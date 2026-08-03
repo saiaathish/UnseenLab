@@ -1,65 +1,127 @@
-import Image from "next/image";
+import Link from "next/link";
+import {
+  NUCLEAR_CHAIN_REACTION_EXPERIMENT,
+  PLANNED_EXPERIMENTS,
+  simulationDisclaimer,
+} from "@/domain/experiments";
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="flex flex-1 flex-col items-center px-6 py-12">
+      <div className="w-full max-w-5xl">
+        <header className="flex flex-col items-start gap-4">
+          <p className="text-sm font-medium uppercase tracking-widest text-accent">
+            Adaptive Virtual STEM Laboratory
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+          <h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
+            UnseenLab
+          </h1>
+          <p className="max-w-2xl text-lg leading-8 text-muted">
+            UnseenLab lets students safely perform otherwise inaccessible STEM
+            experiments — dangerous, radioactive, microscopic, massive, or too
+            slow for a classroom — while an adaptive engine changes how each
+            experiment is represented, paced, and controlled according to the
+            learner&apos;s demonstrated understanding.
+          </p>
+          <Link
+            href="/lab/nuclear-chain-reaction"
+            className="mt-2 rounded-lg bg-accent-strong px-6 py-3 text-base font-semibold text-white hover:brightness-110"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+            Enter the lab
+          </Link>
+        </header>
+
+        <section aria-labelledby="labs-heading" className="mt-14">
+          <h2 id="labs-heading" className="text-xl font-semibold">
+            Laboratories
+          </h2>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="rounded-xl border border-accent/40 bg-surface p-5">
+              <p className="text-xs font-medium uppercase tracking-widest text-accent">
+                Available now
+              </p>
+              <h3 className="mt-2 text-lg font-semibold">
+                {NUCLEAR_CHAIN_REACTION_EXPERIMENT.title}
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-muted">
+                {NUCLEAR_CHAIN_REACTION_EXPERIMENT.pitch}
+              </p>
+              <Link
+                href="/lab/nuclear-chain-reaction"
+                className="mt-4 inline-block rounded-lg bg-accent-strong px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+              >
+                Enter this lab
+              </Link>
+            </div>
+
+            {PLANNED_EXPERIMENTS.map((experiment) => (
+              <div
+                key={experiment.id}
+                aria-disabled="true"
+                className="rounded-xl border border-border bg-surface p-5 opacity-70"
+              >
+                <p className="text-xs font-medium uppercase tracking-widest text-muted">
+                  Planned
+                </p>
+                <h3 className="mt-2 text-lg font-semibold">
+                  {experiment.title}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-muted">
+                  {experiment.pitch}
+                </p>
+                <p className="mt-4 inline-block rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted">
+                  Not built yet
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section aria-labelledby="adapt-heading" className="mt-14">
+          <h2 id="adapt-heading" className="text-xl font-semibold">
+            How UnseenLab adapts to you
+          </h2>
+          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+            {[
+              {
+                title: "Predict before you run",
+                body: "Every trial starts with your prediction and your confidence. The lab records it, without judgment.",
+              },
+              {
+                title: "Adaptations you control",
+                body: "When the lab notices possible friction, it offers a change — a slower animation, a graph, one-variable mode. You accept, reject, or modify it.",
+              },
+              {
+                title: "Counterfactual Microscope",
+                body: "Change exactly one variable and see the same experiment side by side, so cause and effect stay clear.",
+              },
+              {
+                title: "Adaptation Replay",
+                body: "After a trial sequence, review your predictions, the changes offered, and what the evidence suggests about your understanding.",
+              },
+            ].map((item) => (
+              <li
+                key={item.title}
+                className="rounded-xl border border-border bg-surface p-5"
+              >
+                <h3 className="font-semibold">{item.title}</h3>
+                <p className="mt-1 text-sm leading-6 text-muted">{item.body}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <footer className="mt-14 border-t border-border pt-6 text-sm leading-6 text-muted">
+          <p>{simulationDisclaimer}</p>
+          <p className="mt-2">
+            Designed with an initial design participant (a high-school senior
+            who reports learning differently and values interactivity and
+            animation). No diagnosis-based presets — every setting is an
+            explicit learner choice. No account, no tracking, everything stays
+            on this device.
+          </p>
+        </footer>
+      </div>
+    </main>
   );
 }
