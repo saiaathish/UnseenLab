@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ExperimentDefinition,
   ExperimentParameters,
@@ -139,6 +139,7 @@ export function ExperimentShell({
   const [showSettings, setShowSettings] = useState(false);
   const [showResearch, setShowResearch] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const reflectSectionRef = useRef<HTMLElement | null>(null);
 
   const preferences = session.preferences;
   // The pending prediction lives inside the persisted workflow, so a reload
@@ -361,9 +362,13 @@ export function ExperimentShell({
           setActiveRepresentation("causal");
         }
         // Every allowed intervention must lead somewhere visible: comparing
-        // trials opens the one-change comparison tool.
+        // trials opens the one-change comparison tool, and asking for a new
+        // prediction moves focus to the reflection panel.
         if (proposal.type === "compare_trials") {
           setCounterfactualOpen(true);
+        }
+        if (proposal.type === "ask_prediction_again") {
+          reflectSectionRef.current?.focus();
         }
       }
 
@@ -707,8 +712,10 @@ export function ExperimentShell({
             </details>
 
             <section
+              ref={reflectSectionRef}
+              tabIndex={-1}
               aria-labelledby="reflect-heading"
-              className="rounded-2xl border border-border bg-surface p-4 sm:p-6"
+              className="rounded-2xl border border-border bg-surface p-4 outline-none focus-visible:ring-2 focus-visible:ring-focus sm:p-6"
             >
               <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                 <div>
