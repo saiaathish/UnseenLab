@@ -77,8 +77,17 @@ export class StructuredLLMAdaptationProvider implements AdaptationProvider {
       const body = (await response.json()) as {
         data?: LlmResponse;
         fallback?: boolean;
+        reason?: string;
       };
-      if (body.fallback || !body.data) return null;
+      if (body.fallback || !body.data) {
+        // Safe telemetry: `reason` is a fixed enum code, never key/learner data.
+        if (body.reason) {
+          console.warn(
+            `[adapt] LLM unavailable (${body.reason}), using offline rules`,
+          );
+        }
+        return null;
+      }
       return { ...body.data, predictionId: payload.prediction_id };
     } catch {
       return null;

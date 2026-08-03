@@ -13,11 +13,30 @@ import {
  * deterministic rules. This module never sees or returns the API key.
  */
 
+/**
+ * Why the LLM path failed. Returned to the caller so the route can report
+ * safe telemetry (never the key, never raw model text, never learner data).
+ */
+export type FallbackReason =
+  | "no_api_key"
+  | "invalid_input"
+  | "provider_error"
+  | "timeout"
+  | "network_error"
+  | "invalid_response";
+
 export interface LlmClientConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
   timeoutMs: number;
+  /**
+   * When true, send `thinking: { type: "disabled" }` to suppress chain-of-
+   * thought. Only providers that support this field should opt in (via
+   * LLM_DISABLE_THINKING); standard OpenAI endpoints reject unknown params,
+   * so this is off by default.
+   */
+  disableThinking?: boolean;
 }
 
 export const DEFAULT_LLM_CONFIG: Omit<LlmClientConfig, "apiKey"> = {
@@ -26,43 +45,55 @@ export const DEFAULT_LLM_CONFIG: Omit<LlmClientConfig, "apiKey"> = {
   timeoutMs: 15_000,
 };
 
+export type LlmClientResult =
+  | { ok: true; data: LlmResponse }
+  | { ok: false; reason: FallbackReason };
+
 export async function callLlmModel(
   payload: LlmRequestPayload,
   config: LlmClientConfig,
-): Promise<LlmResponse | null> {
+): Promise<LlmClientResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
   try {
+    const body: Record<string, unknown> = {
+      model: config.model,
+      temperature: 0.2,
+      max_tokens: 400,
+      messages: [
+        { role: "system", content: buildSystemPrompt() },
+        { role: "user", content: buildUserPrompt(payload) },
+      ],
+    };
+    if (config.disableThinking) {
+      body.thinking = { type: "disabled" };
+    }
     const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.apiKey}`,
       },
-      body: JSON.stringify({
-        model: config.model,
-        temperature: 0.2,
-        // Disable chain-of-thought reasoning: this task needs only a bounded
-        // JSON answer. Skipping it keeps latency low and avoids aborting on
-        // the timeout, since reasoning models (e.g. deepseek) otherwise burn
-        // tokens in `reasoning_content` before emitting the final answer.
-        thinking: { type: "disabled" },
-        max_tokens: 400,
-        messages: [
-          { role: "system", content: buildSystemPrompt() },
-          { role: "user", content: buildUserPrompt(payload) },
-        ],
-      }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
-    if (!response.ok) return null;
-    const body = (await response.json()) as {
+    if (!response.ok) {
+      return { ok: false, reason: "provider_error" };
+    }
+    const parsed = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
-    const content = body.choices?.[0]?.message?.content ?? null;
-    return parseLlmResponse(content);
-  } catch {
-    return null;
+    const content = parsed.choices?.[0]?.message?.content ?? null;
+    const data = parseLlmResponse(content);
+    if (!data) {
+      return { ok: false, reason: "invalid_response" };
+    }
+    return { ok: true, data };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return { ok: false, reason: "timeout" };
+    }
+    return { ok: false, reason: "network_error" };
   } finally {
     clearTimeout(timer);
   }
