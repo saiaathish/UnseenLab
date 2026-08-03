@@ -66,6 +66,7 @@ function makeInput(
       representationEvents: [],
       adaptationProposals: [],
       conceptEvidence: [],
+      counterfactuals: [],
     },
   };
 }

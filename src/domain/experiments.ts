@@ -177,6 +177,21 @@ export const trialRecordSchema = z.object({
 
 export type SimulationStopReason = "completed" | "max_population" | "extinct";
 
+/**
+ * Derives the stop reason from a recorded trial's final snapshot. Used to
+ * restore UI state after a reload without fabricating evidence: the snapshots
+ * are the source of truth, exactly as in the simulation engine.
+ */
+export function deriveStopReason(
+  trial: TrialRecord | null,
+): SimulationStopReason {
+  const final = trial?.snapshots.at(-1);
+  if (!final) return "completed";
+  if (final.freeNeutrons >= MAX_POPULATION) return "max_population";
+  if (final.freeNeutrons <= 0) return "extinct";
+  return "completed";
+}
+
 export interface SimulationRunResult {
   trial: TrialRecord;
   stopReason: SimulationStopReason;

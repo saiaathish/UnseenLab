@@ -44,7 +44,10 @@ export function PredictionPanel({ goal, lastPrediction, pending, onSubmit }: Pro
   const [editing, setEditing] = useState(false);
 
   const editingNow = editing || (!lastPrediction && !pending);
-  const existing = lastPrediction ?? pending ?? null;
+  // The pending prediction belongs to the upcoming trial, so it takes
+  // precedence over the previous trial's recorded prediction while the
+  // learner is preparing to run it.
+  const existing = pending ?? lastPrediction ?? null;
 
   if (existing && !editingNow) {
     return (

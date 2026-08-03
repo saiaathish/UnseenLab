@@ -73,6 +73,7 @@ describe("AdaptationReplay evidence-driven paths", () => {
           evidenceIds: [prediction.id, trial.id],
         },
       ],
+      counterfactuals: [],
     };
 
     render(
@@ -145,6 +146,7 @@ describe("AdaptationReplay evidence-driven paths", () => {
       ],
       adaptationProposals: [],
       conceptEvidence: [],
+      counterfactuals: [],
     };
 
     render(

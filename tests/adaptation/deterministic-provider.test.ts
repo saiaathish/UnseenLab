@@ -80,6 +80,7 @@ function makeInput(
       representationEvents: [],
       adaptationProposals: [],
       conceptEvidence: [],
+      counterfactuals: [],
       ...overrides.sessionEvidence,
     },
   };
@@ -111,7 +112,11 @@ describe("DeterministicAdaptationProvider", () => {
     });
     const prediction = makePrediction("trial-a", "slightly_faster");
 
-    const proposals = await provider.propose(makeInput([trial], [prediction]));
+    const proposals = await provider.propose(
+      makeInput([trial], [prediction], {
+        preferences: { oneVariableMode: false },
+      }),
+    );
     const freeze = proposals.find((p) => p.type === "freeze_variables");
 
     expect(freeze).toBeDefined();
@@ -209,7 +214,9 @@ describe("DeterministicAdaptationProvider", () => {
       changedVariables: ["absorberPosition", "materialDensity"],
     });
     const prediction = makePrediction("trial-a", "slightly_faster");
-    const baseInput = makeInput([trial], [prediction]);
+    const baseInput = makeInput([trial], [prediction], {
+      preferences: { oneVariableMode: false },
+    });
 
     const firstRound = await provider.propose(baseInput);
     const freeze = firstRound.find((p) => p.type === "freeze_variables");
@@ -221,6 +228,7 @@ describe("DeterministicAdaptationProvider", () => {
       representationEvents: [],
       adaptationProposals: [{ ...freeze!, decision: "rejected" }],
       conceptEvidence: [],
+      counterfactuals: [],
     };
     const secondRound = await provider.propose({
       ...baseInput,
@@ -344,7 +352,9 @@ describe("DeterministicAdaptationProvider", () => {
     const prediction = makePrediction("trial-c", "slightly_faster");
 
     const proposals = await provider.propose(
-      makeInput([first, replay, latest], [prediction]),
+      makeInput([first, replay, latest], [prediction], {
+        preferences: { oneVariableMode: false },
+      }),
     );
 
     expect(proposals.length).toBeLessThanOrEqual(3);

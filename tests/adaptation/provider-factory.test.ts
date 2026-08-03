@@ -44,6 +44,7 @@ function fallbackInput(): AdaptationInput {
       representationEvents: [],
       adaptationProposals: [],
       conceptEvidence: [],
+      counterfactuals: [],
     },
   };
 }
