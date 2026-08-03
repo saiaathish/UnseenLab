@@ -152,3 +152,7 @@ See `docs/architecture.md` for the component diagram and data flow.
 - Public GitHub repository: this repository.
 - Three-minute demo video: planned; demo script in `docs/product-spec.md` §Demo flow.
 - User feedback documented: `docs/user-research.md` (confirmed preferences + empty templates awaiting real test sessions).
+
+## License
+
+Apache License 2.0. See the `LICENSE` file in the repository root.
