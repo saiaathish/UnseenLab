@@ -285,7 +285,7 @@ export function TopicInputHero() {
               onKeyDown={handleKeyDown}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              className="w-full resize-none rounded-2xl border border-white/15 bg-white/5 px-4 py-4 text-base text-white backdrop-blur-md transition-colors placeholder:text-gray-500 focus:border-teal-400/50 focus:outline-none focus:ring-2 focus:ring-teal-400/25 sm:text-lg"
+              className="w-full resize-none rounded-2xl border border-white/15 bg-white/5 px-4 py-4 text-base text-white backdrop-blur-md transition-colors placeholder:text-gray-400 focus:border-teal-400/50 focus:outline-none focus:ring-2 focus:ring-teal-400/25 sm:text-lg"
             />
 
             <div className="mt-2 flex min-h-[1.375rem] items-start justify-between gap-3">
