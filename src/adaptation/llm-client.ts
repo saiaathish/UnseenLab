@@ -42,6 +42,11 @@ export async function callLlmModel(
       body: JSON.stringify({
         model: config.model,
         temperature: 0.2,
+        // Disable chain-of-thought reasoning: this task needs only a bounded
+        // JSON answer. Skipping it keeps latency low and avoids aborting on
+        // the timeout, since reasoning models (e.g. deepseek) otherwise burn
+        // tokens in `reasoning_content` before emitting the final answer.
+        thinking: { type: "disabled" },
         max_tokens: 400,
         messages: [
           { role: "system", content: buildSystemPrompt() },
