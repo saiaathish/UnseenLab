@@ -1,23 +1,22 @@
 @import "tailwindcss";
 
 :root {
-  --background: #101418;
-  --surface: #161b21;
-  --surface-raised: #1c222a;
-  --foreground: #e7ecf1;
-  --muted: #9aa7b4;
-  --border: #2a333d;
-  --accent: #2dd4bf;
-  --accent-strong: #14b8a6;
-  --accent-soft: rgba(45, 212, 191, 0.14);
-  --warn: #fbbf24;
-  --danger: #f87171;
-  --info: #60a5fa;
-  --focus: #22d3ee;
-  --ok: #4ade80;
+  --background: #f5f8fa;
+  --surface: #ffffff;
+  --surface-raised: #edf3f5;
+  --foreground: #17212b;
+  --muted: #5b6b79;
+  --border: #d8e2e8;
+  --accent: #0f766e;
+  --accent-strong: #0f766e;
+  --accent-soft: rgba(15, 118, 110, 0.1);
+  --warn: #9a6700;
+  --danger: #b42318;
+  --info: #175cd3;
+  --focus: #0e7490;
+  --ok: #15803d;
 }
 
-/* High-contrast option: near-black on white with strong borders. */
 body.high-contrast {
   --background: #ffffff;
   --surface: #ffffff;
@@ -25,17 +24,16 @@ body.high-contrast {
   --foreground: #0a0a0a;
   --muted: #333333;
   --border: #111111;
-  --accent: #0f766e;
-  --accent-strong: #0f766e;
+  --accent: #0f5f58;
+  --accent-strong: #0f5f58;
   --accent-soft: #ccfbf1;
-  --warn: #92400e;
-  --danger: #b91c1c;
-  --info: #1d4ed8;
+  --warn: #7a2e0e;
+  --danger: #9f1717;
+  --info: #1746a2;
   --focus: #0d47a1;
-  --ok: #15803d;
+  --ok: #126b33;
 }
 
-/* Reduced motion: strip all CSS transitions/animations. */
 html[data-reduced-motion="true"] *,
 html[data-reduced-motion="true"] *::before,
 html[data-reduced-motion="true"] *::after {
@@ -61,20 +59,36 @@ html[data-reduced-motion="true"] *::after {
   --font-mono: var(--font-geist-mono);
 }
 
+html {
+  background: var(--background);
+}
+
 body {
+  min-height: 100vh;
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea,
+select,
+summary {
+  font: inherit;
+}
+
+summary {
+  list-style-position: inside;
 }
 
 :focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-  border-radius: 2px;
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 6px;
 }
 
-/* Neutron pulse keyframes are opt-in only (reduced motion disables them
-   via the html[data-reduced-motion] rule above). */
 @keyframes lab-pulse {
   0% {
     opacity: 0.9;
