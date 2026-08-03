@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   ExperimentDefinition,
@@ -19,7 +20,8 @@ import type {
   PredictionAnswerChoice,
   PredictionRecord,
   SessionEvidence,
-} from "@/domain/evidence";import {
+} from "@/domain/evidence";
+import {
   addAdaptationProposal,
   addConceptEvidence,
   addPrediction,
@@ -58,10 +60,24 @@ interface PendingPrediction {
   confidence: number;
 }
 
+const STEPS = [
+  { id: "predict", label: "Predict", description: "Say what you expect." },
+  {
+    id: "experiment",
+    label: "Experiment",
+    description: "Change one thing and run it.",
+  },
+  {
+    id: "understand",
+    label: "Understand",
+    description: "See why the result changed.",
+  },
+] as const;
+
 /**
- * Orchestrates one lab: prediction -> trial -> adaptation -> counterfactual ->
- * replay. All evidence lives in the local anonymous session; nothing is sent
- * anywhere. The deterministic adaptation provider runs offline.
+ * Orchestrates one lab through a calm, progressive workflow. Only the controls
+ * needed for the learner's current step are shown; optional research and
+ * accessibility tools remain available without competing with the experiment.
  */
 export function ExperimentShell({
   experiment,
@@ -96,8 +112,6 @@ export function ExperimentShell({
     saveLocalSession(session);
   }, [session]);
 
-  // Honor both the operating-system reduced-motion preference and the in-app
-  // override: either one switches the app to static rendering.
   useEffect(() => {
     const media =
       typeof window.matchMedia === "function"
@@ -120,7 +134,7 @@ export function ExperimentShell({
     () =>
       lastTrial
         ? session.evidence.predictions
-            .filter((p) => p.trialId === lastTrial.id)
+            .filter((prediction) => prediction.trialId === lastTrial.id)
             .at(-1) ?? null
         : null,
     [lastTrial, session.evidence.predictions],
@@ -131,21 +145,25 @@ export function ExperimentShell({
     [session.evidence.representationEvents],
   );
 
+  const currentStep = lastTrial ? 3 : pendingPrediction ? 2 : 1;
+
   const updatePreferences = useCallback(
     (updates: Partial<LearnerPreferences>) => {
-      setSession((prev) => ({
-        ...prev,
-        preferences: { ...prev.preferences, ...updates },
+      setSession((previous) => ({
+        ...previous,
+        preferences: { ...previous.preferences, ...updates },
       }));
     },
     [],
   );
 
   const handlePredictionSubmit = useCallback(
-    (answer: string, structuredAnswer: PredictionAnswerChoice | null, confidence: number) => {
+    (
+      answer: string,
+      structuredAnswer: PredictionAnswerChoice | null,
+      confidence: number,
+    ) => {
       if (lastTrial) {
-        // Updated prediction after a trial: record it immediately against the
-        // trial that just ran.
         const record: PredictionRecord = {
           id: crypto.randomUUID(),
           trialId: lastTrial.id,
@@ -155,13 +173,11 @@ export function ExperimentShell({
           confidence,
           createdAt: new Date().toISOString(),
         };
-        setSession((prev) => ({
-          ...prev,
-          evidence: addPrediction(prev.evidence, record),
+        setSession((previous) => ({
+          ...previous,
+          evidence: addPrediction(previous.evidence, record),
         }));
       } else {
-        // Pre-run prediction: hold it as pending; the record is created when
-        // the trial runs, linked to the trial's id.
         setPendingPrediction({
           trialId: crypto.randomUUID(),
           answer,
@@ -176,11 +192,10 @@ export function ExperimentShell({
 
   const handleRun = useCallback(async () => {
     if (!pendingPrediction) {
-      setNotice(
-        "A prediction is required before running a trial. Please submit your prediction first.",
-      );
+      setNotice("Make a prediction first, then run the experiment.");
       return;
     }
+
     const predictionRecord: PredictionRecord = {
       id: crypto.randomUUID(),
       trialId: pendingPrediction.trialId,
@@ -190,6 +205,7 @@ export function ExperimentShell({
       confidence: pendingPrediction.confidence,
       createdAt: new Date().toISOString(),
     };
+
     const changedVariables = diffParameters(
       lastTrial?.parameters ?? null,
       currentParameters,
@@ -201,8 +217,6 @@ export function ExperimentShell({
       changedVariables,
     };
 
-    // Build the next evidence snapshot synchronously, then ask the
-    // deterministic adaptation provider to interpret it.
     let nextEvidence: SessionEvidence = addPrediction(
       session.evidence,
       predictionRecord,
@@ -215,10 +229,12 @@ export function ExperimentShell({
       trials: nextEvidence.trials,
       sessionEvidence: nextEvidence,
     };
+
     const conceptEvidence = classifyConceptEvidence(input);
     for (const concept of conceptEvidence) {
       nextEvidence = addConceptEvidence(nextEvidence, concept);
     }
+
     let proposals: AdaptationProposal[] = [];
     let adaptationFailed = false;
     try {
@@ -231,7 +247,7 @@ export function ExperimentShell({
       adaptationFailed = true;
     }
 
-    setSession((prev) => ({ ...prev, evidence: nextEvidence }));
+    setSession((previous) => ({ ...previous, evidence: nextEvidence }));
     setLastTrial(trial);
     setLastStopReason(result.stopReason);
     setPendingPrediction(null);
@@ -240,7 +256,7 @@ export function ExperimentShell({
     setActiveRepresentation("animation");
     setNotice(
       adaptationFailed
-        ? "Adaptation suggestions are temporarily unavailable. Your trial still ran normally."
+        ? "Helpful suggestions are unavailable, but your experiment ran normally."
         : null,
     );
   }, [
@@ -269,19 +285,24 @@ export function ExperimentShell({
           : decision === "accepted"
             ? proposal.proposedChanges
             : {};
+
       if (Object.keys(changes).length > 0) {
         updatePreferences(applyPreferenceChanges(preferences, changes));
       }
       if (decision === "accepted") {
         if (proposal.type === "show_graph") setActiveRepresentation("graph");
-        if (proposal.type === "show_causal_view")
+        if (proposal.type === "show_causal_view") {
           setActiveRepresentation("causal");
+        }
       }
-      setSession((prev) => ({
-        ...prev,
-        evidence: updateAdaptationProposal(prev.evidence, decided),
+
+      setSession((previous) => ({
+        ...previous,
+        evidence: updateAdaptationProposal(previous.evidence, decided),
       }));
-      setActiveProposals((prev) => prev.filter((p) => p.id !== proposal.id));
+      setActiveProposals((previous) =>
+        previous.filter((item) => item.id !== proposal.id),
+      );
       setNotice(null);
     },
     [preferences, updatePreferences],
@@ -291,9 +312,9 @@ export function ExperimentShell({
     (mode: RepresentationMode) => {
       setActiveRepresentation(mode);
       if (mode !== lastOpenedMode) {
-        setSession((prev) => ({
-          ...prev,
-          evidence: addRepresentationEvent(prev.evidence, {
+        setSession((previous) => ({
+          ...previous,
+          evidence: addRepresentationEvent(previous.evidence, {
             mode,
             openedAt: new Date().toISOString(),
           }),
@@ -306,14 +327,14 @@ export function ExperimentShell({
   const handleCounterfactual = useCallback(
     (variable: Parameters<typeof runCounterfactual>[1], value: number) => {
       if (!lastTrial) {
-        setNotice("Run a trial first before using the counterfactual comparison.");
+        setNotice("Run the main experiment before comparing one change.");
         return;
       }
       const result = runCounterfactual(lastTrial, variable, value);
       setCounterfactual(result);
-      setSession((prev) => ({
-        ...prev,
-        evidence: addTrial(prev.evidence, result.counterfactual),
+      setSession((previous) => ({
+        ...previous,
+        evidence: addTrial(previous.evidence, result.counterfactual),
       }));
       setNotice(null);
     },
@@ -321,8 +342,8 @@ export function ExperimentShell({
   );
 
   const handleClearSession = useCallback(() => {
-    const session = loadLocalSession();
-    setSession(session);
+    const freshSession = loadLocalSession();
+    setSession(freshSession);
     setCurrentParameters({ ...experiment.defaultParameters });
     setLastTrial(null);
     setLastStopReason(null);
@@ -336,138 +357,304 @@ export function ExperimentShell({
   return (
     <div
       style={{ fontSize: `${preferences.textScale * 100}%` }}
-      className="flex flex-1 flex-col"
+      className="flex min-h-screen flex-col"
     >
-      <header className="border-b border-border bg-surface px-4 py-4 sm:px-6">
-        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-3">
+      <header className="border-b border-border bg-surface">
+        <div className="mx-auto flex w-full max-w-5xl items-start gap-4 px-4 py-5 sm:px-6">
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+            <Link
+              href="/"
+              className="text-sm font-medium text-accent hover:underline"
+            >
+              ← All labs
+            </Link>
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
               {experiment.title}
             </h1>
-            <p className="text-sm text-muted">{experiment.goal}</p>
-            <p className="mt-1 text-xs leading-5 text-muted">
-              {simulationDisclaimer}
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted sm:text-base">
+              {experiment.goal}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setShowSettings((v) => !v)}
-              aria-expanded={showSettings}
-              className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-surface-raised"
-            >
-              Accessibility &amp; display
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowReplay(true)}
-              className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-surface-raised"
-            >
-              Adaptation Replay
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowResearch((v) => !v)}
-              aria-expanded={showResearch}
-              className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-surface-raised"
-            >
-              Research mode
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowSettings((value) => !value)}
+            aria-expanded={showSettings}
+            className="shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold hover:bg-surface-raised"
+          >
+            Accessibility &amp; display
+          </button>
+        </div>
+
+        <div className="border-t border-border bg-background/70">
+          <p className="mx-auto w-full max-w-5xl px-4 py-2.5 text-xs leading-5 text-muted sm:px-6">
+            <span className="font-semibold text-foreground">
+              Safe conceptual model:
+            </span>{" "}
+            {simulationDisclaimer}
+          </p>
         </div>
       </header>
 
       {showSettings && (
-        <div className="border-b border-border bg-surface px-4 py-4 sm:px-6">
-          <div className="mx-auto w-full max-w-7xl">
+        <section
+          aria-label="Accessibility and display settings"
+          className="border-b border-border bg-surface px-4 py-5 sm:px-6"
+        >
+          <div className="mx-auto w-full max-w-5xl">
             <AccessibilityControls
               preferences={preferences}
               onChange={updatePreferences}
             />
           </div>
-        </div>
+        </section>
       )}
 
       {notice && (
         <div
           role="alert"
-          className="border-b border-warn/40 bg-warn/10 px-4 py-3 text-sm text-warn sm:px-6"
+          className="border-b border-warn/30 bg-warn/10 px-4 py-3 text-center text-sm text-warn"
         >
           {notice}
         </div>
       )}
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-4 sm:px-6">
-        <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)_320px]">
-          <div className="flex flex-col gap-4">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
+        <nav aria-label="Experiment progress">
+          <ol className="grid grid-cols-3 overflow-hidden rounded-xl border border-border bg-surface">
+            {STEPS.map((step, index) => {
+              const stepNumber = index + 1;
+              const complete = stepNumber < currentStep;
+              const active = stepNumber === currentStep;
+              return (
+                <li
+                  key={step.id}
+                  aria-current={active ? "step" : undefined}
+                  className={[
+                    "min-w-0 px-3 py-3 sm:px-5",
+                    index > 0 ? "border-l border-border" : "",
+                    active ? "bg-accent-soft" : "",
+                  ].join(" ")}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      aria-hidden="true"
+                      className={[
+                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+                        active || complete
+                          ? "bg-accent-strong text-white"
+                          : "bg-surface-raised text-muted",
+                      ].join(" ")}
+                    >
+                      {complete ? "✓" : stepNumber}
+                    </span>
+                    <span className="truncate text-sm font-semibold">
+                      {step.label}
+                    </span>
+                  </div>
+                  <p className="mt-1 hidden text-xs leading-5 text-muted sm:block">
+                    {step.description}
+                  </p>
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
+
+        {!lastTrial && !pendingPrediction && (
+          <section className="mx-auto mt-6 max-w-2xl">
+            <div className="mb-4 text-center">
+              <h2 className="text-2xl font-semibold">What do you expect?</h2>
+              <p className="mt-2 text-sm leading-6 text-muted">
+                Choose an answer. This is a hypothesis, not a grade.
+              </p>
+            </div>
             <PredictionPanel
               goal={experiment.goal}
               lastPrediction={lastPrediction}
               pending={pendingPrediction}
               onSubmit={handlePredictionSubmit}
             />
-            <VariableControls
-              parameters={currentParameters}
-              previousParameters={lastTrial?.parameters ?? null}
-              spec={experiment.parameterSpecs}
-              oneVariableMode={preferences.oneVariableMode}
-              onChange={setCurrentParameters}
-            />
-            <div className="rounded-xl border border-border bg-surface p-4">
-              <button
-                type="button"
-                onClick={() => void handleRun()}
-                className="w-full rounded-lg bg-accent-strong px-4 py-3 text-base font-semibold text-white hover:brightness-110"
-              >
-                Run trial
-              </button>
-              <p className="mt-2 text-xs leading-5 text-muted">
-                Runs the seeded simulation with the variables above. A
-                prediction is required first.
-              </p>
+          </section>
+        )}
+
+        {!lastTrial && pendingPrediction && (
+          <section className="mt-6">
+            <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+              <div className="flex flex-col gap-4">
+                <div>
+                  <h2 className="text-2xl font-semibold">Change one thing</h2>
+                  <p className="mt-2 text-sm leading-6 text-muted">
+                    Adjust a control, then run the experiment. You can always
+                    reset and try again.
+                  </p>
+                </div>
+                <PredictionPanel
+                  goal={experiment.goal}
+                  lastPrediction={lastPrediction}
+                  pending={pendingPrediction}
+                  onSubmit={handlePredictionSubmit}
+                />
+                <VariableControls
+                  parameters={currentParameters}
+                  previousParameters={null}
+                  spec={experiment.parameterSpecs}
+                  oneVariableMode
+                  onChange={setCurrentParameters}
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleRun()}
+                  className="w-full rounded-xl bg-accent-strong px-5 py-3.5 text-base font-semibold text-white shadow-sm hover:brightness-105"
+                >
+                  Run trial
+                </button>
+              </div>
+
+              <div className="lg:sticky lg:top-6">
+                <SimulationCanvas
+                  key="empty"
+                  trial={null}
+                  stopReason={null}
+                  preferences={preferences}
+                />
+              </div>
             </div>
-          </div>
+          </section>
+        )}
 
-          <div className="flex min-w-0 flex-col gap-4">
-            <SimulationCanvas
-              key={lastTrial?.id ?? "empty"}
-              trial={lastTrial}
-              stopReason={lastStopReason}
-              preferences={preferences}
-            />
-            <RepresentationTabs
-              active={activeRepresentation}
-              trial={lastTrial}
-              stopReason={lastStopReason}
-              preferences={preferences}
-              onChange={handleRepresentationChange}
-            />
-          </div>
+        {lastTrial && (
+          <div className="mt-6 space-y-6">
+            <section aria-labelledby="watch-result-heading">
+              <div className="mb-4">
+                <h2 id="watch-result-heading" className="text-2xl font-semibold">
+                  Watch what happened
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-muted">
+                  Play the animation at your pace. Pause or step through it
+                  whenever you need.
+                </p>
+              </div>
+              <SimulationCanvas
+                key={lastTrial.id}
+                trial={lastTrial}
+                stopReason={lastStopReason}
+                preferences={preferences}
+              />
 
-          <div className="flex flex-col gap-4">
-            <AdaptationCard
-              proposals={activeProposals}
-              preferences={preferences}
-              onAccept={(p) => handleProposalDecision(p, "accepted")}
-              onReject={(p) => handleProposalDecision(p, "rejected")}
-              onModify={(p, subset) => handleProposalDecision(p, "modified", subset)}
-            />
-            <CounterfactualPanel
-              trial={lastTrial}
-              result={counterfactual}
-              spec={experiment.parameterSpecs}
-              onRun={handleCounterfactual}
-            />
+              <details className="mt-4 rounded-xl border border-border bg-surface">
+                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">
+                  See the result another way
+                </summary>
+                <div className="border-t border-border p-4">
+                  <RepresentationTabs
+                    active={activeRepresentation}
+                    trial={lastTrial}
+                    stopReason={lastStopReason}
+                    preferences={preferences}
+                    onChange={handleRepresentationChange}
+                  />
+                </div>
+              </details>
+            </section>
+
+            {activeProposals.length > 0 && (
+              <section aria-labelledby="helpful-change-heading">
+                <div className="mb-4">
+                  <h2
+                    id="helpful-change-heading"
+                    className="text-2xl font-semibold"
+                  >
+                    Try one helpful change
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-muted">
+                    UnseenLab noticed something worth comparing. You stay in
+                    control: accept it, change it, or skip it.
+                  </p>
+                </div>
+                <AdaptationCard
+                  proposals={activeProposals}
+                  preferences={preferences}
+                  onAccept={(proposal) =>
+                    handleProposalDecision(proposal, "accepted")
+                  }
+                  onReject={(proposal) =>
+                    handleProposalDecision(proposal, "rejected")
+                  }
+                  onModify={(proposal, subset) =>
+                    handleProposalDecision(proposal, "modified", subset)
+                  }
+                />
+              </section>
+            )}
+
+            <details className="rounded-xl border border-border bg-surface">
+              <summary className="cursor-pointer px-4 py-4 text-base font-semibold">
+                Compare one change
+                <span className="ml-2 text-sm font-normal text-muted">
+                  Optional
+                </span>
+              </summary>
+              <div className="border-t border-border p-4">
+                <CounterfactualPanel
+                  trial={lastTrial}
+                  result={counterfactual}
+                  spec={experiment.parameterSpecs}
+                  onRun={handleCounterfactual}
+                />
+              </div>
+            </details>
+
+            <section
+              aria-labelledby="reflect-heading"
+              className="rounded-2xl border border-border bg-surface p-4 sm:p-6"
+            >
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                <div>
+                  <h2 id="reflect-heading" className="text-xl font-semibold">
+                    What do you think now?
+                  </h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+                    Update your prediction only when you are ready. Your first
+                    answer is kept so you can see how your thinking changed.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowReplay(true)}
+                    className="rounded-lg border border-border px-3 py-2 text-sm font-semibold hover:bg-surface-raised"
+                  >
+                    Adaptation Replay
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowResearch((value) => !value)}
+                    aria-expanded={showResearch}
+                    className="rounded-lg border border-border px-3 py-2 text-sm font-semibold hover:bg-surface-raised"
+                  >
+                    Research mode
+                  </button>
+                </div>
+              </div>
+              <div className="mt-5 max-w-2xl">
+                <PredictionPanel
+                  goal={experiment.goal}
+                  lastPrediction={lastPrediction}
+                  pending={pendingPrediction}
+                  onSubmit={handlePredictionSubmit}
+                />
+              </div>
+            </section>
           </div>
-        </div>
+        )}
       </main>
 
-      {showResearch && (
+      {showResearch && lastTrial && (
         <section
           aria-label="Research mode"
-          className="border-t border-border bg-surface px-4 py-4 sm:px-6"
+          className="border-t border-border bg-surface px-4 py-5 sm:px-6"
         >
-          <div className="mx-auto w-full max-w-7xl">
+          <div className="mx-auto w-full max-w-5xl">
             <ResearchMode
               session={session}
               onClear={handleClearSession}

@@ -5,162 +5,125 @@ import {
   simulationDisclaimer,
 } from "@/domain/experiments";
 
+const steps = [
+  {
+    number: "1",
+    title: "Predict",
+    body: "Choose what you think will happen. There is no penalty for being wrong.",
+  },
+  {
+    number: "2",
+    title: "Experiment",
+    body: "Change one variable and watch the system respond through animation.",
+  },
+  {
+    number: "3",
+    title: "Understand",
+    body: "Compare the result with your prediction and try a clearer view.",
+  },
+];
+
 export default function Home() {
   return (
-    <main className="flex flex-1 flex-col items-center px-6 py-12">
-      <div className="w-full max-w-5xl">
-        <header className="flex flex-col items-start gap-4">
-          <p className="text-sm font-medium uppercase tracking-widest text-accent">
-            Adaptive Virtual STEM Laboratory
+    <main className="min-h-screen px-4 py-6 sm:px-6 sm:py-10">
+      <div className="mx-auto w-full max-w-5xl">
+        <header className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">UnseenLab</h1>
+            <p className="text-sm text-muted">Adaptive virtual STEM labs</p>
+          </div>
+          <p className="hidden text-sm text-muted sm:block">
+            No account · No timer · You control the pace
           </p>
-          <h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
-            UnseenLab
-          </h1>
-          <p className="max-w-2xl text-lg leading-8 text-muted">
-            UnseenLab lets students safely perform otherwise inaccessible STEM
-            experiments — dangerous, radioactive, microscopic, massive, or too
-            slow for a classroom — while an adaptive engine changes how each
-            experiment is represented, paced, and controlled according to the
-            learner&apos;s demonstrated understanding.
-          </p>
-          <Link
-            href="/lab/nuclear-chain-reaction"
-            className="mt-2 rounded-lg bg-accent-strong px-6 py-3 text-base font-semibold text-white hover:brightness-110"
-          >
-            Enter the lab
-          </Link>
         </header>
 
-        <section aria-labelledby="labs-heading" className="mt-14">
-          <h2 id="labs-heading" className="text-xl font-semibold">
-            Laboratories
-          </h2>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="rounded-xl border border-accent/40 bg-surface p-5">
-              <p className="text-xs font-medium uppercase tracking-widest text-accent">
-                Available now
-              </p>
-              <h3 className="mt-2 text-lg font-semibold">
-                {NUCLEAR_CHAIN_REACTION_EXPERIMENT.title}
-              </h3>
-              <p className="mt-2 text-sm leading-6 text-muted">
-                {NUCLEAR_CHAIN_REACTION_EXPERIMENT.pitch}
-              </p>
+        <section className="grid items-center gap-8 py-14 sm:py-20 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div>
+            <h2 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight sm:text-6xl">
+              Learn by changing what you cannot safely touch.
+            </h2>
+            <p className="mt-5 max-w-2xl text-lg leading-8 text-muted">
+              Run an interactive STEM experiment, make a prediction, and see
+              cause and effect through animation—one clear step at a time.
+            </p>
+            <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
                 href="/lab/nuclear-chain-reaction"
-                className="mt-4 inline-block rounded-lg bg-accent-strong px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+                className="rounded-xl bg-accent-strong px-6 py-3.5 text-base font-semibold text-white shadow-sm hover:brightness-105"
               >
-                Enter this lab
+                Start the experiment
               </Link>
+              <span className="text-sm text-muted">
+                About 5 minutes · Works without an API key
+              </span>
             </div>
+          </div>
 
-            {PLANNED_EXPERIMENTS.map((experiment) => (
-              <div
-                key={experiment.id}
-                aria-disabled="true"
-                className="rounded-xl border border-border bg-surface p-5 opacity-70"
-              >
-                <p className="text-xs font-medium uppercase tracking-widest text-muted">
-                  Planned
-                </p>
-                <h3 className="mt-2 text-lg font-semibold">
-                  {experiment.title}
-                </h3>
-                <p className="mt-2 text-sm leading-6 text-muted">
-                  {experiment.pitch}
-                </p>
-                <p className="mt-4 inline-block rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted">
-                  Not built yet
-                </p>
-              </div>
-            ))}
+          <div className="rounded-3xl border border-border bg-surface p-6 shadow-sm">
+            <p className="text-sm font-semibold text-accent">Available now</p>
+            <h3 className="mt-2 text-2xl font-semibold">
+              {NUCLEAR_CHAIN_REACTION_EXPERIMENT.title}
+            </h3>
+            <p className="mt-3 text-sm leading-6 text-muted">
+              Watch a conceptual chain reaction change as you adjust one
+              variable. The model is simplified and uses no real-world reactor
+              values.
+            </p>
+            <div className="mt-5 rounded-2xl bg-surface-raised p-4">
+              <p className="text-sm font-medium">Best first experience</p>
+              <p className="mt-1 text-sm leading-6 text-muted">
+                Animation first, one-variable mode, and feedback only after the
+                trial.
+              </p>
+            </div>
           </div>
         </section>
 
-        <section aria-labelledby="adapt-heading" className="mt-14">
-          <h2 id="adapt-heading" className="text-xl font-semibold">
-            How UnseenLab adapts to you
+        <section aria-labelledby="how-heading" className="border-y border-border py-10">
+          <h2 id="how-heading" className="text-2xl font-semibold">
+            Three steps. No dashboard to learn.
           </h2>
-          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-            {[
-              {
-                title: "Predict before you run",
-                body: "Every trial starts with your prediction and your confidence. The lab records it, without judgment.",
-              },
-              {
-                title: "Adaptations you control",
-                body: "When the lab notices possible friction, it offers a change — a slower animation, a graph, one-variable mode. You accept, reject, or modify it.",
-              },
-              {
-                title: "Counterfactual Microscope",
-                body: "Change exactly one variable and see the same experiment side by side, so cause and effect stay clear.",
-              },
-              {
-                title: "Adaptation Replay",
-                body: "After a trial sequence, review your predictions, the changes offered, and what the evidence suggests about your understanding.",
-              },
-            ].map((item) => (
-              <li
-                key={item.title}
-                className="rounded-xl border border-border bg-surface p-5"
-              >
-                <h3 className="font-semibold">{item.title}</h3>
-                <p className="mt-1 text-sm leading-6 text-muted">{item.body}</p>
+          <ol className="mt-6 grid gap-6 md:grid-cols-3">
+            {steps.map((step) => (
+              <li key={step.number} className="flex gap-4">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-strong font-bold text-white">
+                  {step.number}
+                </span>
+                <div>
+                  <h3 className="font-semibold">{step.title}</h3>
+                  <p className="mt-1 text-sm leading-6 text-muted">{step.body}</p>
+                </div>
               </li>
             ))}
-          </ul>
+          </ol>
         </section>
 
-        <section aria-labelledby="evidence-heading" className="mt-14">
-          <h2 id="evidence-heading" className="text-xl font-semibold">
-            Design evidence
-          </h2>
-          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-            <li className="rounded-xl border border-border bg-surface p-5">
-              <h3 className="font-semibold">Designed with</h3>
-              <p className="mt-1 text-sm leading-6 text-muted">
-                1 initial design participant — a high-school senior in AP
-                Physics 2 who reports learning differently and values
-                interactivity and animation.
-              </p>
-            </li>
-            <li className="rounded-xl border border-border bg-surface p-5">
-              <h3 className="font-semibold">Initial need</h3>
-              <p className="mt-1 text-sm leading-6 text-muted">
-                Existing demonstrations and lab examples did not provide enough
-                interactivity to build a full understanding.
-              </p>
-            </li>
-            <li className="rounded-xl border border-border bg-surface p-5">
-              <h3 className="font-semibold">First structured test session</h3>
-              <p className="mt-1 text-sm leading-6 text-muted">
-                Pending — results will be recorded here honestly, including
-                friction and requested changes.
-              </p>
-            </li>
-            <li className="rounded-xl border border-border bg-surface p-5">
-              <h3 className="font-semibold">Evidence fields to fill</h3>
-              <ol className="mt-1 list-inside list-decimal text-sm leading-6 text-muted">
-                <li>Observed issue: pending</li>
-                <li>Product change: pending</li>
-                <li>
-                  Initial result: pending (baseline vs post-use scores,
-                  confidence, mental effort)
-                </li>
-              </ol>
-            </li>
-          </ul>
+        <section className="grid gap-8 py-10 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div>
+            <h2 className="text-2xl font-semibold">Designed with learner control</h2>
+            <p className="mt-3 max-w-2xl leading-7 text-muted">
+              The first design participant is a neurodivergent high-school
+              physics learner who asked for more interactivity and animation.
+              UnseenLab does not use diagnosis presets. Every pacing,
+              representation, and display choice remains under the learner’s
+              control.
+            </p>
+          </div>
+
+          <details className="rounded-2xl border border-border bg-surface">
+            <summary className="cursor-pointer px-5 py-4 font-semibold">
+              Future experiments
+            </summary>
+            <ul className="border-t border-border px-5 py-4 text-sm leading-7 text-muted">
+              {PLANNED_EXPERIMENTS.map((experiment) => (
+                <li key={experiment.id}>{experiment.title} — planned</li>
+              ))}
+            </ul>
+          </details>
         </section>
 
-        <footer className="mt-14 border-t border-border pt-6 text-sm leading-6 text-muted">
-          <p>{simulationDisclaimer}</p>
-          <p className="mt-2">
-            Designed with an initial design participant (a high-school senior
-            who reports learning differently and values interactivity and
-            animation). No diagnosis-based presets — every setting is an
-            explicit learner choice. No account, no tracking, everything stays
-            on this device.
-          </p>
+        <footer className="border-t border-border py-6 text-xs leading-5 text-muted">
+          {simulationDisclaimer}
         </footer>
       </div>
     </main>
