@@ -9,9 +9,9 @@ test("demo smoke: predict, run, adapt, compare, replay", async ({ page }) => {
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "UnseenLab", exact: true }),
+    page.getByRole("heading", { name: "What topic do you need help with?" }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "Enter the lab" }).click();
+  await page.getByRole("link", { name: "Start this lab" }).first().click();
 
   await expect(
     page.getByRole("heading", { name: "Nuclear Chain Reaction" }),
@@ -34,6 +34,8 @@ test("demo smoke: predict, run, adapt, compare, replay", async ({ page }) => {
 
   await page.getByRole("button", { name: "Accept" }).first().click();
 
+  // The comparison tool lives inside a collapsible section in the guided flow.
+  await page.getByText("Compare one change").click();
   await page.getByRole("button", { name: "Run comparison" }).click();
   await expect(
     page.getByText(/changed exactly one variable/i),

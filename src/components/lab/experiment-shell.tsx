@@ -366,7 +366,7 @@ export function ExperimentShell({
               href="/"
               className="text-sm font-medium text-accent hover:underline"
             >
-              ← All labs
+              ← Home
             </Link>
             <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
               {experiment.title}
