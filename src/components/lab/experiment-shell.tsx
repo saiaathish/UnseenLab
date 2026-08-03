@@ -580,6 +580,7 @@ export function ExperimentShell({
                   goal={experiment.goal}
                   lastPrediction={lastPrediction}
                   pending={pendingPrediction}
+                  disabled={runPhase !== "idle"}
                   onSubmit={handlePredictionSubmit}
                 />
                 <VariableControls

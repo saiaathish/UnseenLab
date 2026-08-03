@@ -60,6 +60,12 @@ describe("run guard and progress feedback", () => {
       screen.getByText(/interpreting your evidence/i),
     ).toBeInTheDocument();
 
+    // The prediction cannot be edited mid-run either: an edit would be
+    // silently overwritten when the run completes.
+    expect(
+      screen.getByRole("button", { name: /update my prediction/i }),
+    ).toBeDisabled();
+
     // A duplicate click while processing cannot start a second run.
     await user.click(runButton).catch(() => undefined);
     expect(

@@ -17,6 +17,18 @@ import { test, expect } from "@playwright/test";
 
 const EVIDENCE_KEY = "unseenlab.evidence.v1";
 
+/**
+ * Waits for a trial to finish. The results view only renders after the run
+ * (including the AI interpretation) completes, so its heading is the honest
+ * completion marker — the "State summary" text also exists on the previous
+ * trial's canvas while the next run is still processing.
+ */
+async function waitForResults(page: import("@playwright/test").Page) {
+  await expect(
+    page.getByRole("heading", { name: /watch what happened/i }),
+  ).toBeVisible({ timeout: 30_000 });
+}
+
 test("learner can run three trials without reloading and compare them in replay", async ({
   page,
 }) => {
@@ -27,9 +39,7 @@ test("learner can run three trials without reloading and compare them in replay"
   await page.getByRole("button", { name: "Submit prediction" }).click();
   await page.locator("#param-absorberPosition").fill("0");
   await page.getByRole("button", { name: "Run trial" }).click();
-  await expect(page.getByText(/state summary:/i)).toBeVisible({
-    timeout: 20_000,
-  });
+  await waitForResults(page);
 
   // Updated prediction is the gate to trial 2.
   await expect(
@@ -51,9 +61,7 @@ test("learner can run three trials without reloading and compare them in replay"
   ).toBeVisible();
   await page.locator("#param-materialDensity").fill("0.4");
   await page.getByRole("button", { name: "Run trial" }).click();
-  await expect(page.getByText(/state summary:/i)).toBeVisible({
-    timeout: 20_000,
-  });
+  await waitForResults(page);
 
   // Trial 3: change the starting population.
   await page
@@ -70,9 +78,7 @@ test("learner can run three trials without reloading and compare them in replay"
   ).toBeVisible();
   await page.locator("#param-startingNeutrons").fill("5");
   await page.getByRole("button", { name: "Run trial" }).click();
-  await expect(page.getByText(/state summary:/i)).toBeVisible({
-    timeout: 20_000,
-  });
+  await waitForResults(page);
 
   // Three trials were appended, each with its own prediction.
   const stored = await page.evaluate((key) => {
@@ -100,9 +106,7 @@ test("reload restores the results stage without duplicating evidence", async ({
   await page.getByRole("button", { name: "Submit prediction" }).click();
   await page.locator("#param-absorberPosition").fill("0");
   await page.getByRole("button", { name: "Run trial" }).click();
-  await expect(page.getByText(/state summary:/i)).toBeVisible({
-    timeout: 20_000,
-  });
+  await waitForResults(page);
 
   await page.reload();
 
@@ -146,8 +150,6 @@ test("sends at most one adaptation request per trial and shows progress while wa
     page.getByText(/interpreting your evidence/i),
   ).toBeVisible({ timeout: 10_000 });
 
-  await expect(page.getByText(/state summary:/i)).toBeVisible({
-    timeout: 20_000,
-  });
+  await waitForResults(page);
   expect(adaptRequests).toBeLessThanOrEqual(1);
 });
