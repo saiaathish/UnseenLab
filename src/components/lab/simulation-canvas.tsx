@@ -26,6 +26,9 @@ const ABSORBER_X = VIEW_W - 70;
 export function SimulationCanvas({ trial, stopReason, preferences }: Props) {
   const [currentStep, setCurrentStep] = useState(0);
   const [playing, setPlaying] = useState(false);
+  // Only meaningful transitions are announced to assistive technology —
+  // per-frame counter updates must never spam the live region.
+  const [liveMessage, setLiveMessage] = useState<string | null>(null);
 
   const snapshots = trial?.snapshots ?? [];
   const lastIndex = snapshots.length - 1;
@@ -39,16 +42,29 @@ export function SimulationCanvas({ trial, stopReason, preferences }: Props) {
   useEffect(() => {
     if (!playing || snapshots.length === 0) return;
     const timer = window.setInterval(() => {
-      setCurrentStep((step) => {
-        if (step >= lastIndex) {
+      setCurrentStep((previous) => {
+        if (previous >= lastIndex) {
+          // Final frame: stop playback and announce completion once. Both
+          // updates are idempotent, so StrictMode double-invocation is safe.
           setPlaying(false);
-          return step;
+          setLiveMessage("Animation reached the end");
+          return previous;
         }
-        return step + 1;
+        return previous + 1;
       });
     }, frameDelay);
     return () => window.clearInterval(timer);
   }, [playing, frameDelay, lastIndex, snapshots.length]);
+
+  const togglePlay = () => {
+    if (playing) {
+      setPlaying(false);
+      setLiveMessage("Animation paused");
+    } else {
+      setPlaying(true);
+      setLiveMessage("Animation started");
+    }
+  };
 
   if (!trial || snapshots.length === 0) {
     return (
@@ -127,7 +143,7 @@ export function SimulationCanvas({ trial, stopReason, preferences }: Props) {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setPlaying((p) => !p)}
+              onClick={togglePlay}
               aria-label={playing ? "Pause animation" : "Play animation"}
               className="rounded-lg bg-accent-strong px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
             >
@@ -217,7 +233,7 @@ export function SimulationCanvas({ trial, stopReason, preferences }: Props) {
       </div>
 
       <p
-        aria-live="polite"
+        aria-hidden="true"
         className="mt-3 rounded-lg bg-surface-raised px-3 py-2 text-sm leading-6"
       >
         <span className="font-semibold">State summary:</span> step{" "}
@@ -229,6 +245,11 @@ export function SimulationCanvas({ trial, stopReason, preferences }: Props) {
         {snapshot.absorbedNeutrons}. Escaped: {snapshot.escapedNeutrons}.
         Energy units: {snapshot.cumulativeEnergyUnits}.
       </p>
+      {liveMessage && (
+        <p role="status" className="sr-only">
+          {liveMessage}
+        </p>
+      )}
     </section>
   );
 }
