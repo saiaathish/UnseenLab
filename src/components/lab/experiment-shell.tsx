@@ -461,7 +461,11 @@ export function ExperimentShell({
   }, [experiment.defaultParameters]);
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <>
+      <div
+        inert={showReplay ? true : undefined}
+        className="flex min-h-screen flex-col"
+      >
       <header className="border-b border-border bg-surface">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-start gap-3 px-4 py-5 sm:px-6">
           <div className="min-w-0 flex-1">
@@ -804,6 +808,7 @@ export function ExperimentShell({
           </div>
         </section>
       )}
+      </div>
 
       {showReplay && (
         <AdaptationReplay
@@ -813,6 +818,6 @@ export function ExperimentShell({
           onClose={() => setShowReplay(false)}
         />
       )}
-    </div>
+    </>
   );
 }

@@ -21,7 +21,9 @@ async function newPage() {
   const page = await browser.newPage();
   const consoleErrors = [];
   page.on("console", (msg) => {
-    if (msg.type() === "error") consoleErrors.push(msg.text().slice(0, 300));
+    if (msg.type() === "error" || msg.type() === "warning") {
+      consoleErrors.push(`${msg.type()}: ${msg.text().slice(0, 300)}`);
+    }
   });
   page.on("pageerror", (err) => consoleErrors.push(`pageerror: ${err.message.slice(0, 300)}`));
   page.consoleErrors = consoleErrors;
@@ -51,11 +53,12 @@ async function newPage() {
   await page.getByRole("button", { name: "Run trial" }).click();
   await page.getByRole("heading", { name: /watch what happened/i }).waitFor({ timeout: 30000 });
 
-  // AI badge (the interpretation succeeded if the badge says AI interpretation)
+  // AI badge: the interpretation succeeded, so the AI badge must be present
+  // (the Offline-rules badge must NOT be, since no fallback was forced).
   await page.getByRole("button", { name: "Adaptation Replay" }).click();
   const aiBadge = await page.getByText("AI interpretation", { exact: true }).count();
   const offlineBadge = await page.getByText("Offline rules", { exact: true }).count();
-  check("AI interpretation badge shown for live LLM success", aiBadge > 0 || offlineBadge > 0,
+  check("AI interpretation badge shown for live LLM success", aiBadge > 0 && offlineBadge === 0,
     `llm=${aiBadge} rules=${offlineBadge}`);
   await page.getByRole("button", { name: /close replay/i }).click();
 
@@ -127,8 +130,10 @@ async function newPage() {
   await page.getByRole("heading", { name: /watch what happened/i }).waitFor({ timeout: 30000 });
   const trials = await page.evaluate(() => JSON.parse(localStorage.getItem("unseenlab.evidence.v1")).trials.length);
   check("second trial works after forced fallback", trials === 2, `trials=${trials}`);
-  const warnLines = page.consoleErrors.filter((l) => l.includes("[adapt]")).length;
-  check("fallback logs a safe reason, no learner data", true, `console adapt lines=${warnLines}`);
+  // The abort means no request reached the server; the client must log the
+  // fallback warning with a fixed reason enum and no learner content.
+  const fallbackWarnings = page.consoleErrors.filter((l) => l.includes("[adapt]")).length;
+  check("fallback logs a safe reason", fallbackWarnings >= 1, `warnings=${fallbackWarnings}`);
   const hasLearnerData = page.consoleErrors.some((l) => /slightly faster|absorber/i.test(l));
   check("no learner data in console output", !hasLearnerData);
   await page.close();

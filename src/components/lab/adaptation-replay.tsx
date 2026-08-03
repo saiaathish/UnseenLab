@@ -80,7 +80,7 @@ export function AdaptationReplay({
         t.parameters.absorberPosition === latest.parameters.absorberPosition,
     ).length;
     if (sameParams >= 2) {
-      interactionPattern.push("replayed the animation several times");
+      interactionPattern.push("repeated the same run settings");
     }
   }
   if (evidence.trials.some((t) => t.changedVariables.length >= 2)) {

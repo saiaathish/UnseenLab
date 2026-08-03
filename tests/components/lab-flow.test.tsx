@@ -487,6 +487,25 @@ describe("replay dialog keyboard behavior", () => {
     await user.tab({ shift: true });
     expect(closeButton).toHaveFocus();
   });
+
+  it("makes background content inert while the dialog is open", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <ExperimentShell experiment={NUCLEAR_CHAIN_REACTION_EXPERIMENT} />,
+    );
+    await submitPrediction(user);
+    await runTrial(user);
+    await screen.findByText(/state summary:/i);
+
+    const shellRoot = container.firstElementChild;
+    expect(shellRoot).not.toHaveAttribute("inert");
+
+    await user.click(screen.getByRole("button", { name: /adaptation replay/i }));
+    expect(shellRoot).toHaveAttribute("inert");
+
+    await user.keyboard("{Escape}");
+    expect(shellRoot).not.toHaveAttribute("inert");
+  });
 });
 
 describe("SimulationCanvas", () => {
