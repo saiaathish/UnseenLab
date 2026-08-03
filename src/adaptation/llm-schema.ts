@@ -58,7 +58,7 @@ const GROWTH_PATTERN_LABEL = {
  * causal interpretation, and never receives any personal identity.
  */
 export function buildLlmRequest(input: AdaptationInput): LlmRequestPayload {
-  const { predictions, trials, sessionEvidence, preferences } = input;
+  const { predictions, trials, sessionEvidence } = input;
   const latest = trials.length > 0 ? trials[trials.length - 1] : null;
   const final =
     latest && latest.snapshots.length > 0

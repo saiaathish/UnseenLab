@@ -1,6 +1,5 @@
 import type { AdaptationInput, AdaptationProvider } from "@/domain/adaptation";
 import type { AdaptationProposal } from "@/domain/evidence";
-import type { TrialRecord } from "@/domain/experiments";
 import {
   buildLlmRequest,
   interventionChanges,
