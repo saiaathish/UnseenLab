@@ -351,9 +351,10 @@ describe("repeatable adaptive loop", () => {
     first.unmount();
 
     render(<ExperimentShell experiment={NUCLEAR_CHAIN_REACTION_EXPERIMENT} />);
-    // No empty initial state while retained evidence says trials exist.
+    // No empty initial state while retained evidence says trials exist. The
+    // restore happens after hydration, so wait for it.
     expect(
-      screen.getByRole("heading", { name: /watch what happened/i }),
+      await screen.findByRole("heading", { name: /watch what happened/i }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: /predict first/i }),
@@ -376,7 +377,9 @@ describe("repeatable adaptive loop", () => {
     render(<ExperimentShell experiment={NUCLEAR_CHAIN_REACTION_EXPERIMENT} />);
     // The second-trial experiment step is restored with the pending answer.
     expect(
-      screen.getByRole("heading", { name: /trial 2 — run another trial/i }),
+      await screen.findByRole("heading", {
+        name: /trial 2 — run another trial/i,
+      }),
     ).toBeInTheDocument();
     expect(screen.getByText(/it grows much faster than before/i)).toBeInTheDocument();
     // And running it still appends exactly one trial.

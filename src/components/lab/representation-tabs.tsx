@@ -42,10 +42,18 @@ export function RepresentationTabs({
   /**
    * WAI-ARIA tabs pattern: ArrowRight/ArrowLeft move selection (wrapping),
    * Home/End jump to the first/last tab. Only keyboard-originated changes
-   * move focus; clicks select without stealing focus.
+   * move focus; clicks select without stealing focus. Navigation starts from
+   * the FOCUSED tab (falling back to the selected one) so focus and selection
+   * can never drift apart.
    */
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const currentIndex = REPRESENTATION_MODES.indexOf(active);
+    const focusedIndex = tabRefs.current.findIndex(
+      (node) => node === document.activeElement,
+    );
+    const currentIndex =
+      focusedIndex >= 0
+        ? focusedIndex
+        : REPRESENTATION_MODES.indexOf(active);
     let nextIndex: number | null = null;
 
     switch (event.key) {

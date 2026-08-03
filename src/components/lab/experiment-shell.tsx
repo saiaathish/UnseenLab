@@ -39,6 +39,7 @@ import { createAdaptationProvider } from "@/adaptation/llm-provider";
 import { classifyConceptEvidence } from "@/adaptation/misconception-taxonomy";
 import {
   clearLocalSession,
+  createLocalSession,
   loadLocalSession,
   saveLocalSession,
   type LocalSession,
@@ -86,51 +87,26 @@ export function ExperimentShell({
 }: {
   experiment: ExperimentDefinition;
 }) {
-  const [session, setSession] = useState<LocalSession>(() => loadLocalSession());
-
-  // Restore the latest valid workflow stage from persisted state once on
-  // mount, so a reload never shows an empty initial state while retained
-  // evidence says trials exist — and never fabricates one.
+  // All persisted state starts EMPTY so the server-rendered HTML and the first
+  // client render always agree (a reload with retained evidence must not
+  // cause a hydration mismatch). The latest valid workflow stage is restored
+  // atomically after mount — never showing an empty initial state while
+  // evidence says trials exist, and never fabricating one.
+  const [session, setSession] = useState<LocalSession>(() =>
+    createLocalSession(),
+  );
   const [currentParameters, setCurrentParameters] =
     useState<ExperimentParameters>(() => ({
-      ...(session.evidence.trials.at(-1)?.parameters ??
-        experiment.defaultParameters),
+      ...experiment.defaultParameters,
     }));
-  const [lastTrial, setLastTrial] = useState<TrialRecord | null>(() => {
-    const latest = session.evidence.trials.at(-1);
-    return latest ?? null;
-  });
+  const [lastTrial, setLastTrial] = useState<TrialRecord | null>(null);
   const [lastStopReason, setLastStopReason] =
-    useState<SimulationStopReason | null>(() =>
-      deriveStopReason(session.evidence.trials.at(-1) ?? null),
-    );
+    useState<SimulationStopReason | null>(null);
   const [activeProposals, setActiveProposals] = useState<AdaptationProposal[]>(
-    () => {
-      const latest = session.evidence.trials.at(-1);
-      return latest
-        ? session.evidence.adaptationProposals.filter(
-            (proposal) =>
-              proposal.decision === "pending" &&
-              proposal.evidenceIds.includes(latest.id),
-          )
-        : [];
-    },
+    [],
   );
   const [counterfactual, setCounterfactual] =
-    useState<CounterfactualResult | null>(() => {
-      const latest = session.evidence.trials.at(-1);
-      if (!latest) return null;
-      const record = session.evidence.counterfactuals
-        .filter((item) => item.originalTrialId === latest.id)
-        .at(-1);
-      return record
-        ? {
-            original: record.original,
-            counterfactual: record.counterfactual,
-            changedVariable: record.changedVariable,
-          }
-        : null;
-    });
+    useState<CounterfactualResult | null>(null);
   const [activeRepresentation, setActiveRepresentation] =
     useState<RepresentationMode>("animation");
   const [counterfactualOpen, setCounterfactualOpen] = useState(false);
@@ -146,7 +122,54 @@ export function ExperimentShell({
   // mid-experiment restores the exact guided step.
   const pendingPrediction = session.workflow.pendingPrediction;
 
+  // Restore AFTER hydration (declared before the save effect). The restore is
+  // deferred out of the effect body so the hydration render is identical to
+  // the server render; the save effect skips its very first run so it can
+  // never clobber persisted evidence with the empty hydration session.
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const restored = loadLocalSession();
+      const latest = restored.evidence.trials.at(-1) ?? null;
+      setSession(restored);
+      setLastTrial(latest);
+      setLastStopReason(deriveStopReason(latest));
+      setCurrentParameters({
+        ...(latest?.parameters ?? experiment.defaultParameters),
+      });
+      setActiveProposals(
+        latest
+          ? restored.evidence.adaptationProposals.filter(
+              (proposal) =>
+                proposal.decision === "pending" &&
+                proposal.evidenceIds.includes(latest.id),
+            )
+          : [],
+      );
+      setCounterfactual(() => {
+        if (!latest) return null;
+        const record = restored.evidence.counterfactuals
+          .filter((item) => item.originalTrialId === latest.id)
+          .at(-1);
+        return record
+          ? {
+              original: record.original,
+              counterfactual: record.counterfactual,
+              changedVariable: record.changedVariable,
+            }
+          : null;
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [experiment.defaultParameters]);
+
+  // The very first render is the empty hydration session — never persist it
+  // over retained evidence before the restore effect has run.
+  const skipInitialSave = useRef(true);
+  useEffect(() => {
+    if (skipInitialSave.current) {
+      skipInitialSave.current = false;
+      return;
+    }
     saveLocalSession(session);
   }, [session]);
 
