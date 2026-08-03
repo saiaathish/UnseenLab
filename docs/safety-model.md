@@ -29,6 +29,27 @@ Simulation outcomes come exclusively from the deterministic, seeded engine in `s
 
 All results are labeled conceptual and simplified. The engine includes safety caps (population ceiling, step limit, parameter clamping, nonnegativity) and terminates deterministically.
 
+## Scientific constraints (conceptual model)
+
+What the engine preserves — pedagogical relationships, verified by unit tests:
+
+- Zero neutrons → no reaction.
+- Absorption reduces or never increases reaction growth (expected-value checks over fixed seeds).
+- Same seed + same parameters → identical result, every time.
+- Population capped (safety ceiling terminates the run).
+- Nonnegativity: no negative population/energy values.
+- Parameters clamped to valid ranges.
+
+What the model explicitly does NOT claim:
+
+- No physical fidelity, no real materials, no reactor behavior.
+- No criticality, no enrichment, no reactor-safety analysis.
+- No real-world predictive value of any kind.
+
+Constants (escape probability 0.12, fission chance 0.5 per material density, energy 2 per reaction) are pedagogical tuning, not physics. This is acceptable because the model's purpose is causal comparison — as stated in the visible disclaimer — not physical prediction.
+
+The AI layer's boundary: the hosted/LLM path may only interpret learner evidence (predictions, behavior, trial summaries) and propose representational changes. It can never alter equations, parameters, seeds, or outcomes; any answer outside its bounded schema is rejected and the deterministic rules run instead.
+
 ## Future-experiment safety review checklist
 
 Before any new lab ships, reviewers must confirm:

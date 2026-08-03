@@ -15,6 +15,8 @@ import type { LearnerPreferences } from "@/domain/learner";
 import { applyProposedChanges } from "@/domain/adaptation";
 import type { AdaptationInput } from "@/domain/adaptation";
 import { DeterministicAdaptationProvider } from "@/adaptation/deterministic-provider";
+import { classifyConceptEvidence } from "@/adaptation/misconception-taxonomy";
+import { runSimulation } from "@/simulation/nuclear-chain-reaction";
 
 const provider = new DeterministicAdaptationProvider();
 
@@ -267,6 +269,8 @@ describe("DeterministicAdaptationProvider", () => {
               decision: "accepted",
               createdAt: "2026-01-01T00:00:00.000Z",
               decidedAt: "2026-01-01T00:00:10.000Z",
+              source: "rules",
+              followUpQuestion: null,
             },
           ],
         },
@@ -406,5 +410,37 @@ describe("DeterministicAdaptationProvider", () => {
     };
     const withChanges = applyProposedChanges(preferences, proposal.proposedChanges);
     expect(withChanges.oneVariableMode).toBe(true);
+  });
+
+  it("a correct prediction does not trigger misconception-based proposals", async () => {
+    // A capped run with a "much faster than before" prediction: the learner
+    // got it right, so show_graph / compare_trials (which both require a
+    // CONTRADICTED linear-vs-nonlinear classification) must NOT fire. Only
+    // reduce_density may fire — it needs the cap, not a wrong prediction.
+    const trial = runSimulation({
+      ...createDefaultParameters(),
+      seed: 42,
+      absorberPosition: 0.2,
+      startingNeutrons: 10,
+      materialDensity: 1,
+      absorptionProbability: 0.01,
+      durationSteps: 120,
+    }).trial;
+    const prediction = {
+      ...makePrediction(trial.id, "much_faster_nonlinear"),
+      confidence: 4,
+    };
+    const input = makeInput([trial], [prediction]);
+
+    const proposals = await provider.propose(input);
+
+    expect(typesOf(proposals)).not.toContain("show_graph");
+    expect(typesOf(proposals)).not.toContain("compare_trials");
+    expect(typesOf(proposals)).toContain("reduce_density");
+
+    const linearNonlinear = classifyConceptEvidence(input).find(
+      (concept) => concept.conceptId === "LINEAR_VS_NONLINEAR_GROWTH",
+    );
+    expect(linearNonlinear?.status).toBe("supported");
   });
 });

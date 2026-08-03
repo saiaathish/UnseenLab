@@ -101,7 +101,17 @@ function ProposalCard({
 
   return (
     <div className="rounded-lg border border-border bg-surface-raised p-3">
-      <p className="text-sm leading-6">{proposal.reason}</p>
+      <p
+        aria-hidden="true"
+        className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+          proposal.source === "llm"
+            ? "bg-accent-soft text-accent"
+            : "bg-border/40 text-muted"
+        }`}
+      >
+        {proposal.source === "llm" ? "AI interpretation" : "Offline rules"}
+      </p>
+      <p className="mt-1 text-sm leading-6">{proposal.reason}</p>
 
       {changeKeys.length > 0 && (
         <ul className="mt-2 list-inside list-disc text-sm text-muted">
@@ -114,6 +124,11 @@ function ProposalCard({
       )}
       {actionText && (
         <p className="mt-2 text-sm text-accent">{actionText}</p>
+      )}
+      {proposal.followUpQuestion && (
+        <p className="mt-2 text-sm">
+          Try this question: <em>{proposal.followUpQuestion}</em>
+        </p>
       )}
 
       {modifying ? (

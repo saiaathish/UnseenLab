@@ -111,6 +111,47 @@ export default function Home() {
           </ul>
         </section>
 
+        <section aria-labelledby="evidence-heading" className="mt-14">
+          <h2 id="evidence-heading" className="text-xl font-semibold">
+            Design evidence
+          </h2>
+          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+            <li className="rounded-xl border border-border bg-surface p-5">
+              <h3 className="font-semibold">Designed with</h3>
+              <p className="mt-1 text-sm leading-6 text-muted">
+                1 initial design participant — a high-school senior in AP
+                Physics 2 who reports learning differently and values
+                interactivity and animation.
+              </p>
+            </li>
+            <li className="rounded-xl border border-border bg-surface p-5">
+              <h3 className="font-semibold">Initial need</h3>
+              <p className="mt-1 text-sm leading-6 text-muted">
+                Existing demonstrations and lab examples did not provide enough
+                interactivity to build a full understanding.
+              </p>
+            </li>
+            <li className="rounded-xl border border-border bg-surface p-5">
+              <h3 className="font-semibold">First structured test session</h3>
+              <p className="mt-1 text-sm leading-6 text-muted">
+                Pending — results will be recorded here honestly, including
+                friction and requested changes.
+              </p>
+            </li>
+            <li className="rounded-xl border border-border bg-surface p-5">
+              <h3 className="font-semibold">Evidence fields to fill</h3>
+              <ol className="mt-1 list-inside list-decimal text-sm leading-6 text-muted">
+                <li>Observed issue: pending</li>
+                <li>Product change: pending</li>
+                <li>
+                  Initial result: pending (baseline vs post-use scores,
+                  confidence, mental effort)
+                </li>
+              </ol>
+            </li>
+          </ul>
+        </section>
+
         <footer className="mt-14 border-t border-border pt-6 text-sm leading-6 text-muted">
           <p>{simulationDisclaimer}</p>
           <p className="mt-2">

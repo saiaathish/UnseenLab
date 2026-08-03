@@ -68,6 +68,8 @@ export class DeterministicAdaptationProvider implements AdaptationProvider {
         decision: "pending",
         createdAt: new Date().toISOString(),
         decidedAt: null,
+        source: "rules",
+        followUpQuestion: null,
       });
     };
 

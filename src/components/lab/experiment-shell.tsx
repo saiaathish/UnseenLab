@@ -32,7 +32,7 @@ import {
   runCounterfactual,
   type CounterfactualResult,
 } from "@/simulation/counterfactual";
-import { DeterministicAdaptationProvider } from "@/adaptation/deterministic-provider";
+import { createAdaptationProvider } from "@/adaptation/llm-provider";
 import { classifyConceptEvidence } from "@/adaptation/misconception-taxonomy";
 import {
   loadLocalSession,
@@ -49,7 +49,7 @@ import { AdaptationReplay } from "./adaptation-replay";
 import { AccessibilityControls } from "./accessibility-controls";
 import { ResearchMode } from "./research-mode";
 
-const adaptationProvider = new DeterministicAdaptationProvider();
+const adaptationProvider = createAdaptationProvider();
 
 interface PendingPrediction {
   trialId: string;
@@ -321,8 +321,6 @@ export function ExperimentShell({
     setNotice(null);
   }, [experiment.defaultParameters]);
 
-  const lowDensity = preferences.informationDensity === "low";
-
   return (
     <div
       style={{ fontSize: `${preferences.textScale * 100}%` }}
@@ -335,11 +333,9 @@ export function ExperimentShell({
               {experiment.title}
             </h1>
             <p className="text-sm text-muted">{experiment.goal}</p>
-            {!lowDensity && (
-              <p className="mt-1 text-xs leading-5 text-muted">
-                {simulationDisclaimer}
-              </p>
-            )}
+            <p className="mt-1 text-xs leading-5 text-muted">
+              {simulationDisclaimer}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button

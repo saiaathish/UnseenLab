@@ -10,9 +10,10 @@ import { z } from "zod";
 export const NUCLEAR_CHAIN_REACTION_LAB_ID = "nuclear-chain-reaction";
 
 export const simulationDisclaimer =
-  "This is a conceptual, simplified simulation with fictionalized values. " +
-  "It teaches causal principles only. It is not a real reactor model and must " +
-  "not be used for any real-world engineering or safety decision.";
+  "This is a conceptual, simplified, pedagogical model — not physically " +
+  "predictive. All values are fictionalized and dimensionless; its purpose is " +
+  "causal comparison. It does not simulate real materials or reactor behavior " +
+  "and must not be used for real engineering or safety decisions.";
 
 /** Hard ceiling on the free-neutron population. The run stops when reached. */
 export const MAX_POPULATION = 500;

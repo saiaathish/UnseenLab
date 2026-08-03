@@ -191,6 +191,8 @@ describe("AdaptationReplay", () => {
           decision: "pending" as const,
           createdAt: now,
           decidedAt: null,
+          source: "rules" as const,
+          followUpQuestion: null,
         },
       ],
       conceptEvidence: [

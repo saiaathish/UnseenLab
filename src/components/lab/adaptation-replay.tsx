@@ -164,6 +164,21 @@ export function AdaptationReplay({
                   className="rounded-lg bg-surface-raised p-3"
                 >
                   <p className="text-sm">{proposal.reason}</p>
+                  <p
+                    aria-hidden="true"
+                    className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                      proposal.source === "llm"
+                        ? "bg-accent-soft text-accent"
+                        : "bg-border/40 text-muted"
+                    }`}
+                  >
+                    {proposal.source === "llm" ? "AI interpretation" : "Offline rules"}
+                  </p>
+                  {proposal.followUpQuestion && (
+                    <p className="mt-1 text-sm">
+                      Suggested question: {proposal.followUpQuestion}
+                    </p>
+                  )}
                   <p className="mt-1 text-sm font-medium">
                     Your decision:{" "}
                     {DECISION_LABELS[proposal.decision] ?? proposal.decision}
