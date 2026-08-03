@@ -496,7 +496,7 @@ export function ExperimentShell({
                 />
                 <VariableControls
                   parameters={currentParameters}
-                  previousParameters={lastTrial?.parameters ?? null}
+                  previousParameters={null}
                   spec={experiment.parameterSpecs}
                   oneVariableMode
                   onChange={setCurrentParameters}
