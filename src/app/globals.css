@@ -6,6 +6,7 @@
   --surface-raised: #edf3f5;
   --foreground: #17212b;
   --muted: #5b6b79;
+  --muted-strong: #3d4c59;
   --border: #d8e2e8;
   --accent: #0f766e;
   --accent-strong: #0f766e;
@@ -23,6 +24,7 @@ body.high-contrast {
   --surface-raised: #f2f4f6;
   --foreground: #0a0a0a;
   --muted: #333333;
+  --muted-strong: #f5f5f5;
   --border: #111111;
   --accent: #0f5f58;
   --accent-strong: #0f5f58;
@@ -47,6 +49,7 @@ html[data-reduced-motion="true"] *::after {
   --color-surface-raised: var(--surface-raised);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
+  --color-muted-strong: var(--muted-strong);
   --color-border: var(--border);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
