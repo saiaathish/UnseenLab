@@ -1,0 +1,643 @@
+{
+  "schema_version": "1.0",
+  "provider": "deterministic_rule_provider",
+  "subject_model": "Each case defines an AdaptationInput: {preferences, predictions, trials, sessionEvidence}. trials entries: {id, parameters, changedVariables, snapshots:[{freeNeutrons, absorbedNeutrons, escapedNeutrons, reactionEvents, cumulativeEnergyUnits, step}], startedAt, completedAt}. predictions: {id, trialId, prompt, answer, structuredAnswer, confidence, createdAt}. sessionEvidence: {representationEvents:[{mode, openedAt}], adaptationProposals:[{id, type, decision, evidenceIds, reason, createdAt}], conceptEvidence:[{conceptId, status, evidenceIds}]}. expected_proposals: types that MUST be proposed. forbidden_proposals: types that MUST NOT be proposed. abstention_expected: true means zero proposals expected. required_evidence_ids: ids that must appear in the evidenceIds of every produced proposal. Rule order in the implementation: ask_prediction_again, freeze_variables, show_graph, compare_trials, slow_animation, show_causal_view, reduce_density; max 3 proposals; rejected types are never re-proposed.",
+  "cases": [
+    {
+      "id": "ADAPT-001",
+      "title": "Multiple variables changed at once",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T2", "structuredAnswer": "much_faster_nonlinear", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" },
+          { "id": "T2", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 8, "materialDensity": 0.6, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": ["absorberPosition", "startingNeutrons", "materialDensity"], "snapshots": [ { "step": 0, "freeNeutrons": 8, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:03Z", "completedAt": "2026-08-03T00:00:04Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T2", "prompt": "g", "answer": "It grows much faster than before", "structuredAnswer": "much_faster_nonlinear", "confidence": 4, "createdAt": "2026-08-03T00:00:03Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["freeze_variables"],
+      "forbidden_proposals": [],
+      "required_evidence_ids": ["T2"],
+      "abstention_expected": false,
+      "severity": "S1",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "freeze_variables fires because latest.changedVariables >= 2 and oneVariableMode is false (deterministic-provider.ts:85-99)."
+    },
+    {
+      "id": "ADAPT-002",
+      "title": "Repeated animation replay of the same configuration",
+      "signals": { "animationReplays": 3 },
+      "prediction": { "id": "P3", "trialId": "T3", "structuredAnswer": "slightly_faster", "confidence": 3 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" },
+          { "id": "T2", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:03Z", "completedAt": "2026-08-03T00:00:04Z" },
+          { "id": "T3", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:05Z", "completedAt": "2026-08-03T00:00:06Z" }
+        ],
+        "predictions": [ { "id": "P3", "trialId": "T3", "prompt": "g", "answer": "It gets slightly faster", "structuredAnswer": "slightly_faster", "confidence": 3, "createdAt": "2026-08-03T00:00:05Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["slow_animation"],
+      "forbidden_proposals": ["show_graph"],
+      "required_evidence_ids": ["T1", "T2", "T3"],
+      "abstention_expected": false,
+      "severity": "S2",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "slow_animation requires >= 2 trials with identical parameters and reducedMotion false (deterministic-provider.ts:135-156). Evidence ids must list all matching trials."
+    },
+    {
+      "id": "ADAPT-003",
+      "title": "Graph ignored while prediction contradicts outcome",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "slightly_faster", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It gets slightly faster", "structuredAnswer": "slightly_faster", "confidence": 4, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [ { "mode": "animation", "openedAt": "2026-08-03T00:00:02Z" } ],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["show_graph", "compare_trials"],
+      "forbidden_proposals": ["slow_animation"],
+      "required_evidence_ids": ["P1", "T1"],
+      "abstention_expected": false,
+      "severity": "S2",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "Nonlinear outcome (ceiling hit) + linear-ish prediction => LINEAR_VS_NONLINEAR_GROWTH contradicted. show_graph fires only if no graph event after trial start; compare_trials fires on contradicted (deterministic-provider.ts:101-133)."
+    },
+    {
+      "id": "ADAPT-004",
+      "title": "Equation view explicitly selected by the learner",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "slightly_faster", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation", "equation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It gets slightly faster", "structuredAnswer": "slightly_faster", "confidence": 4, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [ { "mode": "equation", "openedAt": "2026-08-03T00:00:03Z" } ],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["show_graph", "compare_trials"],
+      "forbidden_proposals": ["slow_animation"],
+      "required_evidence_ids": ["P1", "T1"],
+      "abstention_expected": false,
+      "severity": "S3",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PARTIAL",
+      "notes": "UX refinement candidate: the learner chose equation, yet the rule proposes graph (it only checks whether GRAPH was opened). Desired behavior may be to respect the equation preference; current rule is defensible but blunt."
+    },
+    {
+      "id": "ADAPT-005",
+      "title": "Reduced motion enabled: no motion-related proposals",
+      "signals": {},
+      "prediction": { "id": "P3", "trialId": "T3", "structuredAnswer": "stays_the_same", "confidence": 2 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": true, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" },
+          { "id": "T2", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:03Z", "completedAt": "2026-08-03T00:00:04Z" },
+          { "id": "T3", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:05Z", "completedAt": "2026-08-03T00:00:06Z" }
+        ],
+        "predictions": [],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": ["slow_animation"],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S2",
+      "rubric_axis": "Usability and Accessibility",
+      "current_implementation_status": "PASS",
+      "notes": "Learners with reduced motion never receive motion suggestions (deterministic-provider.ts:137-139)."
+    },
+    {
+      "id": "ADAPT-006",
+      "title": "Adaptation previously rejected: type is never re-proposed",
+      "signals": {},
+      "prediction": { "id": "P2", "trialId": "T2", "structuredAnswer": "much_faster_nonlinear", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" },
+          { "id": "T2", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 8, "materialDensity": 0.6, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": ["absorberPosition", "startingNeutrons", "materialDensity"], "snapshots": [ { "step": 0, "freeNeutrons": 8, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:03Z", "completedAt": "2026-08-03T00:00:04Z" }
+        ],
+        "predictions": [ { "id": "P2", "trialId": "T2", "prompt": "g", "answer": "It grows much faster than before", "structuredAnswer": "much_faster_nonlinear", "confidence": 4, "createdAt": "2026-08-03T00:00:03Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [ { "id": "A1", "type": "freeze_variables", "decision": "rejected", "evidenceIds": ["T1"], "reason": "test", "createdAt": "2026-08-03T00:00:02Z" } ],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": ["freeze_variables"],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S1",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "rejectedTypes set blocks freeze_variables even though the trigger conditions fire (deterministic-provider.ts:37-46, 61)."
+    },
+    {
+      "id": "ADAPT-007",
+      "title": "Same adaptation rejected multiple times remains suppressed",
+      "signals": {},
+      "prediction": { "id": "P2", "trialId": "T2", "structuredAnswer": "much_faster_nonlinear", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" },
+          { "id": "T2", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 8, "materialDensity": 0.6, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": ["absorberPosition", "startingNeutrons", "materialDensity"], "snapshots": [ { "step": 0, "freeNeutrons": 8, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:03Z", "completedAt": "2026-08-03T00:00:04Z" }
+        ],
+        "predictions": [ { "id": "P2", "trialId": "T2", "prompt": "g", "answer": "It grows much faster than before", "structuredAnswer": "much_faster_nonlinear", "confidence": 4, "createdAt": "2026-08-03T00:00:03Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [
+          { "id": "A1", "type": "freeze_variables", "decision": "rejected", "evidenceIds": ["T1"], "reason": "test", "createdAt": "2026-08-03T00:00:02Z" },
+          { "id": "A2", "type": "freeze_variables", "decision": "rejected", "evidenceIds": ["T1"], "reason": "test", "createdAt": "2026-08-03T00:00:03Z" }
+        ],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": ["freeze_variables"],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S1",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "Repeated rejections of the same type are durable; the set is built from every rejected proposal in the session."
+    },
+    {
+      "id": "ADAPT-008",
+      "title": "Linear-growth misconception: predicted steady, observed nonlinear",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "slightly_faster", "confidence": 5 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It gets slightly faster", "structuredAnswer": "slightly_faster", "confidence": 5, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["show_graph", "compare_trials"],
+      "forbidden_proposals": [],
+      "required_evidence_ids": ["P1", "T1"],
+      "abstention_expected": false,
+      "severity": "S2",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "Core friction scenario: predicted linear-ish, got runaway growth (misconception-taxonomy.ts:223-234)."
+    },
+    {
+      "id": "ADAPT-009",
+      "title": "Absorber-effect misconception: withdrew absorber, predicted slower",
+      "signals": {},
+      "prediction": { "id": "P2", "trialId": "T2", "structuredAnswer": "slower", "confidence": 3 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" },
+          { "id": "T2", "parameters": { "absorberPosition": 0.3, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": ["absorberPosition"], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:03Z", "completedAt": "2026-08-03T00:00:04Z" }
+        ],
+        "predictions": [ { "id": "P2", "trialId": "T2", "prompt": "g", "answer": "It gets slower", "structuredAnswer": "slower", "confidence": 3, "createdAt": "2026-08-03T00:00:03Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["show_causal_view"],
+      "forbidden_proposals": [],
+      "required_evidence_ids": ["T1", "T2", "P2"],
+      "abstention_expected": false,
+      "severity": "S2",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "Withdrawal predicts faster; learner predicted slower => contradicted; causal view never opened and an earlier absorber-differing trial exists (deterministic-provider.ts:159-178)."
+    },
+    {
+      "id": "ADAPT-010",
+      "title": "Starting-population misconception is classified but yields no proposal",
+      "signals": {},
+      "prediction": { "id": "P2", "trialId": "T2", "structuredAnswer": "slower", "confidence": 3 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.5, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" },
+          { "id": "T2", "parameters": { "absorberPosition": 0.5, "startingNeutrons": 8, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": ["startingNeutrons"], "snapshots": [ { "step": 0, "freeNeutrons": 8, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 40, "absorbedNeutrons": 100, "escapedNeutrons": 20, "reactionEvents": 60, "cumulativeEnergyUnits": 120 } ], "startedAt": "2026-08-03T00:00:03Z", "completedAt": "2026-08-03T00:00:04Z" }
+        ],
+        "predictions": [ { "id": "P2", "trialId": "T2", "prompt": "g", "answer": "It gets slower", "structuredAnswer": "slower", "confidence": 3, "createdAt": "2026-08-03T00:00:03Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": [],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S3",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PARTIAL",
+      "notes": "STARTING_POPULATION_EFFECT is classified (sign of finalDelta matches sign of startDelta => supported) but NO proposal type consumes it. Realized gap: the taxonomy feeds no intervention for this concept. Not a correctness failure; an unrealized dimension."
+    },
+    {
+      "id": "ADAPT-011",
+      "title": "Confounded experiment with three changed variables",
+      "signals": {},
+      "prediction": { "id": "P2", "trialId": "T2", "structuredAnswer": "much_faster_nonlinear", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" },
+          { "id": "T2", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 9, "materialDensity": 0.4, "absorptionProbability": 0.5, "durationSteps": 60, "seed": 42 }, "changedVariables": ["absorberPosition", "startingNeutrons", "materialDensity", "absorptionProbability"], "snapshots": [ { "step": 0, "freeNeutrons": 9, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:03Z", "completedAt": "2026-08-03T00:00:04Z" }
+        ],
+        "predictions": [ { "id": "P2", "trialId": "T2", "prompt": "g", "answer": "It grows much faster than before", "structuredAnswer": "much_faster_nonlinear", "confidence": 4, "createdAt": "2026-08-03T00:00:03Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["freeze_variables"],
+      "forbidden_proposals": [],
+      "required_evidence_ids": ["T2"],
+      "abstention_expected": false,
+      "severity": "S2",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "MULTIPLE_VARIABLE_CONFOUNDING contradicted (>=3 changes) + freeze_variables fires. This is the causal-reasoning story of the demo."
+    },
+    {
+      "id": "ADAPT-012",
+      "title": "Correct prediction: no friction proposals",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "much_faster_nonlinear", "confidence": 5 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It grows much faster than before", "structuredAnswer": "much_faster_nonlinear", "confidence": 5, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [ { "mode": "graph", "openedAt": "2026-08-03T00:00:02Z" } ],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": ["show_graph", "compare_trials", "slow_animation", "show_causal_view", "reduce_density", "freeze_variables", "ask_prediction_again"],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S3",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "Prediction supported, graph already open, one trial only: abstention is the correct respectful behavior."
+    },
+    {
+      "id": "ADAPT-013",
+      "title": "Empty prediction for the latest trial",
+      "signals": {},
+      "prediction": null,
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.5, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["ask_prediction_again"],
+      "forbidden_proposals": [],
+      "required_evidence_ids": ["T1"],
+      "abstention_expected": false,
+      "severity": "S3",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "Fires when the latest trial has no prediction on record (deterministic-provider.ts:74-83). In the current UI this is unlikely to be reachable because prediction is required before running."
+    },
+    {
+      "id": "ADAPT-014",
+      "title": "Low-confidence free-text interpretation: conservative abstention",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "answer": "maybe something happens", "structuredAnswer": null, "confidence": 1 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "maybe something happens", "structuredAnswer": null, "confidence": 1, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": [],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S2",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "Free-text with no keyword intent => uncertain classification => no friction proposals. Conservatism is the correct failure mode (misconception-taxonomy.ts:387-398)."
+    },
+    {
+      "id": "ADAPT-015",
+      "title": "Contradictory evidence across trials: no overclaiming",
+      "signals": {},
+      "prediction": { "id": "P2", "trialId": "T2", "structuredAnswer": "much_faster_nonlinear", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.5, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 41 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 4, "absorbedNeutrons": 10, "escapedNeutrons": 8, "reactionEvents": 2, "cumulativeEnergyUnits": 4 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" },
+          { "id": "T2", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": ["absorberPosition"], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:03Z", "completedAt": "2026-08-03T00:00:04Z" }
+        ],
+        "predictions": [ { "id": "P2", "trialId": "T2", "prompt": "g", "answer": "It grows much faster than before", "structuredAnswer": "much_faster_nonlinear", "confidence": 4, "createdAt": "2026-08-03T00:00:03Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["compare_trials"],
+      "forbidden_proposals": [],
+      "required_evidence_ids": ["P2", "T2"],
+      "abstention_expected": false,
+      "severity": "S2",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "Mixed evidence (flat on seed 41, runaway on seed 42 with absorber withdrawn). Only compare_trials fires; no proposal may assert a definitive learner error."
+    },
+    {
+      "id": "ADAPT-016",
+      "title": "No useful adaptation available: respectful empty state",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "much_faster_nonlinear", "confidence": 5 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation", "graph"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It grows much faster than before", "structuredAnswer": "much_faster_nonlinear", "confidence": 5, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [ { "mode": "graph", "openedAt": "2026-08-03T00:00:03Z" } ],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": [],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S3",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "Correct prediction, graph already opened, single trial, no rejection history: zero proposals is the right outcome."
+    },
+    {
+      "id": "ADAPT-017",
+      "title": "Learner requests free exploration",
+      "signals": { "learnerMode": "free_exploration" },
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "much_faster_nonlinear", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 8, "materialDensity": 0.6, "absorptionProbability": 0.4, "durationSteps": 60, "seed": 42 }, "changedVariables": ["absorberPosition", "startingNeutrons", "materialDensity", "absorptionProbability"], "snapshots": [ { "step": 0, "freeNeutrons": 8, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It grows much faster than before", "structuredAnswer": "much_faster_nonlinear", "confidence": 4, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [ { "id": "A1", "type": "freeze_variables", "decision": "rejected", "evidenceIds": ["T1"], "reason": "test", "createdAt": "2026-08-03T00:00:02Z" }, { "id": "A2", "type": "freeze_variables", "decision": "rejected", "evidenceIds": ["T1"], "reason": "test", "createdAt": "2026-08-03T00:00:02Z" } ],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": ["freeze_variables"],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S2",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "Learner control wins: repeated rejection of freeze_variables suppresses it durably, even though the trigger conditions still fire."
+    },
+    {
+      "id": "ADAPT-018",
+      "title": "Learner requests guided mode (one-variable mode on)",
+      "signals": { "learnerMode": "guided" },
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "slightly_faster", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": true, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 8, "materialDensity": 0.6, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": ["absorberPosition", "startingNeutrons", "materialDensity"], "snapshots": [ { "step": 0, "freeNeutrons": 8, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It gets slightly faster", "structuredAnswer": "slightly_faster", "confidence": 4, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["show_graph", "compare_trials"],
+      "forbidden_proposals": ["freeze_variables"],
+      "required_evidence_ids": ["P1", "T1"],
+      "abstention_expected": false,
+      "severity": "S2",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "oneVariableMode true suppresses freeze_variables; contradiction still yields graph/comparison suggestions (deterministic-provider.ts:85-89)."
+    },
+    {
+      "id": "ADAPT-019",
+      "title": "Learner requests less text: reduce_density must not fire redundantly",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "slightly_faster", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "low", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It gets slightly faster", "structuredAnswer": "slightly_faster", "confidence": 4, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["show_graph", "compare_trials"],
+      "forbidden_proposals": ["reduce_density"],
+      "required_evidence_ids": ["P1", "T1"],
+      "abstention_expected": false,
+      "severity": "S3",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "FAIL",
+      "notes": "KNOWN DEFECT: the rule fires reduce_density on any ceiling-hit trial when no proposal was accepted yet — it does not check the CURRENT informationDensity (deterministic-provider.ts:180-193). Proposing 'less text' to a learner who already set low density is a generic-feeling misfire. Fix: skip when informationDensity is already 'low' or learner chose 'full' (~0.5h)."
+    },
+    {
+      "id": "ADAPT-020",
+      "title": "Learner requests more detail: density must not be reduced",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "slightly_faster", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "full", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It gets slightly faster", "structuredAnswer": "slightly_faster", "confidence": 4, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["show_graph", "compare_trials"],
+      "forbidden_proposals": ["reduce_density"],
+      "abstention_expected": false,
+      "severity": "S3",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "FAIL",
+      "notes": "Same defect as ADAPT-019, now actively contradicting the learner's explicit choice. There is also no 'increase depth' proposal at all (MISSING dimension, see adaptation-audit.md section 3)."
+    },
+    {
+      "id": "ADAPT-021",
+      "title": "Immediate feedback disabled: feedbackTiming must change behavior",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "slightly_faster", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "manual", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It gets slightly faster", "structuredAnswer": "slightly_faster", "confidence": 4, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["show_graph", "compare_trials"],
+      "forbidden_proposals": [],
+      "abstention_expected": false,
+      "severity": "S2",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "FAIL",
+      "notes": "feedbackTiming is settable and persisted but consumed by NO code path (learner.ts:38,56,70; accessibility-controls.tsx:115-134). The same proposals fire regardless of the setting. Either wire it (delay/limit adaptation-card display timing) or remove the control (2-6h)."
+    },
+    {
+      "id": "ADAPT-022",
+      "title": "Corrupt session event: provider must not throw",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "much_faster_nonlinear", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It grows much faster than before", "structuredAnswer": "much_faster_nonlinear", "confidence": 4, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [ { "mode": "graph", "openedAt": "not-a-date" } ],
+        "adaptationProposals": [ { "id": "A1", "type": "freeze_variables", "decision": "rejected", "evidenceIds": ["T1"], "reason": "test", "createdAt": "bad-timestamp" } ],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": [],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S2",
+      "rubric_axis": "Technical Execution",
+      "current_implementation_status": "PASS",
+      "notes": "Malformed evidence must not crash the provider; the zod schema at the storage boundary would reject this on load (session-storage.ts:51-66) and the provider itself only reads fields it needs. Expected outcome: graceful abstention."
+    },
+    {
+      "id": "ADAPT-023",
+      "title": "Repeated identical proposal: identical inputs yield identical rule selections",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "slightly_faster", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It gets slightly faster", "structuredAnswer": "slightly_faster", "confidence": 4, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": ["show_graph", "compare_trials"],
+      "forbidden_proposals": [],
+      "required_evidence_ids": ["P1", "T1"],
+      "abstention_expected": false,
+      "severity": "S3",
+      "rubric_axis": "Innovation in AI Application",
+      "current_implementation_status": "PASS",
+      "notes": "Calling propose() twice with this exact input must yield the same two types in the same order (determinism contract, tested). Proposal UUIDs may differ; rule selection must not."
+    },
+    {
+      "id": "ADAPT-024",
+      "title": "Unsupported diagnosis inference: no proposal may reference identity or diagnosis",
+      "signals": { "learnerText": "I have ADHD so I think the absorber matters" },
+      "prediction": { "id": "P1", "trialId": "T1", "answer": "I have ADHD so I think the absorber matters", "structuredAnswer": null, "confidence": 3 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "I have ADHD so I think the absorber matters", "structuredAnswer": null, "confidence": 3, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": [],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S0",
+      "rubric_axis": "Usability and Accessibility",
+      "current_implementation_status": "PASS",
+      "notes": "The provider must never reference diagnosis, identity, attention, or emotional state. No such fields exist; taxonomy language is behavior-only (misconception-taxonomy.ts:13-26). Re-verify if an LLM provider is added (mandatory prompt boundary)."
+    },
+    {
+      "id": "ADAPT-025",
+      "title": "Adaptation attempts to change scientific parameters: must be impossible",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "much_faster_nonlinear", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.2, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 }, { "step": 60, "freeNeutrons": 500, "absorbedNeutrons": 200, "escapedNeutrons": 50, "reactionEvents": 800, "cumulativeEnergyUnits": 1600 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It grows much faster than before", "structuredAnswer": "much_faster_nonlinear", "confidence": 4, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [ { "id": "A1", "type": "freeze_variables", "decision": "pending", "evidenceIds": ["T1"], "reason": "injected", "proposedChanges": { "absorberPosition": 0.1, "materialDensity": 0.3 }, "createdAt": "2026-08-03T00:00:02Z" } ],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": [],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S0",
+      "rubric_axis": "Scientific Behavior",
+      "current_implementation_status": "PASS",
+      "notes": "Even a hostile proposal with scientific keys in proposedChanges cannot alter outcomes: applyProposedChanges applies only known preference keys and ignores everything else (adaptation.ts:33-63). Science is unmodifiable by the adaptation layer."
+    },
+    {
+      "id": "ADAPT-026",
+      "title": "Adaptation must never change multiple counterfactual variables",
+      "signals": {},
+      "prediction": { "id": "P1", "trialId": "T1", "structuredAnswer": "much_faster_nonlinear", "confidence": 4 },
+      "preferences": { "animationSpeed": 1, "reducedMotion": false, "informationDensity": "medium", "preferredRepresentations": ["animation"], "feedbackTiming": "after_trial", "oneVariableMode": false, "highContrast": false, "textScale": 1 },
+      "sessionEvidence": {
+        "trials": [
+          { "id": "T1", "parameters": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }, "changedVariables": [], "snapshots": [ { "step": 0, "freeNeutrons": 3, "absorbedNeutrons": 0, "escapedNeutrons": 0, "reactionEvents": 0, "cumulativeEnergyUnits": 0 } ], "startedAt": "2026-08-03T00:00:01Z", "completedAt": "2026-08-03T00:00:02Z" }
+        ],
+        "predictions": [ { "id": "P1", "trialId": "T1", "prompt": "g", "answer": "It grows much faster than before", "structuredAnswer": "much_faster_nonlinear", "confidence": 4, "createdAt": "2026-08-03T00:00:01Z" } ],
+        "representationEvents": [],
+        "adaptationProposals": [],
+        "conceptEvidence": []
+      },
+      "expected_proposals": [],
+      "forbidden_proposals": [],
+      "required_evidence_ids": [],
+      "abstention_expected": true,
+      "severity": "S0",
+      "rubric_axis": "Scientific Behavior",
+      "current_implementation_status": "PASS",
+      "notes": "runCounterfactual takes exactly ONE variable from the allowlist and throws for anything else; seed and durationSteps are excluded (counterfactual.ts:15-42). The counterfactual panel exposes a single-variable select. Multi-variable counterfactuals are structurally impossible."
+    }
+  ]
+}
