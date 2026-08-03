@@ -9,12 +9,9 @@ import { test, expect } from "@playwright/test";
 test("keyboard-only core flow works", async ({ page }) => {
   await page.goto("/lab/nuclear-chain-reaction");
 
-  // The prediction gate is enforced for keyboard users too.
-  await page.getByRole("button", { name: "Run trial" }).focus();
-  await page.keyboard.press("Enter");
-  await expect(
-    page.getByText(/prediction is required before running a trial/i),
-  ).toBeVisible();
+  // The prediction gate is enforced structurally in the guided flow: the Run
+  // trial control only exists once a prediction has been submitted.
+  await expect(page.getByRole("button", { name: "Run trial" })).toHaveCount(0);
 
   // Focus the first prediction radio and activate it with the keyboard.
   const radio = page.getByRole("radio", { name: /gets slightly faster/i });
@@ -52,6 +49,14 @@ test("safety disclaimer is visible inside the lab", async ({ page }) => {
 
 test("replay dialog closes with the Escape key", async ({ page }) => {
   await page.goto("/lab/nuclear-chain-reaction");
+
+  // The Adaptation Replay control appears once a trial has been recorded, so
+  // record one first.
+  await page.getByRole("radio", { name: /gets slightly faster/i }).click();
+  await page.getByRole("button", { name: "Submit prediction" }).click();
+  await page.getByRole("button", { name: "Run trial" }).click();
+  await expect(page.getByText(/state summary:/i)).toBeVisible();
+
   await page.getByRole("button", { name: "Adaptation Replay" }).click();
   await expect(
     page.getByRole("heading", { name: "Adaptation Replay" }),
