@@ -106,7 +106,7 @@ function ProposalCard({
         className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
           proposal.source === "llm"
             ? "bg-accent-soft text-accent"
-            : "bg-border/40 text-muted"
+            : "bg-border/60 text-muted-strong"
         }`}
       >
         {proposal.source === "llm" ? "AI interpretation" : "Offline rules"}

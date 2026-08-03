@@ -4,7 +4,6 @@ import type { LearnerPreferences } from "@/domain/learner";
 import {
   ANIMATION_SPEED_MAX,
   ANIMATION_SPEED_MIN,
-  FEEDBACK_TIMINGS,
   INFORMATION_DENSITIES,
   REPRESENTATION_MODES,
   TEXT_SCALE_MAX,
@@ -111,27 +110,6 @@ export function AccessibilityControls({ preferences, onChange }: Props) {
           className="mt-1 w-full accent-accent"
         />
       </div>
-
-      <fieldset>
-        <legend className="text-sm font-medium">Feedback timing</legend>
-        <div className="mt-1 flex flex-wrap gap-2">
-          {FEEDBACK_TIMINGS.map((timing) => (
-            <label
-              key={timing}
-              className="flex cursor-pointer items-center gap-1.5 text-sm"
-            >
-              <input
-                type="radio"
-                name="pref-feedback"
-                checked={p.feedbackTiming === timing}
-                onChange={() => onChange({ feedbackTiming: timing })}
-                className="h-4 w-4 accent-accent"
-              />
-              {timing.replace("_", " ")}
-            </label>
-          ))}
-        </div>
-      </fieldset>
 
       <fieldset className="sm:col-span-2 lg:col-span-3">
         <legend className="text-sm font-medium">
