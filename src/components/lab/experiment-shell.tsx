@@ -96,12 +96,24 @@ export function ExperimentShell({
     saveLocalSession(session);
   }, [session]);
 
+  // Honor both the operating-system reduced-motion preference and the in-app
+  // override: either one switches the app to static rendering.
   useEffect(() => {
-    document.body.classList.toggle("high-contrast", preferences.highContrast);
-    document.documentElement.setAttribute(
-      "data-reduced-motion",
-      String(preferences.reducedMotion),
-    );
+    const media =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-reduced-motion: reduce)")
+        : undefined;
+    const apply = () => {
+      const osReduced = media?.matches ?? false;
+      document.body.classList.toggle("high-contrast", preferences.highContrast);
+      document.documentElement.setAttribute(
+        "data-reduced-motion",
+        String(osReduced || preferences.reducedMotion),
+      );
+    };
+    apply();
+    media?.addEventListener("change", apply);
+    return () => media?.removeEventListener("change", apply);
   }, [preferences.highContrast, preferences.reducedMotion]);
 
   const lastPrediction = useMemo(

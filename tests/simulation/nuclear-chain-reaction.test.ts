@@ -152,6 +152,29 @@ describe("nuclear chain reaction simulation", () => {
     expect(result.trial.parameters.startingNeutrons).toBeLessThanOrEqual(10);
   });
 
+  it("normalizes NaN and non-finite parameter inputs to safe defaults", () => {
+    const result = runSimulation(
+      params({
+        absorberPosition: NaN,
+        materialDensity: Infinity,
+        absorptionProbability: -Infinity,
+        seed: NaN,
+      }),
+    );
+    expect(result.trial.parameters).toEqual(
+      clampParameters(result.trial.parameters),
+    );
+    expect(result.trial.parameters.absorberPosition).toBe(0.9);
+    expect(result.trial.parameters.materialDensity).toBe(0.9);
+    expect(result.trial.parameters.absorptionProbability).toBe(0.25);
+    expect(result.trial.parameters.seed).toBe(42);
+    for (const snap of result.trial.snapshots) {
+      expect(Number.isFinite(snap.freeNeutrons)).toBe(true);
+      expect(Number.isFinite(snap.reactionEvents)).toBe(true);
+      expect(snap.freeNeutrons).toBeGreaterThanOrEqual(0);
+    }
+  });
+
   it("counters are monotonic non-decreasing across the timeline", () => {
     const result = runSimulation(params({ seed: 42, absorberPosition: 0.3 }));
     let prev = result.trial.snapshots[0];

@@ -47,12 +47,12 @@ export const DEFAULT_EXPERIMENT_PARAMETERS: ExperimentParameters = {
 };
 
 export const experimentParametersSchema = z.object({
-  absorberPosition: z.number().min(0).max(1),
-  startingNeutrons: z.number().int().min(1).max(MAX_STARTING_NEUTRONS),
-  materialDensity: z.number().min(0.1).max(1),
-  absorptionProbability: z.number().min(0.01).max(0.6),
-  durationSteps: z.number().int().min(MIN_STEPS).max(MAX_STEPS),
-  seed: z.number().int().min(0).max(1_000_000_000),
+  absorberPosition: z.number().finite().min(0).max(1),
+  startingNeutrons: z.number().finite().int().min(1).max(MAX_STARTING_NEUTRONS),
+  materialDensity: z.number().finite().min(0.1).max(1),
+  absorptionProbability: z.number().finite().min(0.01).max(0.6),
+  durationSteps: z.number().finite().int().min(MIN_STEPS).max(MAX_STEPS),
+  seed: z.number().finite().int().min(0).max(1_000_000_000),
 });
 
 export type ExperimentParameterKey = keyof ExperimentParameters;
@@ -192,10 +192,15 @@ export function clampParameter(
 ): number {
   const spec = NUCLEAR_PARAMETER_SPECS.find((s) => s.key === key);
   if (!spec) return value;
+  // Non-finite inputs (NaN, ±Infinity) can never poison the scientific core:
+  // fall back to the parameter's default, then clamp as usual.
+  const safeValue = Number.isFinite(value)
+    ? value
+    : DEFAULT_EXPERIMENT_PARAMETERS[key];
   // Engine safety allows startingNeutrons = 0 (a run with no neutrons must
   // produce no reaction); the UI slider still starts at 1.
   const min = key === "startingNeutrons" ? 0 : spec.min;
-  let clamped = Math.min(Math.max(value, min), spec.max);
+  let clamped = Math.min(Math.max(safeValue, min), spec.max);
   if (key === "startingNeutrons" || key === "durationSteps" || key === "seed") {
     clamped = Math.round(clamped);
   }

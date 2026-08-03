@@ -51,7 +51,7 @@ Future labs (High-Voltage Circuit Failure, Exothermic Thermal Runaway) are regis
 ## Accessibility controls
 
 - Animation-first experience with play / pause / step forward / step backward / reset
-- Reduced-motion mode (static frame rendering, no motion, no pulses)
+- Reduced-motion mode honoring the operating-system preference and an in-app override (static frame rendering, no motion, no pulses)
 - Adjustable animation speed (0.25×–2×)
 - Low / medium / full information density
 - One-variable-at-a-time mode
@@ -106,8 +106,8 @@ npm run test:e2e    # Playwright smoke (requires `npx playwright install chromiu
 npm run build       # production build
 ```
 
-- 98 unit/component tests passing (measured on the latest run; the LLM provider tests continue to grow the adaptation count): simulation invariants, seed reproducibility, counterfactual one-variable constraint, adaptation rule selection (deterministic + LLM provider, schema, factory), evidence IDs, preference validation, session persistence, main learner flow, reduced motion, accept/reject, replay, clear-session.
-- 1 Playwright e2e smoke: open → enter lab → predict → withdraw absorber → run → adaptation → accept → counterfactual → replay.
+- 106 unit/component tests passing (measured on the latest run): simulation invariants, non-finite input normalization, seed reproducibility, counterfactual one-variable constraint, adaptation rule selection (deterministic + LLM provider, schema, factory), evidence IDs, preference validation, session persistence, main learner flow, reduced motion, accept/reject, replay, clear-session.
+- 4 Playwright e2e tests: keyboard-only core flow, demo smoke (predict → run → adapt → compare → replay), safety-disclaimer visibility, replay-dialog Escape handling.
 
 ## Architecture
 
