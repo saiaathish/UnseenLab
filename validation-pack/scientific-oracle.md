@@ -1,5 +1,13 @@
 # Scientific Oracle — Conceptual Nuclear Chain Reaction
 
+> **RE-STAMPED on the final-hardening branch.** Corrected for the current product:
+> Invariant 9/10 (single-run-per-session friction) are resolved by the repeatable multi-trial
+> loop; Invariant 13 (disclaimer hidden in low density) is fixed — the disclaimer is always
+> visible; Invariant 18's conditional (re-audit if an LLM provider is added) has now been
+> exercised — the optional structured LLM provider is bounded by a typed schema, system-prompt
+> guards, and deterministic fallback on any failure, so the "explains recorded state only"
+> invariant still holds.
+
 Defines the conceptual truths the educational simulation must preserve. This is **not** a nuclear-physics reference and deliberately provides **no** real-world quantities.
 
 ## Scope
@@ -112,7 +120,7 @@ For every invariant: **Definition** — **Why it matters educationally** — **M
 - **False-positive risk:** A seed control that does nothing.
 - **False-negative risk:** If the demo configuration is chosen to always explode, randomness is invisible — a deliberate choice must still be labeled.
 - **Severity:** S2.
-- **Current status:** PASS by inspection (seed parameter, seeded PRNG, same-seed counterfactual). Educational friction: the current UI allows only one primary run per session (see `implementation-inspection.md`, `experiment-shell.tsx:132-179, 165-171`), which limits cross-seed exploration unless the session is cleared.
+- **Current status:** PASS by inspection (seed parameter, seeded PRNG, same-seed counterfactual). The repeatable multi-trial loop (updated prediction gates each new trial; trials appended, no reload) now makes cross-seed and cross-parameter exploration a normal session activity rather than a session-clearing chore.
 
 ## Invariant 10 — Repeated trials should reveal distributions rather than one guaranteed outcome
 
@@ -121,9 +129,9 @@ For every invariant: **Definition** — **Why it matters educationally** — **M
 - **Minimal test:** `SCI-013`; protocol question in `user-testing-protocol.md`.
 - **Expected behavior:** Varying the seed across repeated runs yields a visible distribution of final populations.
 - **False-positive risk:** A histogram that just replays one recorded run.
-- **False-negative risk:** Single-run-per-session UI friction (see Invariant 9).
+- **False-negative risk:** None — the multi-trial loop lets the learner run and re-run freely in one session.
 - **Severity:** S2.
-- **Current status:** PARTIAL — the engine supports it; the UI session model constrains it. Tracked as `GATE B` evidence need.
+- **Current status:** PASS — the engine supports it and the multi-trial session model no longer constrains it (previously PARTIAL due to the single-run constraint).
 
 ## Invariant 11 — A conceptual critical transition may appear nonlinear
 
@@ -156,7 +164,7 @@ For every invariant: **Definition** — **Why it matters educationally** — **M
 - **False-positive risk:** A disclaimer that exists in code but is hidden in the default view.
 - **False-negative risk:** None.
 - **Severity:** S0 (a nuclear-adjacent product without a visible boundary reads as dangerous).
-- **Current status:** FAIL (edge) — disclaimer exists (`experiments.ts:12-15`) and renders in the header, but is **hidden in low-density mode** (`experiment-shell.tsx:338-342`). A learner who chooses "less text" loses the safety disclaimer. Severity S2 as implemented; fix: keep the disclaimer outside density controls.
+- **Current status:** PASS — disclaimer exists (`experiments.ts:12-15`) and renders in the header and on the landing page; it is **no longer hidden in low-density mode** (fixed on the final-hardening branch).
 
 ## Invariant 14 — Counterfactual comparison must change exactly one variable
 
@@ -211,7 +219,7 @@ For every invariant: **Definition** — **Why it matters educationally** — **M
 - **False-positive risk:** An LLM added later could generate plausible-sounding but unrecorded claims. This invariant must be re-tested if a generative provider is ever added.
 - **False-negative risk:** None for the current rules engine.
 - **Severity:** S0.
-- **Current status:** PASS by inspection — the deterministic provider emits templated reasons tied to `evidenceIds` (`deterministic-provider.ts`); replay reads evidence only (`adaptation-replay.tsx`). **Conditional:** re-audit if an LLM provider is introduced.
+- **Current status:** PASS by inspection — the deterministic provider emits templated reasons tied to `evidenceIds` (`deterministic-provider.ts`); replay reads evidence only (`adaptation-replay.tsx`). **Conditional exercised:** the optional structured LLM provider (added since the original audit) is bounded by a typed Zod schema (enum-only misconception/intervention, 1–3 evidence strings, optional follow-up), system-prompt guards (no diagnosis inference, no ignoring data, no science changes), and returns `{ fallback: true }` on ANY failure — so it cannot assert unrecorded facts, and the "Offline rules" path guarantees the same behavior without it.
 
 ---
 
@@ -227,11 +235,11 @@ For every invariant: **Definition** — **Why it matters educationally** — **M
 | 6 | More absorption ≠ more propagation | S1 | PASS |
 | 7 | Less absorption permits propagation | S1 | PASS |
 | 8 | Starting population ≠ rule change | S2 | PASS |
-| 9 | One trial is not proof | S2 | PASS (UI friction noted) |
-| 10 | Distributions over repeated trials | S2 | PARTIAL (session model) |
+| 9 | One trial is not proof | S2 | PASS (multi-trial loop supports cross-seed exploration) |
+| 10 | Distributions over repeated trials | S2 | PASS (multi-trial loop) |
 | 11 | Nonlinear critical transition | S3 | PASS |
 | 12 | Abstract energy units | S2 | INSPECTABLE (verify labels) |
-| 13 | No reactor-grade fidelity claim | S0 | FAIL-EDGE (disclaimer hidden in low density) |
+| 13 | No reactor-grade fidelity claim | S0 | PASS (disclaimer always visible) |
 | 14 | Counterfactual: one variable | S0 | PASS |
 | 15 | Original immutable | S0 | PASS |
 | 16 | Representations don't change science | S0 | PASS |

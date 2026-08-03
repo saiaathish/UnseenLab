@@ -1,5 +1,16 @@
 # UnseenLab — Parallel Validation Pack
 
+> **RE-STAMPED on the final-hardening branch.** The pack was originally written against an
+> older snapshot of the product (single-trial session, no LLM/AI in the build, several
+> accessibility gaps). It has been corrected to match the current product: repeatable
+> multi-trial loop, topic-input homepage, optional structured LLM provider behind `/api/adapt`
+> with deterministic offline fallback, working text scale, OS reduced-motion support, focus-
+> trapped replay dialog, WAI-ARIA tabs, no per-frame aria-live spam, and the `feedbackTiming`
+> control removed. Each corrected file carries its own re-stamp note; stale statements that
+> remain inside corrected files are explicitly marked as superseded or historical. User-testing
+> claims are unchanged and honest: **no structured session has run; a real participant session
+> is still required, and nothing in this pack fabricates results.**
+
 Independent adversarial review, validation, and winning-evidence package for **UnseenLab**, the Track 1 ("AI for Learners Who Think Differently") hackathon entry. Produced by a parallel session that does **not** build or modify the product. This pack determines whether the implementation is scientifically coherent, technically real, accessible, safe, adaptively personalized, and demoable in three minutes — and whether it can win under the official rubric.
 
 ## Product under review
@@ -47,7 +58,7 @@ Every file distinguishes between:
 | **UNVERIFIED** | "UNVERIFIED" | Claimed or plausible but not yet evidenced. |
 | **NOT YET INSPECTABLE** | "NOT YET INSPECTABLE" | Item is designed-for or absent from the current build; cannot be assessed. |
 
-**Known audit limitation:** the pack reviews the build at commit `HEAD` of branch `audit/unseenlab-validation-pack` (worktree `UnseenLab-audit-worktree`). Unit/e2e test suites were reviewed conceptually, not executed, to respect parallel-session isolation. Vector files (JSON) are executable by a human or agent following `setup` steps; none of the pass/fail results have been stamped yet.
+**Known audit limitation:** the pack reviews the build at commit `HEAD` of branch `audit/unseenlab-validation-pack` (worktree `UnseenLab-audit-worktree`). Unit/e2e test suites were reviewed conceptually, not executed, to respect parallel-session isolation. Vector files (JSON) are executable by a human or agent following `setup` steps; none of the pass/fail results have been stamped yet. **Re-stamp history:** on the final-hardening branch the pack was corrected against the current product (see header note); the vector files remain unstamped, and the current suite numbers are 166 unit/component tests across 17 files and 12 Playwright e2e tests across 4 specs.
 
 ## File index
 

@@ -1,5 +1,12 @@
 # Evidence and Claims Register
 
+> **RE-STAMPED on the final-hardening branch.** The claims below were corrected to match the
+> current product: repeatable multi-trial loop, optional structured LLM provider behind
+> `/api/adapt` (deterministic offline fallback), working accessibility fixes (focus trap,
+> OS reduced motion, root-font-size text scale, WAI-ARIA tabs, no per-frame aria-live), the
+> removed `feedbackTiming` control, and truthful first-trial change evidence. The old
+> "single-run session constraint" and "no AI in the build" framings are obsolete.
+
 Single source of truth for what UnseenLab may and may not claim. Every claim used in the pitch, README, demo, or video must appear here with an approved wording. A claim may only move from UNVERIFIED to VERIFIED when the listed evidence exists.
 
 Status legend: **CONFIRMED (PROFILE)** = supported by the confirmed design-participant facts supplied for this product; **INSPECTED** = verified in source by this audit; **PARTIAL** = only part of the evidence exists; **UNVERIFIED** = no evidence yet; **NOT ALLOWED** = must never be claimed.
@@ -7,11 +14,10 @@ Status legend: **CONFIRMED (PROFILE)** = supported by the confirmed design-parti
 | Claim | Status | High-level note |
 |---|---|---|
 | CLAIM-01..05 | CONFIRMED (PROFILE) | Design-participant facts |
-| CLAIM-06, 09, 10, 11, 19 | INSPECTED | Verified in code |
-| CLAIM-08, 13 | PARTIAL | Real but with known gaps |
+| CLAIM-06, 09, 10, 11, 13, 19 | INSPECTED | Verified in code |
+| CLAIM-08, 14, 15, 16 | PARTIAL | Real but with known gaps |
 | CLAIM-07, 17, 18, 20 | UNVERIFIED | Require real user testing |
 | CLAIM-12 | UNVERIFIED | Design position, not evidence |
-| CLAIM-14, 15, 16 | PARTIAL | Defensible delta; needs demo proof |
 
 ---
 
@@ -58,10 +64,10 @@ Status legend: **CONFIRMED (PROFILE)** = supported by the confirmed design-parti
 ## CLAIM-06 — The simulation adapts
 
 - **Evidence required:** adaptation proposals that change visible experience from session evidence; adaptation test vectors ADAPT-001..026.
-- **Currently available:** deterministic rule provider with evidence-linked proposals (INSPECTED, `src/adaptation/deterministic-provider.ts`); tests; single-run session constraint limits multi-trial rules (see `implementation-inspection.md`).
+- **Currently available:** deterministic rule provider with evidence-linked proposals (INSPECTED, `src/adaptation/deterministic-provider.ts`); optional structured LLM provider behind the same interface (`src/adaptation/llm-provider.ts`); the repeatable multi-trial loop makes multi-trial rules reachable in a normal session (`e2e/multi-trial.spec.ts`); tests.
 - **Allowed wording:** "The lab proposes representation, pacing, and structure changes based on what the learner did — and the learner accepts, rejects, or modifies each one."
-- **Forbidden wording:** "AI-driven adaptation" (no AI present), "the system learns your style" (no learning).
-- **Status:** INSPECTED — adapts; the *AI* framing is not allowed (see CLAIM-13).
+- **Forbidden wording:** "AI-driven adaptation" without qualification (the default path is deterministic rules; AI interpretation is optional and labeled), "the system learns your style" (no learning).
+- **Status:** INSPECTED — adapts; AI framing is only allowed for the labeled, optional hosted path (see CLAIM-13).
 
 ## CLAIM-07 — Adaptation improved understanding
 
@@ -74,10 +80,10 @@ Status legend: **CONFIRMED (PROFILE)** = supported by the confirmed design-parti
 ## CLAIM-08 — The application is accessible
 
 - **Evidence required:** keyboard, focus, motion, screen-reader, visual, cognitive, and animation tests from `accessibility-audit.md` passing.
-- **Currently available:** strong basics (INSPECTED) + verified gaps: no OS `prefers-reduced-motion`, dialog focus trap missing, tab arrow navigation missing, aria-live spam while playing, `textScale` likely ineffective for rem-based text, dead `feedbackTiming` control.
-- **Allowed wording:** "Designed with accessibility controls: reduced motion, animation speed, low-density mode, high contrast, text scale, and full keyboard operation of the core flow."
+- **Currently available:** strong basics (INSPECTED) with the previously verified gaps now fixed: OS `prefers-reduced-motion` honored, replay-dialog focus trap + initial focus + restore, WAI-ARIA tabs with roving tabindex, no per-frame `aria-live` spam, text scale effective via root font-size, disclaimer always visible (density no longer hides it), and the dead `feedbackTiming` control removed. Manual verification (screen-reader pass, keyboard-only walkthrough) is still pending.
+- **Allowed wording:** "Designed with accessibility controls: reduced motion (including the OS preference), animation speed, low-density mode, high contrast, text scale, and full keyboard operation of the core flow."
 - **Forbidden wording:** "Fully WCAG 2.2 AA compliant", "accessible to all users".
-- **Status:** PARTIAL — fix the five verified gaps first.
+- **Status:** PARTIAL — fixes shipped and covered by tests; manual assistive-tech verification still pending.
 
 ## CLAIM-09 — The science is deterministic
 
@@ -90,16 +96,16 @@ Status legend: **CONFIRMED (PROFILE)** = supported by the confirmed design-parti
 ## CLAIM-10 — No API key is required
 
 - **Evidence required:** deploy to a public URL; verify clean-browser flow.
-- **Currently available:** INSPECTED — zero network calls in `src/`, no AI SDK, no env vars (`package.json` deps: next, react, react-dom, zod).
-- **Allowed wording:** "Runs fully in the browser — no account, no API key."
+- **Currently available:** INSPECTED — the core app runs fully offline with no key: deterministic rules, no server dependency. The optional structured LLM path requires `NEXT_PUBLIC_LLM_ENABLED=1` (build time) plus a server-side `LLM_API_KEY`, and is off by default. Runtime deps are now `next`, `react`, `react-dom`, `zod`, `gsap`, `three`.
+- **Allowed wording:** "Runs fully in the browser — no account, no API key required. An optional, labeled AI-interpretation layer can be enabled with a server-side key; without it everything runs on deterministic offline rules."
 - **Forbidden wording:** none specific.
 - **Status:** INSPECTED (architecture); VERIFY on the deployed URL.
 
 ## CLAIM-11 — Data remains local
 
-- **Evidence required:** network tab empty during use; export only on explicit button press; delete clears both localStorage keys.
-- **Currently available:** INSPECTED — `unseenlab.preferences.v1` + `unseenlab.evidence.v1` only; zod-validated reads; no analytics SDK; no fetch/axios anywhere in `src/`.
-- **Allowed wording:** "Everything stays in your browser. You can export your session as a file or clear it at any time."
+- **Evidence required:** network tab empty during use (with the hosted path disabled); export only on explicit button press; delete clears both localStorage keys.
+- **Currently available:** INSPECTED — `unseenlab.preferences.v1` + `unseenlab.evidence.v1` only; zod-validated reads; no analytics SDK; no fetch/axios in `src/` except the optional `POST /api/adapt` bridge, which is active only when the hosted path is enabled and sends only the typed, bounded session summary (never the learner's identity or free text verbatim), with every failure falling back locally.
+- **Allowed wording:** "Everything stays in your browser — except one optional, labeled AI-interpretation request when the hosted layer is enabled, which sends only a bounded summary and never personal identity. You can export your session as a file or clear it at any time."
 - **Forbidden wording:** "Private and secure" (no security claim tested), "anonymized cloud storage".
 - **Status:** INSPECTED.
 
@@ -114,10 +120,10 @@ Status legend: **CONFIRMED (PROFILE)** = supported by the confirmed design-parti
 ## CLAIM-13 — AI is used meaningfully
 
 - **Evidence required:** either (a) a real interpretation layer for free-text predictions with conservative abstention, or (b) re-framing: "adaptive engine" claims, no "AI" claims.
-- **Currently available:** deterministic rules engine + keyword fallback; NO AI/LLM dependency (INSPECTED).
-- **Allowed wording (today):** "A deterministic adaptive engine proposes representation, pacing, and structure changes from your session evidence — you keep control of every change."
-- **Forbidden wording (today):** "Our AI", "AI-powered", "machine learning", "the AI interprets your answers".
-- **Status:** PARTIAL — the product is meaningfully adaptive; the word "AI" is not yet earned. Highest-risk claim in the register.
+- **Currently available:** deterministic rules engine + keyword fallback (default), AND an implemented optional structured LLM provider behind `POST /api/adapt` — typed bounded payload, Zod-validated enum-only answer (misconception, intervention, confidence 0..1, 1–3 evidence strings, optional follow-up), system-prompt guards (no diagnosis inference, no science changes), server-side key only, ANY failure falls back to the deterministic rules, proposals tagged `source: "llm" | "rules"` shown as "AI interpretation" vs "Offline rules". Active only when `NEXT_PUBLIC_LLM_ENABLED=1` + server `LLM_API_KEY` (INSPECTED: `src/adaptation/llm-provider.ts`, `llm-client.ts`, `llm-schema.ts`, `src/app/api/adapt/route.ts`).
+- **Allowed wording (today):** "The lab interprets your prediction and behavior with a bounded evidence model. When enabled, a hosted model provides a labeled 'AI interpretation'; by default, deterministic offline rules provide the same explainable proposals, labeled 'Offline rules' — you keep control of every change."
+- **Forbidden wording:** "Our AI" without the label and the optionality, "machine learning", "the AI infers your diagnosis" (never — no diagnosis inference exists).
+- **Status:** INSPECTED — meaningful, bounded, labeled AI interpretation is implemented and optional; the default offline path is deterministic rules.
 
 ## CLAIM-14 — The product is different from PhET
 

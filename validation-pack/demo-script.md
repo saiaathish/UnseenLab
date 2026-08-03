@@ -1,5 +1,14 @@
 # UnseenLab — Demo Script (2:45 spoken)
 
+> **RE-STAMPED on the final-hardening branch.** This script was rewritten for the
+> current product: topic-input homepage, repeatable multi-trial loop (no reload),
+> optional structured LLM provider with deterministic fallback, and truthful
+> first-trial change evidence. Earlier versions of this script described a
+> single-trial session and a fixed three-card deterministic outcome; both are
+> obsolete. The script is now **intervention-agnostic** — it must not require the
+> hosted model (or the rules) to pick a specific intervention; any adaptation
+> offer with a plain-language reason is acceptable in the demo.
+
 **Purpose:** The exact, rehearsal-ready script for the Track 1 demo video (max 3 minutes).
 **Runtime:** 2:45 spoken + 15 seconds reserved for interaction latency = 3:00 wall clock.
 **Hard rule:** every claim below is demonstrable on screen. If it is not on screen, do not say it.
@@ -13,12 +22,10 @@
 - Every claim maps to a visible element. If you cannot point at the element, cut the claim.
 - Show first, explain second. The phrase "misconception taxonomy" never leaves your mouth on
   video; say "the lab's evidence rules" instead.
-- The demo is one session, one trial, from a clean state. The current build gates every run on a
-  prediction (`src/components/lab/experiment-shell.tsx:165-179`) and records a submitted
-  prediction against the last trial (`experiment-shell.tsx:132-163`) — a second trial in the
-  same session cannot be run without clearing the session (Research mode → "Clear local
-  session", confirm twice). The script below is built for exactly one trial. Do not improvise a
-  second run.
+- The demo is one session with **two trials** from a clean state, to show the loop: predict →
+  run → understand → update prediction → run another trial. The current build supports this
+  without a reload — every trial is appended to the evidence and the replay lists both.
+  Do not improvise a third run unless the first two are fast; two trials prove the loop.
 
 ---
 
@@ -27,29 +34,24 @@
 | Fact | Source |
 |---|---|
 | Same seed + same parameters → identical run (seeded PRNG, client-side) | `src/simulation/nuclear-chain-reaction.ts` (`createSeededRandom`) |
-| Adaptation can only change representation/pacing/preferences, never science | `src/domain/adaptation.ts:33-63` (`applyProposedChanges` touches preferences only) |
-| Adaptation is offline deterministic rules, not an LLM; no AI SDK in dependencies (next, react, react-dom, zod) | `src/adaptation/deterministic-provider.ts:22-31`; `package.json` |
-| Zero network calls; everything local; storage writes guarded by try/catch | `src/storage/session-storage.ts:32-42, 71-85` |
-| Counterfactual changes exactly one variable, keeps the same seed | `src/simulation/counterfactual.ts:10-20` |
-| Landing page: one lab "Available now", two "Planned" | `src/app/page.tsx:38-77` |
-| The demo smoke flow the product is tested against | `e2e/smoke.spec.ts:8-48` (predict → withdraw → run → ceiling → adapt → compare → replay) |
+| Adaptation can only change representation/pacing/preferences, never science | `src/domain/adaptation.ts` (`applyProposedChanges` touches preferences only) |
+| Adaptation is a typed provider: deterministic offline rules by default; an optional structured LLM provider behind `POST /api/adapt` when `NEXT_PUBLIC_LLM_ENABLED=1` + server `LLM_API_KEY` are set; every failure falls back to the rules | `src/adaptation/llm-provider.ts`, `src/adaptation/llm-client.ts`, `src/adaptation/llm-schema.ts`, `src/app/api/adapt/route.ts`, `src/adaptation/deterministic-provider.ts` |
+| Proposals are labeled "AI interpretation" vs "Offline rules" so the learner can always tell them apart | UI badges on the adaptation card |
+| The scientific core is fully client-side and offline; the only network call in the whole app is the optional `POST /api/adapt` (hosted path only) | `src/app/api/adapt/route.ts` |
+| Counterfactual changes exactly one variable, keeps the same seed | `src/simulation/counterfactual.ts` |
+| Homepage: topic input ("What topic do you need help with?") → supported topics route to the lab; unsupported topics get a pointer | `src/components/ui/topic-input-hero.tsx`, `src/lib/topic-routing.ts`, `src/app/page.tsx` |
+| The demo flow the product is tested against | `e2e/smoke.spec.ts` (one-trial core flow), `e2e/multi-trial.spec.ts` (three trials without a reload) |
 
-### Verified seeded outcomes (seed 42, startingNeutrons 3, density 0.9, absorption 0.25, duration 60)
+### Verified seeded reference (deterministic rules path; seed 42, startingNeutrons 3, density 0.9, absorption 0.25, duration 60)
 
 Run with **absorber 0.9 (default)** → `extinct` at step 7, final free neutrons 0, reactions 4.
 Run with **absorber 0.2** → `max_population` at step 28, final free neutrons **500**, reactions **1043**.
 Counterfactual absorber **0.2 → 0.9** (same seed) → final free neutrons **0**, reactions 4.
-**Do not use absorber 0.5**: with seed 42 it goes extinct (verified). The hero flow below uses 0.2.
+**Do not use absorber 0.5**: with seed 42 it goes extinct (verified). The hero trial below uses 0.2.
 
-### Adaptation cards that MUST appear after the hero trial (prediction contradicted, in order)
-
-1. `show_graph` — "The prediction and the result differed. Seeing the population on a graph can
-   show how it actually grew." (fires when the linear/nonlinear evidence is contradicted and no
-   graph was opened after the trial; `src/adaptation/deterministic-provider.ts:101-122`)
-2. `compare_trials` — "A side-by-side comparison of two runs that differ in only one variable can
-   show what actually caused the difference." (`deterministic-provider.ts:124-133`)
-3. `reduce_density` — "The reaction hit the safety ceiling, so the details were hidden. Lowering
-   the material density would let us see more of the curve." (`deterministic-provider.ts:180-193`)
+With the hosted model enabled, the deterministic seed facts stay identical (the model never
+touches simulation output); only the *interpretation* (the card's reason and the proposed
+intervention) may differ. Never promise a specific card — promise the loop.
 
 ---
 
@@ -66,46 +68,52 @@ Counterfactual absorber **0.2 → 0.9** (same seed) → final free neutrons **0*
 **Presenter note:** 0:00–0:20 is presenter-only. No product, no slides, no architecture. The
 design participant sentence must include the word "design participant" and must not imply data.
 
-### Segment 2 — Solution + pitch (0:20–0:35)
+### Segment 2 — Solution + pitch + topic input (0:20–0:35)
 
 | Time | On screen | Presenter says | Presenter does |
 |---|---|---|---|
-| 0:20–0:29 | UnseenLab landing page (`/`): title, one lab "Available now", two "Planned" cards | "This is UnseenLab. Verbatim pitch: 'UnseenLab lets students safely perform otherwise inaccessible STEM experiments while an adaptive AI engine changes how each experiment is represented, paced, and controlled according to the learner's demonstrated understanding.'" | Cut to the landing page at 0:20. The pitch is read slowly, one sentence, no ad-libs. |
-| 0:29–0:35 | Accessibility & display panel open: animation speed, reduced motion, representations | "Every one of those dials — speed, motion, representations — is a learner-controlled setting, not a profile the system invented. And let me be explicit: no diagnosis mode. The system never classifies the learner." | Click "Accessibility & display" in the lab header (`src/components/lab/experiment-shell.tsx:344-352`) and show the panel. Do not list every setting; sweep the panel once. |
+| 0:20–0:29 | UnseenLab landing page (`/`): topic input hero, "How it works", "Available lab" | "This is UnseenLab. Verbatim pitch: 'UnseenLab lets students safely perform otherwise inaccessible STEM experiments while an adaptive AI engine changes how each experiment is represented, paced, and controlled according to the learner's demonstrated understanding.'" | Cut to the landing page at 0:20. The pitch is read slowly, one sentence, no ad-libs. |
+| 0:29–0:35 | Topic input focused; typing "chain reaction" | "You tell the lab what you need help with — I'll type 'chain reaction' — and it routes me straight into the matching experiment." | Type in the topic input, press Enter; the page routes to the lab. Latency buffer: give the route one beat. |
 
-### Segment 3 — Live hero flow (0:35–1:35) — one trial, one session
+**Presenter note:** do not dwell on the unsupported-topic path in the video; it exists and is
+covered by tests, but the demo beats are the loop, not the router.
+
+### Segment 3 — Live hero flow, trial 1 (0:35–1:25)
 
 | Time | On screen | Presenter says | Presenter does |
 |---|---|---|---|
-| 0:35–0:40 | Landing page | "One lab is live today: a conceptual nuclear chain reaction. Let's go in." | Click "Enter the lab". Latency buffer: page is client-rendered; give it one beat. |
+| 0:35–0:40 | Lab page; "Accessibility & display" sweep | "Every dial — speed, motion, representations — is a learner-controlled setting, not a profile the system invented. And let me be explicit: no diagnosis mode. The system never classifies the learner." | Sweep the "Accessibility & display" panel once. Do not list every setting. |
 | 0:40–0:50 | "Predict first" panel with the goal: "Find out what happens to the reaction when you withdraw the absorber." | "The lab does not let you run before you predict. I think it gets slightly faster — I don't expect it to really take off." | Click radio "It gets slightly faster", set confidence 3, click "Submit prediction". Wait for the "Your prediction" card. |
-| 0:50–0:56 | Experiment variables: Absorber position 0.9 inserted | "The absorber rod is fully inserted at 0.9. I'm going to withdraw it." | Drag Absorber position to 0.2 (slider step is 0.1; 0.2 hits the ceiling with seed 42 — verified; 0.5 goes extinct, never use it). |
-| 0:56–1:10 | Canvas; then "Run trial" → Play → animation | "Run it. Same seed as always: 42. Play." | Click "Run trial". Click "Play" (the canvas never auto-plays — `src/components/lab/simulation-canvas.tsx:23-24`). Narrate nothing during the animation; let it run to the ceiling at step 28. |
-| 1:10–1:18 | Stop banner: "The simulation stopped at the safety ceiling: 500 free neutrons." | "It did not grow slightly faster. It grew so fast the simulation stopped at the safety ceiling — 500 free neutrons — and the steepest part of the curve is cut off." | Point at the stop banner (`simulation-canvas.tsx:74-97`). This is the friction beat: prediction vs result. |
-| 1:18–1:26 | "Suggested adaptation" card (`show_graph`) | "The lab checks my prediction against what happened, and it flags the mismatch. Listen to the reason: 'The prediction and the result differed. Seeing the population on a graph can show how it actually grew.' I accept." | Read the reason verbatim off the card. Click "Accept". The Graph tab opens automatically (`experiment-shell.tsx:264`). |
-| 1:26–1:35 | Graph view with "safety ceiling (500)" annotation; then Counterfactual Microscope | "Now the question is causal: what did the absorber actually do? In the Counterfactual Microscope I pick one variable — absorber position — and push it back to 0.9. Run comparison." | Click "Run comparison". Read the result block: "Changed exactly one variable: Absorber position 0.2 → 0.9" and the explanation — free neutrons 500 → 0, reactions 1043 → 4. |
+| 0:50–0:56 | Experiment variables: Absorber position 0.9 inserted | "The absorber rod is fully inserted at 0.9. I'm going to withdraw it — one variable, one change." | Drag Absorber position to 0.2 (slider step is 0.1; 0.2 hits the ceiling with seed 42 — verified; 0.5 goes extinct, never use it). |
+| 0:56–1:08 | Canvas; then "Run trial" → Play → animation | "Run it. Same seed as always: 42. Play." | Click "Run trial". Click "Play" (the canvas never auto-plays). Narrate nothing during the animation; let it run to the ceiling at step 28. |
+| 1:08–1:16 | Stop banner: "The simulation stopped at the safety ceiling: 500 free neutrons." | "It did not grow slightly faster. It grew so fast the simulation stopped at the safety ceiling — 500 free neutrons — and the steepest part of the curve is cut off." | Point at the stop banner. This is the friction beat: prediction vs result. |
+| 1:16–1:25 | "Suggested adaptation" card with its source badge | "The lab checks my prediction against what happened, and it flags the mismatch — read the reason aloud: [read the card's reason verbatim]. The badge tells me whether this is an AI interpretation or the offline rules; either way, I decide." | Read the reason verbatim off the card, then click "Accept". Accept whatever is offered — any intervention is fine; never promise a specific one. |
 
-**Presenter note — latency buffer:** the 0:35–1:35 window reserves ~10 seconds of slack. If
+**Presenter note — latency buffer:** the 0:35–1:25 window reserves ~10 seconds of slack. If
 anything lags, skip narration during the animation, not during the prediction or the adaptation
 read — those are the beats that matter.
 
-### Segment 4 — Winning edge (1:35–2:05)
+### Segment 4 — Understanding + the loop (1:25–2:00)
 
 | Time | On screen | Presenter says | Presenter does |
 |---|---|---|---|
-| 1:35–1:50 | Counterfactual comparison still visible | "That is the Counterfactual Microscope: changed exactly one variable, same randomness, same seed — any difference is caused by that one change. Same seed, same duration — the only difference between these two runs is that one absorber." | Keep the comparison on screen; point at the "Same randomness seed (42)" line. |
-| 1:50–2:05 | Adaptation Replay dialog, steps 5 and 6 | "And every suggestion is accountable. Here's the replay: my prediction, the friction the lab flagged, the adaptation it offered, and my decision — accepted. Every suggestion cites the evidence that triggered it, and you can reject it." | Click "Adaptation Replay" (header button), show step 5 "Possible conceptual friction — evidence suggests: contradicted" and step 6 "Adaptation offered … Your decision: Accepted". Close the dialog. |
+| 1:25–1:35 | Counterfactual Microscope result | "Now the question is causal: what did the absorber actually do? The Counterfactual Microscope changes exactly one variable — absorber position — same randomness, same seed. Any difference is caused by that one change." | Click "Run comparison" (absorber position 0.2 → 0.9). Point at the "Same randomness seed (42)" line and the delta (free neutrons 500 → 0). |
+| 1:35–1:45 | Updated-prediction prompt | "I now understand more than my first guess. I update my prediction: 'The neutron population may grow nonlinearly.' That updated prediction is what unlocks the next trial." | Submit the updated prediction with confidence 4. |
+| 1:45–2:00 | Second trial: change one variable, run | "And the lab lets me go again — no reload, no reset. I'll change one variable this time, run, and the evidence from both trials is kept." | Change one variable (e.g., material density), run the second trial, let the animation play briefly. Point at the per-trial evidence (e.g., "Trial 2"). |
 
-**Presenter note:** the Reject and Modify buttons exist on every card
-(`src/components/lab/adaptation-card.tsx:170-188`) and a rejected type is never re-offered in the
-session (`deterministic-provider.ts:39-43`). Do not click them in the demo; name them.
+**Presenter note:** do not narrate the second trial's outcome in detail — the loop is the point.
+If the second run feels slow, skip ahead by opening the Adaptation Replay (Segment 5).
 
-### Segment 5 — Technical proof (2:05–2:25)
+### Segment 5 — Winning edge + fallback proof (2:00–2:25)
 
 | Time | On screen | Presenter says | Presenter does |
 |---|---|---|---|
-| 2:05–2:15 | Back on the lab; hover the seed control | "Under the hood: a deterministic engine. Same seed, same parameters, same result — every time. That is what makes the counterfactual honest." | Click "Show advanced: randomness seed" (`src/components/lab/variable-controls.tsx:107-114`) to reveal seed 42. |
-| 2:15–2:25 | Adaptation card row (Accept/Reject/Modify) | "And the adaptation is deterministic adaptation — structured rules, not a language model. There is no AI SDK in this build. The adaptive engine can change how the lab is represented, paced, and controlled — it can never change the science. Everything runs on this laptop, zero network calls." | Point at the card buttons. Do not overclaim: say "adaptive engine" and "deterministic adaptation". |
+| 2:00–2:15 | Adaptation Replay dialog listing both trials | "And every suggestion is accountable. Here's the replay — both trials, in order: my predictions, the friction the lab flagged, the adaptation it offered, and my decision. Every suggestion cites the evidence that triggered it, and you can reject it." | Click "Adaptation Replay", show the multi-trial journey (both predictions and the accepted offer), close the dialog (focus returns to the trigger — the dialog traps focus). |
+| 2:15–2:25 | Adaptation card row with the source badge ("Offline rules" or "AI interpretation") | "And this is honest by construction: if the hosted model is off, unreachable, or wrong, the lab falls back to deterministic offline rules and labels the card 'Offline rules'. Same loop, same science, nothing breaks — the science itself never depends on a network." | Point at the badge on the card. If the demo runs without a key (default), the badge says "Offline rules" — say exactly that, on screen. |
+
+**Presenter note — fallback proof:** the single most important resilience beat. Practice it:
+with the hosted model enabled, kill the network (or use a bad key) and show the card still
+appears labeled "Offline rules". With no key at all, that is simply the default state.
 
 ### Segment 6 — Impact + closer (2:25–2:45)
 
@@ -129,17 +137,22 @@ Feedback-driven change: [CHANGE]
 ## Rehearsal checklist
 
 - [ ] Dry-run the full script 3 times with a 2:45 timer; spoken word count must fit the window.
-- [ ] Once, before recording, run the seeded trial at absorber 0.2 and confirm the stop banner
-      "safety ceiling: 500" and all three cards (show_graph, compare_trials, reduce_density) appear.
+- [ ] Once, before recording, run trial 1 at absorber 0.2 and confirm the stop banner
+      "safety ceiling: 500" appears and **at least one** adaptation card appears with its
+      reason and source badge (do not require a specific intervention).
+- [ ] Rehearse the updated-prediction → second-trial transition; confirm no reload happens and
+      the replay lists both trials.
+- [ ] Rehearse the fallback proof once: hosted model unreachable → card still appears with
+      "Offline rules" badge (see `demo-failure-script.md`, failure mode 7/10).
 - [ ] Before recording: open "Accessibility & display" and set animation speed to fastest
       (2x), reduced motion off. The preference persists; a full 29-step playback is ~13s at 2x.
-- [ ] Practice the two recoveries from `demo-failure-script.md` that can strike mid-recording:
+- [ ] Practice the recoveries from `demo-failure-script.md` that can strike mid-recording:
       animation freeze (use Step), missing card (never improvise; see failure mode 3).
 - [ ] Confirm the recorded hero flow backup file exists and plays (see backup checklist in
       `demo-failure-script.md`).
 - [ ] Confirm mic, recording software, screen-recording permission, and the 2:45 timer.
 - [ ] Rehearse the impact segment out loud — the placeholder framing line is the easiest to rush.
-- [ ] Time check: 0:20, 0:35, 1:35, 2:05, 2:25, 2:45 — if you are more than 5 seconds off any
+- [ ] Time check: 0:20, 0:35, 1:25, 2:00, 2:25, 2:45 — if you are more than 5 seconds off any
       marker, tighten the animation beat, never the prediction or adaptation beats.
 
 ---
@@ -152,16 +165,16 @@ Feedback-driven change: [CHANGE]
 | "clinically proven" / "proven to improve learning" | No study exists | "in active user testing" |
 | "we improved his grades" | Never measured | "the design participant told us interactivity mattered" |
 | "ADHD mode" / "ADHD profile" / "personalized for ADHD learners" | No diagnosis mode; would misrepresent the participant | "learner-controlled settings" |
-| "the model was trained on…" / "LLM" | No AI SDK in the build | "deterministic adaptation rules" |
+| "the model always picks this intervention" | Interventions vary (LLM vs rules); never promise a specific card | "the lab offers an explainable change — I decide" |
 | "studies show…" / "85% of…" / any number | Invented | the placeholder block, verbatim |
 | "the system knows what kind of learner you are" | Contradicts no-diagnosis design | "the system never classifies the learner" |
-| "sent to the cloud" / "our servers" | Zero network calls | "everything stays on this device" |
+| "everything runs without any network, period" | The optional hosted path calls `/api/adapt` when enabled | "the science never depends on a network; the AI interpretation is optional and labeled" |
 
 ---
 
 ## If asked to go deeper (1-minute appendix)
 
-**Hardest judge question: "Give me one case where your adaptation did materially better than a
+**Hardest judge question: "Give me one case where adaptation did materially better than a
 static simulation."**
 
 Answer with the contradicted-linear-prediction scenario (30–45 seconds, live in the app):
@@ -170,10 +183,10 @@ Answer with the contradicted-linear-prediction scenario (30–45 seconds, live i
 2. "The run is nonlinear — it hits the ceiling at 500. In a static simulation, the curve plays,
    nobody acknowledges the prediction, and the mismatch quietly disappears."
 3. "Here, the lab holds the prediction next to the outcome, records the concept evidence as
-   contradicted, and offers a change — the graph — with a plain-language reason tied to that
-   exact evidence. The learner accepts it or rejects it."
-4. "The material difference: the learner's wrong prediction becomes the teaching moment. The
-   learner is in the loop, decides what happens next, and the counterfactual then isolates the
+   contradicted, and offers a change — with a plain-language reason tied to that exact evidence
+   and a source badge, 'AI interpretation' or 'Offline rules'. The learner accepts it or rejects it."
+4. "Then the updated prediction unlocks a second trial, and the replay shows both trials — you
+   can watch the learner's reasoning change across the loop. The counterfactual isolates the
    one variable that caused it."
 
 Close: "We measured nothing yet — that is the case we are testing with our participant now."

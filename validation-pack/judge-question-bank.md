@@ -1,5 +1,13 @@
 # UnseenLab — Judge Question Bank (Validation Pack)
 
+> **RE-STAMPED on the final-hardening branch.** Answers were corrected for the current
+> product: the structured LLM provider is now implemented (optional, behind `/api/adapt`,
+> labeled, deterministic fallback), OS `prefers-reduced-motion` is honored, the replay dialog
+> traps focus, WAI-ARIA tabs are implemented, per-frame `aria-live` spam is gone, the
+> `feedbackTiming` control was removed, and the multi-trial loop is the demo flow. Items
+> marked **SUPERSEDED** below are historical. No user-testing results exist; every answer
+> stays honest about that.
+
 **Purpose:** 33 cross-examination questions a judge could ask after a demo, grouped by judge perspective, each with a strong product-specific answer, the required evidence to give that answer, the weak answer to avoid, and whether the team can answer today.
 
 **How to use:** Before the demo, the team should be able to answer every question with a citation (file:line) or artifact (session export, video timestamp, screenshot). During the demo, if a judge asks any question, answer with the Strong answer — never the Weak answer.
@@ -14,18 +22,18 @@
 
 **"Show one case where adaptation did something materially better than a static simulation."**
 
-**Strong answer (specific scenario, reproducible live):** The learner predicts the reaction "stays about the same" or "gets slightly faster" (structured answers `stays_the_same` / `slightly_faster`, src/domain/evidence.ts:17-32) for a trial with the absorber fully withdrawn. The run is classified `nonlinear` because it hits the hard ceiling — any run reaching MAX_POPULATION=500 is treated as nonlinear regardless of ratio (src/adaptation/misconception-taxonomy.ts:127-128, 223-234). The taxonomy marks LINEAR_VS_NONLINEAR_GROWTH as `contradicted` with evidenceIds [prediction.id, trial.id] (misconception-taxonomy.ts:229-234). The provider then fires, in fixed order (src/adaptation/deterministic-provider.ts:32-196):
-1. `show_graph` — because the prediction was contradicted and the learner never opened the graph (deterministic-provider.ts:101-122) — proposes adding the graph view;
-2. `compare_trials` — same contradicted evidence, proposes the one-variable side-by-side (deterministic-provider.ts:124-133);
-3. `reduce_density` — because the run hit the ceiling and no proposal was accepted yet (deterministic-provider.ts:180-193) — proposes informationDensity=low so the curve's tail is visible inside the caps.
+**Strong answer (specific scenario, reproducible live):** The learner predicts the reaction "stays about the same" or "gets slightly faster" (structured answers `stays_the_same` / `slightly_faster`, src/domain/evidence.ts) for a trial with the absorber fully withdrawn. The run is classified `nonlinear` because it hits the hard ceiling — any run reaching MAX_POPULATION=500 is treated as nonlinear regardless of ratio (src/adaptation/misconception-taxonomy.ts). The taxonomy marks LINEAR_VS_NONLINEAR_GROWTH as `contradicted` with evidenceIds [prediction.id, trial.id]. The provider then proposes changes (on the rules path, in fixed order: `show_graph` → `compare_trials` → `reduce_density`, src/adaptation/deterministic-provider.ts; on the hosted path, the same evidence yields a labeled "AI interpretation" card — never promise a specific intervention):
+1. `show_graph` — because the prediction was contradicted and the learner never opened the graph — proposes adding the graph view;
+2. `compare_trials` — same contradicted evidence, proposes the one-variable side-by-side;
+3. `reduce_density` — because the run hit the ceiling — proposes informationDensity=low so the curve's tail is visible inside the caps.
 
-A static simulation (PhET-style) shows the same ceiling animation to every learner and stops. UnseenLab converts the contradicted prediction plus ceiling-hit into: a graph of the actual growth shape, a one-variable comparison to attribute cause, and a density change that reveals the hidden tail — each with a plain-language reason and evidence IDs, each refusable (src/components/lab/adaptation-card.tsx:167-191). And because the whole chain is deterministic and seeded, the judge can watch it fire in the same order on any machine.
+A static simulation (PhET-style) shows the same ceiling animation to every learner and stops. UnseenLab converts the contradicted prediction plus ceiling-hit into: a graph of the actual growth shape, a one-variable comparison to attribute cause, and a density change that reveals the hidden tail — each with a plain-language reason and evidence IDs, each refusable (src/components/lab/adaptation-card.tsx). And the loop is repeatable: the updated prediction unlocks a second trial, and the replay shows both trials, so the judge can watch the reasoning change.
 
-**Required product evidence:** A recorded session trace (export JSON via research-mode.tsx:135-141 / src/storage/session-storage.ts:88-100) or an e2e screenshot showing the three proposals fired with their evidence IDs — and ideally the demo video timestamp. The current e2e smoke only asserts the "Suggested adaptation" header appears (e2e/smoke.spec.ts:31-33), not which proposal fired from which evidence.
+**Required product evidence:** A recorded session trace (export JSON via research-mode) or an e2e screenshot showing proposals fired with their evidence IDs — and ideally the demo video timestamp. The e2e suite covers the loop (`e2e/smoke.spec.ts`, `e2e/multi-trial.spec.ts`), including "only one /api/adapt request per trial".
 
 **Weak answer to avoid:** "We adapt the pace and content to each learner." (This names a category; it shows no mechanism, no evidence, and it is true of Lumina-style tools.)
 
-**Current status: PARTIAL** — the scenario can be demonstrated live today (deterministic rules, no network, no randomness surprises), but no recorded trace, screenshot, or video of it exists yet.
+**Current status: PARTIAL** — the scenario can be demonstrated live today (deterministic rules path, no network), but no recorded trace, screenshot, or video of it exists yet.
 
 ---
 
@@ -72,17 +80,17 @@ A static simulation (PhET-style) shows the same ceiling animation to every learn
 
 ### JUDGE-06. Can the learner operate it independently?
 - **Question:** Could a learner use this alone, no teacher, no developer?
-- **Strong answer:** By construction yes — no account, no diagnosis disclosure, no teacher configuration, no API key (README.md:60, 73; package.json:15-20; zero network calls in src/), anonymous local persistence (src/storage/session-storage.ts:12-15), and the full flow is on one page (predict → run → adapt → compare → replay, src/app/lab/nuclear-chain-reaction/page.tsx:6-8). What is UNVERIFIED: no live URL exists and no independent-use test has been run (README.md:121).
+- **Strong answer:** By construction yes — no account, no diagnosis disclosure, no teacher configuration, no API key required for the core (README; deps are next/react/react-dom/zod/gsap/three; the only network call in the app is the optional `POST /api/adapt` when the hosted path is enabled, and it falls back to deterministic rules), anonymous local persistence (src/storage/session-storage.ts), and the full flow is on one page (predict → run → adapt → compare → replay → updated prediction → another trial, src/app/lab/nuclear-chain-reaction/page.tsx). What is UNVERIFIED: no live URL exists and no independent-use test has been run.
 - **Required product evidence:** A public URL plus one unsupervised session by the participant.
 - **Weak answer to avoid:** "It works on my machine."
 - **Current status: PARTIAL.**
 
 ### JUDGE-07. What happens with reduced motion at the OS level?
 - **Question:** I have Reduce Motion on in my OS. Does your app respect it automatically?
-- **Strong answer:** Not yet — and we can point to the exact gap: reduced-motion is only handled via the app's own toggle (`html[data-reduced-motion="true"]` rule in src/app/globals.css:38-44, set from the preference in experiment-shell.tsx:99-105); there is no `@media (prefers-reduced-motion: reduce)` anywhere in globals.css. Once the toggle is on, motion is thoroughly suppressed: no CSS animation/transition (globals.css:39-44), static frames with pulse glyphs replaced by static marks (src/components/lab/simulation-canvas.tsx:311-335), slower frame pacing (simulation-canvas.tsx:33-37). The OS-level hookup is a documented remediation (~1-2 h).
-- **Required product evidence:** None yet; this answer is the honest gap statement.
-- **Weak answer to avoid:** "Yes, we fully support reduced motion." (A judge toggles the OS setting and watches the pulses continue.)
-- **Current status: YES** (we can answer accurately — the answer is that the OS-level behavior is a known gap).
+- **Strong answer:** Yes — the app now honors the OS `prefers-reduced-motion` preference on load (in addition to the in-app toggle; the manual override wins if the learner changes it). Once reduced motion is active, motion is thoroughly suppressed: no CSS animation/transition, static frames with pulse glyphs replaced by static marks (src/components/lab/simulation-canvas.tsx), slower frame pacing, and the adaptation engine never proposes `slow_animation` under reduced motion.
+- **Required product evidence:** A screen recording with OS Reduce Motion on at load; the e2e keyboard spec covers reduced-motion behavior.
+- **Weak answer to avoid:** "Yes, we fully support reduced motion" without the OS-level hook — the hook now exists, so say it plainly and show it.
+- **Current status: YES** (implemented; a screenshot/video of the OS-level behavior is trivial to produce).
 
 ### JUDGE-08. Is animation optional?
 - **Question:** Can a learner use the lab with animation effectively off?
@@ -100,7 +108,7 @@ A static simulation (PhET-style) shows the same ceiling animation to every learn
 
 ### JUDGE-10. Does the system stereotype?
 - **Question:** Could this system label me as a type of learner, or leak a label?
-- **Strong answer:** No. The taxonomy only ever states whether learner behavior is consistent or in tension with a scientific idea — `supported/partial/uncertain/contradicted` — and "contradiction ... is a normal part of exploring a model, not a failing on the learner's part" (src/adaptation/misconception-taxonomy.ts:16-22). No diagnosis is inferred anywhere (misconception-taxonomy.ts:16; README.md:17). Everything is local: no account, no server, no telemetry (src/storage/session-storage.ts:12-15; zero network calls in src/); the only export is learner-initiated and anonymous (research-mode.tsx:127-140, labeled "Not a statistically validated learning study").
+- **Strong answer:** No. The taxonomy only ever states whether learner behavior is consistent or in tension with a scientific idea — `supported/partial/uncertain/contradicted` — and "contradiction ... is a normal part of exploring a model, not a failing on the learner's part" (src/adaptation/misconception-taxonomy.ts). No diagnosis is inferred anywhere — including the hosted path, whose system prompt forbids diagnosis inference and whose output schema has no diagnosis field. Everything is local by default: no account, no server, no telemetry (src/storage/session-storage.ts); the only network activity is the optional, labeled `/api/adapt` call when the hosted path is enabled, and the only export is learner-initiated and anonymous (labeled "Not a statistically validated learning study").
 - **Required product evidence:** None beyond code; a judge can verify by running with the network panel open.
 - **Weak answer to avoid:** "We classify learners by learning style."
 - **Current status: YES.**
@@ -111,10 +119,10 @@ A static simulation (PhET-style) shows the same ceiling animation to every learn
 
 ### JUDGE-11. What does the AI actually do?
 - **Question:** Point at the AI and tell me exactly what it does.
-- **Strong answer:** The honest answer: the adaptation layer is a deterministic rules engine, not an ML model — "bounded rules + conservative keyword classification" (README.md:114). What it does: classifies prediction-vs-outcome evidence against a 5-concept taxonomy (src/adaptation/misconception-taxonomy.ts:28-34, 210-385), applies 7 rule types in fixed order with per-proposal evidence IDs (src/adaptation/deterministic-provider.ts:19, 74-195), proposes representation/pacing/structure changes only (never science: src/domain/adaptation.ts:9-12), and respects rejection memory (deterministic-provider.ts:39-43). The provider interface is AI-ready for a hosted LLM without touching the rest of the system (README.md:44; src/domain/adaptation.ts:21-27). We do not claim this is AI today.
-- **Required product evidence:** A trace of one propose() call with its inputs and outputs.
-- **Weak answer to avoid:** "It's an AI that understands how the student learns." (There is no such code.)
-- **Current status: YES** (the accurate answer includes the disclaimer).
+- **Strong answer:** Two honest layers. Default: a deterministic rules engine — classifies prediction-vs-outcome evidence against a 5-concept taxonomy (src/adaptation/misconception-taxonomy.ts), applies rule types in fixed order with per-proposal evidence IDs (src/adaptation/deterministic-provider.ts), proposes representation/pacing/structure changes only (never science: src/domain/adaptation.ts), and respects rejection memory. Optional (enabled at build time with `NEXT_PUBLIC_LLM_ENABLED=1` + server `LLM_API_KEY`): a structured LLM provider behind `POST /api/adapt` — typed bounded payload in, Zod-validated enum-only answer out, system-prompt guards, fallback to the rules on ANY failure, proposals labeled "AI interpretation" vs "Offline rules" (src/adaptation/llm-provider.ts, llm-client.ts, llm-schema.ts; src/app/api/adapt/route.ts). We never claim more than the label on the card.
+- **Required product evidence:** A trace of one propose() call with its inputs and outputs (rules path), or one labeled "AI interpretation" card (hosted path).
+- **Weak answer to avoid:** "It's an AI that understands how the student learns." (No such code exists on either path.)
+- **Current status: YES** (the accurate answer includes both layers and the label).
 
 ### JUDGE-12. What remains if you remove the AI?
 - **Question:** Strip the AI out. What's left?
@@ -139,23 +147,23 @@ A static simulation (PhET-style) shows the same ceiling animation to every learn
 
 ### JUDGE-15. What happens when interpretation confidence is low?
 - **Question:** When the engine is unsure, what does it do?
-- **Strong answer:** It says nothing rather than guessing. The taxonomy only emits a concept when there is signal, and unclassified cases are omitted entirely ("a concept is omitted when there is nothing to say", src/adaptation/misconception-taxonomy.ts:207-209); free text without matching keywords yields `uncertain` with no evidenceIds (misconception-taxonomy.ts:282-284); structured answers outside the covered cases are left unclassified (misconception-taxonomy.ts:242-243); the provider proposes nothing unless a rule's preconditions hold (deterministic-provider.ts:40-61); and if the provider itself throws, the lab still runs trials normally with a notice (experiment-shell.tsx:210-220, 229-233).
+- **Strong answer:** It says nothing rather than guessing. The taxonomy only emits a concept when there is signal, and unclassified cases are omitted entirely; free text without matching keywords yields `uncertain` with no evidenceIds; structured answers outside the covered cases are left unclassified; the provider proposes nothing unless a rule's preconditions hold; and if the provider itself throws, the lab still runs trials normally with a notice. On the hosted path, the same conservative behavior is enforced mechanically: a low-confidence or schema-invalid answer from the model is discarded and the deterministic rules run, labeled "Offline rules".
 - **Required product evidence:** A session where a free-text prediction produces no proposals (or an `uncertain` replay entry).
-- **Weak answer to avoid:** "It falls back to the LLM." (There is no LLM.)
+- **Weak answer to avoid:** "It falls back to the LLM." (The fallback is the other way: the model falls back to the deterministic rules, which stay conservative.)
 - **Current status: YES.**
 
 ### JUDGE-16. How is adaptation evidence recorded?
 - **Question:** Where does the evidence trail live, and can I inspect it?
-- **Strong answer:** In the anonymous local session: predictions, trials, representation events, proposals with decisions, concept evidence (src/domain/evidence.ts:117-131), persisted Zod-validated to localStorage (src/storage/session-storage.ts:44-86), exportable as JSON with a label stating it is "not a statistically validated learning study" (session-storage.ts:88-100; research-mode.tsx:18-19), and rendered back to the learner as the Adaptation Replay (adaptation-replay.tsx:31-229).
+- **Strong answer:** In the anonymous local session: predictions, trials, representation events, proposals with decisions, concept evidence (src/domain/evidence.ts), persisted Zod-validated to localStorage (src/storage/session-storage.ts), exportable as JSON with a label stating it is "not a statistically validated learning study", and rendered back to the learner as the Adaptation Replay (src/components/lab/adaptation-replay.tsx) — which now lists every trial in a multi-trial session.
 - **Required product evidence:** The exported JSON from any live session.
 - **Weak answer to avoid:** "It's in the cloud, we can pull it." (There is no cloud.)
 - **Current status: YES.**
 
 ### JUDGE-17. Why is there no LLM in your dependencies?
-- **Question:** Your pitch says AI, but package.json has four dependencies. Explain.
-- **Strong answer:** Deliberate and documented: "The adaptation provider is deterministic and offline... A structured LLM provider is designed-for but not implemented" (README.md:114, 44). Reasons: (1) zero-network, zero-account privacy posture — nothing leaves the browser (README.md:60, 73); (2) determinism — the same input must produce the same proposal so the science stays judgeable and reproducible (src/domain/adaptation.ts:21-27; README.md:45); (3) hackathon scope — one lab, no server (README.md:116). The interface is AI-ready (src/domain/adaptation.ts:21-27), and we present the product as an adaptive rules engine, not an LLM app.
+- **Question:** Your pitch says AI, but package.json has six dependencies. Explain.
+- **Strong answer:** Deliberate and documented. There is no bundled AI/LLM SDK — deps are next, react, react-dom, zod, gsap, three — because the AI layer is a bounded, optional server call: when enabled (`NEXT_PUBLIC_LLM_ENABLED=1` + server `LLM_API_KEY`), the server bridge `POST /api/adapt` calls an OpenAI-compatible chat completions API, validates the typed answer, and returns either the structured result or `{ fallback: true }`; the client bundle contains no model code and the key never leaves the server. Default posture stays zero-network and deterministic (the same input must produce the same proposal so the science stays judgeable and reproducible), and the product is presented as a deterministic adaptive engine with an optional, labeled AI-interpretation layer.
 - **Required product evidence:** None — this is the honesty answer.
-- **Weak answer to avoid:** "We use an LLM under the hood, it's just bundled." (Verifiably false.)
+- **Weak answer to avoid:** "We use an LLM under the hood, it's just bundled." (Verifiably false — it is not bundled, it is an optional server call.)
 - **Current status: YES.**
 
 ---
@@ -263,16 +271,16 @@ A static simulation (PhET-style) shows the same ceiling animation to every learn
 
 ### JUDGE-31. Does adaptation feel surveillant?
 - **Question:** The app records everything. Does the learner feel watched?
-- **Strong answer:** Everything is recorded only in the learner's own browser: anonymous, local, Zod-validated (src/storage/session-storage.ts:12-15, 44-86); zero network calls (no fetch/XHR/beacon/EventSource in src/; deps are next/react/react-dom/zod, package.json:15-20); no account, no telemetry (README.md:60, 73); the record is visible back to the learner as the Adaptation Replay (adaptation-replay.tsx:31-229); data leaves the device only if the learner clicks Export, with a label on the file (research-mode.tsx:127-140; session-storage.ts:88-100); and Clear Session exists with a confirm (research-mode.tsx:142-159). The research-mode UI states this explicitly ("Nothing is transmitted externally", research-mode.tsx:130-133).
-- **Required product evidence:** A network-panel screenshot showing zero requests during a full session.
+- **Strong answer:** Everything is recorded only in the learner's own browser: anonymous, local, Zod-validated (src/storage/session-storage.ts). The default posture is zero network activity; the ONLY exception is the optional, labeled `POST /api/adapt` when the hosted path is enabled, which sends a bounded typed session summary (never identity, never free text verbatim) and falls back locally on any failure. No account, no telemetry; the record is visible back to the learner as the Adaptation Replay; data leaves the device otherwise only if the learner clicks Export, with a label on the file; and Clear Session exists with a confirm.
+- **Required product evidence:** A network-panel screenshot showing zero requests during a full session (hosted path off) or exactly the one labeled `/api/adapt` request (hosted path on).
 - **Weak answer to avoid:** "Data is anonymized in the cloud." (There is no cloud.)
 - **Current status: YES.**
 
 ### JUDGE-32. What data is collected, and where does it live?
 - **Question:** Exactly what data, stored where, and who can access it?
-- **Strong answer:** Two localStorage keys (`unseenlab.preferences.v1`, `unseenlab.evidence.v1`, src/storage/session-storage.ts:17-18): preferences (learner.ts:31-44) and evidence (predictions, trials incl. full snapshots, representation events, proposals+decisions, concept evidence — src/domain/evidence.ts:117-131). It lives on the learner's device; no server, no database, no third party (README.md:73, 116). Access: only the learner (browser) and anyone they send the optional JSON export to (downloadSessionJson, session-storage.ts:112-121). Free-text research answers are NOT persisted in this commit (README.md:115; research-mode.tsx:25-26 — component state only).
+- **Strong answer:** Two localStorage keys (`unseenlab.preferences.v1`, `unseenlab.evidence.v1`, src/storage/session-storage.ts): preferences (learner.ts) and evidence (predictions, trials incl. full snapshots, representation events, proposals+decisions, concept evidence — src/domain/evidence.ts). It lives on the learner's device; no server, no database, no third party in the default posture. Access: only the learner (browser) and anyone they send the optional JSON export to. If the hosted path is enabled, the server bridge additionally receives the bounded typed payload (structured prediction, confidence, trial summary, behavior counts — no identity) and its telemetry logs only model, fallback reason, and elapsed ms. Free-text research answers are NOT persisted in this commit (component state only).
 - **Required product evidence:** The exported JSON structure from a live session.
-- **Weak answer to avoid:** "We only collect what's needed for the AI." (No AI collects anything.)
+- **Weak answer to avoid:** "We only collect what's needed for the AI." (In the default posture no AI collects anything.)
 - **Current status: YES.**
 
 ### JUDGE-33. What happens if the learner rejects everything?
