@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+:root {
+  --background: #101418;
+  --surface: #161b21;
+  --surface-raised: #1c222a;
+  --foreground: #e7ecf1;
+  --muted: #9aa7b4;
+  --border: #2a333d;
+  --accent: #2dd4bf;
+  --accent-strong: #14b8a6;
+  --accent-soft: rgba(45, 212, 191, 0.14);
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --info: #60a5fa;
+  --focus: #22d3ee;
+  --ok: #4ade80;
+}
+
+/* High-contrast option: near-black on white with strong borders. */
+body.high-contrast {
+  --background: #ffffff;
+  --surface: #ffffff;
+  --surface-raised: #f2f4f6;
+  --foreground: #0a0a0a;
+  --muted: #333333;
+  --border: #111111;
+  --accent: #0f766e;
+  --accent-strong: #0f766e;
+  --accent-soft: #ccfbf1;
+  --warn: #92400e;
+  --danger: #b91c1c;
+  --info: #1d4ed8;
+  --focus: #0d47a1;
+  --ok: #15803d;
+}
+
+/* Reduced motion: strip all CSS transitions/animations. */
+html[data-reduced-motion="true"] *,
+html[data-reduced-motion="true"] *::before,
+html[data-reduced-motion="true"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-focus: var(--focus);
+  --color-ok: var(--ok);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Neutron pulse keyframes are opt-in only (reduced motion disables them
+   via the html[data-reduced-motion] rule above). */
+@keyframes lab-pulse {
+  0% {
+    opacity: 0.9;
+    r: 3;
+  }
+  100% {
+    opacity: 0;
+    r: 14;
+  }
+}
+
+.lab-pulse {
+  animation: lab-pulse 0.8s ease-out forwards;
+}

@@ -1,0 +1,543 @@
+{
+  "schema_version": "1.0",
+  "simulation": "conceptual_nuclear_chain_reaction",
+  "disclaimer": "Educational, fictionalized, dimensionless model. Not a reactor simulator. Not suitable for engineering or safety decisions.",
+  "subject_model": "Each vector declares a subject. Exposed result values: run -> {params, final:{freeNeutrons,absorbedNeutrons,escapedNeutrons,reactionEvents,cumulativeEnergyUnits}, snapshots:[{step,freeNeutrons,absorbedNeutrons,escapedNeutrons,reactionEvents,cumulativeEnergyUnits}], stopReason}; multi -> {r1..rn} one per seed; pair_same -> {a,b}; aggregate_pair -> {a,b, seeds}; counterfactual -> {original, counterfactual, changedVariable}; schema -> {valid, error}. Operators: equals, not_equals, gte, lte, gt, lt, in_range, all_fields_gte_zero, identical_to, differs_from, length_lte, one_of, all_of.",
+  "operators": {
+    "equals": "extracted value strictly equals value",
+    "not_equals": "extracted value differs from value",
+    "gte": "extracted value >= value",
+    "lte": "extracted value <= value",
+    "gt": "extracted value > value",
+    "lt": "extracted value < value",
+    "in_range": "value is [min,max] inclusive",
+    "all_fields_gte_zero": "every numeric field of the target object is >= 0",
+    "identical_to": "target object deep-equals the object at the reference path",
+    "differs_from": "target object deep-differs from the object at the reference path",
+    "length_lte": "array length <= value",
+    "one_of": "extracted value is one of the listed values",
+    "all_of": "every listed path satisfies the nested assertion"
+  },
+  "calibration_note": "Vectors flagged calibration_required=true are stochastic: seed values may need to be adjusted once on the real engine so the relational assertion holds robustly. The invariant they guard is mandatory; the specific seeds are not. Vectors without the flag must hold for any seed.",
+  "vectors": [
+    {
+      "id": "SCI-001",
+      "title": "Zero-neutron no-reaction case",
+      "subject": {
+        "type": "run",
+        "params": { "absorberPosition": 0.5, "startingNeutrons": 0, "materialDensity": 0.5, "absorptionProbability": 0.5, "durationSteps": 100, "seed": 1234 }
+      },
+      "assertions": [
+        { "path": "final.reactionEvents", "operator": "equals", "value": 0 },
+        { "path": "final.freeNeutrons", "operator": "equals", "value": 0 },
+        { "path": "final.cumulativeEnergyUnits", "operator": "equals", "value": 0 },
+        { "path": "stopReason", "operator": "equals", "value": "extinct" },
+        { "path": "snapshots", "operator": "length_lte", "value": 2 }
+      ],
+      "severity": "S0",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": false,
+      "notes": "Engine must be called directly with startingNeutrons=0 (UI slider min is 1)."
+    },
+    {
+      "id": "SCI-002",
+      "title": "Zero-neutron no-reaction case across multiple seeds",
+      "subject": {
+        "type": "multi",
+        "params": { "absorberPosition": 0.5, "startingNeutrons": 0, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 1 },
+        "seeds": [1, 2, 3, 4, 5]
+      },
+      "assertions": [
+        { "path": "r1.final.reactionEvents", "operator": "equals", "value": 0 },
+        { "path": "r2.final.reactionEvents", "operator": "equals", "value": 0 },
+        { "path": "r3.final.reactionEvents", "operator": "equals", "value": 0 },
+        { "path": "r4.final.reactionEvents", "operator": "equals", "value": 0 },
+        { "path": "r5.final.reactionEvents", "operator": "equals", "value": 0 },
+        { "path": "r1.stopReason", "operator": "equals", "value": "extinct" }
+      ],
+      "severity": "S0",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": false,
+      "notes": "Zero-population behavior must be seed-independent."
+    },
+    {
+      "id": "SCI-003",
+      "title": "Seed reproducibility: identical parameters + seed yield identical full history",
+      "subject": {
+        "type": "pair_same",
+        "params": { "absorberPosition": 0.5, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 }
+      },
+      "assertions": [
+        { "path": "b.snapshots", "operator": "identical_to", "value": "a.snapshots" },
+        { "path": "b.stopReason", "operator": "equals", "value": "a.stopReason" },
+        { "path": "b.final.reactionEvents", "operator": "equals", "value": "a.final.reactionEvents" }
+      ],
+      "severity": "S0",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": false,
+      "notes": "Compare every snapshot, not just final values."
+    },
+    {
+      "id": "SCI-004",
+      "title": "Seed variation produces different outcomes",
+      "subject": {
+        "type": "pair_same",
+        "params": { "absorberPosition": 0.5, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 },
+        "second_seed": 43
+      },
+      "assertions": [
+        { "path": "b.snapshots", "operator": "differs_from", "value": "a.snapshots" }
+      ],
+      "severity": "S3",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": true,
+      "notes": "Stochastic: if seeds 42/43 coincide, try consecutive seeds until divergence. Guards against a hidden global RNG ignoring the seed."
+    },
+    {
+      "id": "SCI-005",
+      "title": "Parameter lower bounds are clamped",
+      "subject": {
+        "type": "run",
+        "params": { "absorberPosition": -5, "startingNeutrons": -3, "materialDensity": -1, "absorptionProbability": -2, "durationSteps": 1, "seed": -7 }
+      },
+      "assertions": [
+        { "path": "params.absorberPosition", "operator": "equals", "value": 0 },
+        { "path": "params.startingNeutrons", "operator": "gte", "value": 0 },
+        { "path": "params.materialDensity", "operator": "equals", "value": 0.1 },
+        { "path": "params.absorptionProbability", "operator": "equals", "value": 0.01 },
+        { "path": "params.durationSteps", "operator": "equals", "value": 10 },
+        { "path": "params.seed", "operator": "equals", "value": 0 },
+        { "path": "final.freeNeutrons", "operator": "gte", "value": 0 },
+        { "path": "final.reactionEvents", "operator": "gte", "value": 0 }
+      ],
+      "severity": "S1",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": false,
+      "notes": "Engine-level clampParameters must keep every value in the configured safe range (experiments.ts:188-212)."
+    },
+    {
+      "id": "SCI-006",
+      "title": "Parameter upper bounds are clamped",
+      "subject": {
+        "type": "run",
+        "params": { "absorberPosition": 99, "startingNeutrons": 500, "materialDensity": 5, "absorptionProbability": 0.99, "durationSteps": 1000000000, "seed": 1000000000000 }
+      },
+      "assertions": [
+        { "path": "params.absorberPosition", "operator": "equals", "value": 1 },
+        { "path": "params.startingNeutrons", "operator": "equals", "value": 10 },
+        { "path": "params.materialDensity", "operator": "equals", "value": 1 },
+        { "path": "params.absorptionProbability", "operator": "equals", "value": 0.6 },
+        { "path": "params.durationSteps", "operator": "equals", "value": 120 },
+        { "path": "params.seed", "operator": "equals", "value": 1000000000 },
+        { "path": "snapshots", "operator": "length_lte", "value": 121 }
+      ],
+      "severity": "S1",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": false,
+      "notes": "Also guards against CPU-burning runs from hostile inputs."
+    },
+    {
+      "id": "SCI-007",
+      "title": "Nonnegative state across many seeds and full duration",
+      "subject": {
+        "type": "multi",
+        "params": { "absorberPosition": 0.3, "startingNeutrons": 8, "materialDensity": 0.9, "absorptionProbability": 0.2, "durationSteps": 120, "seed": 1 },
+        "seeds": [1, 7, 42, 99, 1234, 777, 2024, 31337]
+      },
+      "assertions": [
+        { "path": "r1.snapshots", "operator": "all_of", "value": [ { "path": ".", "operator": "all_fields_gte_zero", "value": null } ] },
+        { "path": "r2.snapshots", "operator": "all_of", "value": [ { "path": ".", "operator": "all_fields_gte_zero", "value": null } ] },
+        { "path": "r3.snapshots", "operator": "all_of", "value": [ { "path": ".", "operator": "all_fields_gte_zero", "value": null } ] },
+        { "path": "r4.snapshots", "operator": "all_of", "value": [ { "path": ".", "operator": "all_fields_gte_zero", "value": null } ] },
+        { "path": "r5.snapshots", "operator": "all_of", "value": [ { "path": ".", "operator": "all_fields_gte_zero", "value": null } ] },
+        { "path": "r6.snapshots", "operator": "all_of", "value": [ { "path": ".", "operator": "all_fields_gte_zero", "value": null } ] },
+        { "path": "r7.snapshots", "operator": "all_of", "value": [ { "path": ".", "operator": "all_fields_gte_zero", "value": null } ] },
+        { "path": "r8.snapshots", "operator": "all_of", "value": [ { "path": ".", "operator": "all_fields_gte_zero", "value": null } ] }
+      ],
+      "severity": "S0",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": false,
+      "notes": "Check every snapshot, not only the final one. freeNeutrons must also be integer."
+    },
+    {
+      "id": "SCI-008",
+      "title": "Step termination: run ends at the configured step cap",
+      "subject": {
+        "type": "run",
+        "params": { "absorberPosition": 0.6, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 120, "seed": 42 }
+      },
+      "assertions": [
+        { "path": "snapshots", "operator": "length_lte", "value": 121 },
+        { "path": "stopReason", "operator": "one_of", "value": ["completed", "max_population", "extinct"] },
+        { "path": "snapshots", "operator": "length_lte", "value": "durationSteps_plus_one" }
+      ],
+      "severity": "S1",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": false,
+      "notes": "If stopReason is 'completed', the last snapshot step must equal durationSteps."
+    },
+    {
+      "id": "SCI-009",
+      "title": "Population termination: hard cap is never exceeded",
+      "subject": {
+        "type": "run",
+        "params": { "absorberPosition": 0.2, "startingNeutrons": 10, "materialDensity": 1, "absorptionProbability": 0.01, "durationSteps": 120, "seed": 42 }
+      },
+      "assertions": [
+        { "path": "final.freeNeutrons", "operator": "lte", "value": 500 },
+        { "path": "final.reactionEvents", "operator": "lte", "value": 1000 },
+        { "path": "stopReason", "operator": "one_of", "value": ["max_population", "completed"] },
+        { "path": "final.freeNeutrons", "operator": "gte", "value": 0 }
+      ],
+      "severity": "S0",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": true,
+      "notes": "Expect max_population with the ceiling snapshot exactly 500 for this configuration; calibrate seed if it does not blow up."
+    },
+    {
+      "id": "SCI-010",
+      "title": "Absorption comparison: more absorber never increases propagation",
+      "subject": {
+        "type": "aggregate_pair",
+        "a": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 1 },
+        "b": { "absorberPosition": 0.3, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 1 },
+        "seeds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+      },
+      "assertions": [
+        { "path": "b.aggregate.reactionEvents", "operator": "gte", "value": "a.aggregate.reactionEvents" },
+        { "path": "b.aggregate.finalFreeNeutrons", "operator": "gte", "value": "a.aggregate.finalFreeNeutrons" }
+      ],
+      "severity": "S1",
+      "rubric_axis": "Scientific Behavior",
+      "calibration_required": true,
+      "notes": "Single-seed comparisons can invert due to random-stream re-consumption; aggregate over seeds. Same seeds applied to both configurations."
+    },
+    {
+      "id": "SCI-011",
+      "title": "Low-absorption comparison: lower absorption permits greater propagation",
+      "subject": {
+        "type": "aggregate_pair",
+        "a": { "absorberPosition": 0.5, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.6, "durationSteps": 60, "seed": 1 },
+        "b": { "absorberPosition": 0.5, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.01, "durationSteps": 60, "seed": 1 },
+        "seeds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+      },
+      "assertions": [
+        { "path": "b.aggregate.reactionEvents", "operator": "gte", "value": "a.aggregate.reactionEvents" },
+        { "path": "b.aggregate.finalFreeNeutrons", "operator": "gte", "value": "a.aggregate.finalFreeNeutrons" }
+      ],
+      "severity": "S1",
+      "rubric_axis": "Scientific Behavior",
+      "calibration_required": true,
+      "notes": "The 'withdraw and it takes off' lesson must hold on average."
+    },
+    {
+      "id": "SCI-012",
+      "title": "Starting population alters early behavior but not the propagation rule",
+      "subject": {
+        "type": "aggregate_pair",
+        "a": { "absorberPosition": 0.5, "startingNeutrons": 1, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 1 },
+        "b": { "absorberPosition": 0.5, "startingNeutrons": 10, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 1 },
+        "seeds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+      },
+      "assertions": [
+        { "path": "b.aggregate.finalFreeNeutrons", "operator": "gte", "value": "a.aggregate.finalFreeNeutrons" },
+        { "path": "b.aggregate.reactionEvents", "operator": "gte", "value": "a.aggregate.reactionEvents" }
+      ],
+      "severity": "S2",
+      "rubric_axis": "Scientific Behavior",
+      "calibration_required": true,
+      "notes": "Aggregate only: per-seed monotonicity is not guaranteed because random consumption differs. Rule constants (escape/fission/absorption) must be identical in both runs."
+    },
+    {
+      "id": "SCI-013",
+      "title": "Repeated trials reveal distributions, not one guaranteed outcome",
+      "subject": {
+        "type": "multi",
+        "params": { "absorberPosition": 0.5, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 1 },
+        "seeds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+      },
+      "assertions": [
+        { "path": "distinctFinalFreeNeutrons", "operator": "gte", "value": 2 }
+      ],
+      "severity": "S2",
+      "rubric_axis": "Scientific Behavior",
+      "calibration_required": true,
+      "notes": "Guard: at least two distinct final populations across 25 seeds, proving randomness is real and visible. Calibrate the parameter point so this holds comfortably."
+    },
+    {
+      "id": "SCI-014",
+      "title": "Counterfactual changes exactly one variable and locks seed and duration",
+      "subject": {
+        "type": "counterfactual",
+        "original": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 },
+        "variable": "absorberPosition",
+        "value": 0.2
+      },
+      "assertions": [
+        { "path": "changedVariable", "operator": "equals", "value": "absorberPosition" },
+        { "path": "counterfactual.parameters.seed", "operator": "equals", "value": "original.parameters.seed" },
+        { "path": "counterfactual.parameters.durationSteps", "operator": "equals", "value": "original.parameters.durationSteps" },
+        { "path": "counterfactual.parameters.startingNeutrons", "operator": "equals", "value": "original.parameters.startingNeutrons" },
+        { "path": "counterfactual.parameters.materialDensity", "operator": "equals", "value": "original.parameters.materialDensity" },
+        { "path": "counterfactual.parameters.absorptionProbability", "operator": "equals", "value": "original.parameters.absorptionProbability" },
+        { "path": "counterfactual.parameters.absorberPosition", "operator": "equals", "value": 0.2 }
+      ],
+      "severity": "S0",
+      "rubric_axis": "Scientific Behavior",
+      "calibration_required": false,
+      "notes": "Counterfactual variables are allowlisted; seed and durationSteps are rejected as changeable variables (counterfactual.ts:15-20)."
+    },
+    {
+      "id": "SCI-015",
+      "title": "Counterfactual original remains immutable",
+      "subject": {
+        "type": "counterfactual",
+        "original": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 42 },
+        "variable": "materialDensity",
+        "value": 0.4
+      },
+      "assertions": [
+        { "path": "original.snapshots", "operator": "identical_to", "value": "original_reference.snapshots" },
+        { "path": "original.parameters", "operator": "identical_to", "value": "original_reference.parameters" }
+      ],
+      "severity": "S0",
+      "rubric_axis": "Scientific Behavior",
+      "calibration_required": false,
+      "notes": "original_reference = an independent run of the original parameters performed before the counterfactual. The original trial object must not be mutated (counterfactual.ts:22-31, 58)."
+    },
+    {
+      "id": "SCI-016",
+      "title": "Counterfactual keeps the same randomness stream",
+      "subject": {
+        "type": "counterfactual",
+        "original": { "absorberPosition": 0.9, "startingNeutrons": 3, "materialDensity": 0.9, "absorptionProbability": 0.25, "durationSteps": 60, "seed": 7 },
+        "variable": "absorptionProbability",
+        "value": 0.5
+      },
+      "assertions": [
+        { "path": "counterfactual.parameters.seed", "operator": "equals", "value": 7 },
+        { "path": "counterfactual.stopReason", "operator": "one_of", "value": ["completed", "max_population", "extinct"] }
+      ],
+      "severity": "S0",
+      "rubric_axis": "Scientific Behavior",
+      "calibration_required": false,
+      "notes": "Same seed means any outcome difference is attributable to the single changed variable. This is the causal claim of the whole product."
+    },
+    {
+      "id": "SCI-017",
+      "title": "Representation independence: switching views never re-simulates",
+      "subject": {
+        "type": "ui",
+        "setup": "Run one trial. Record trial id and snapshots. Switch representations in order: animation, graph, equation, causal, plain_language. Switch back to animation.",
+        "steps": [
+          "Run trial with defaults and seed 42",
+          "Record trial.id and final.freeNeutrons",
+          "Open each representation tab sequentially",
+          "Return to animation tab"
+        ]
+      },
+      "assertions": [
+        { "path": "trial.id", "operator": "equals", "value": "unchanged" },
+        { "path": "trial.final.freeNeutrons", "operator": "equals", "value": "unchanged" },
+        { "path": "reRunCount", "operator": "equals", "value": 0 }
+      ],
+      "severity": "S0",
+      "rubric_axis": "Scientific Behavior",
+      "calibration_required": false,
+      "notes": "Views render recorded snapshots only; no view may trigger runSimulation. Inspect network/console for re-runs."
+    },
+    {
+      "id": "SCI-018",
+      "title": "Animation speed independence: outcome identical at any speed",
+      "subject": {
+        "type": "ui",
+        "setup": "Run one trial at default speed (1x). Record final values. Set animation speed to 0.25x, replay. Set to 2x, replay.",
+        "steps": [
+          "Run trial seed 42",
+          "Record final.freeNeutrons and reactionEvents",
+          "Set animationSpeed 0.25, replay the same trial",
+          "Set animationSpeed 2, replay the same trial"
+        ]
+      },
+      "assertions": [
+        { "path": "final.freeNeutrons.0.25x", "operator": "equals", "value": "final.freeNeutrons.1x" },
+        { "path": "final.freeNeutrons.2x", "operator": "equals", "value": "final.freeNeutrons.1x" }
+      ],
+      "severity": "S0",
+      "rubric_axis": "Scientific Behavior",
+      "calibration_required": false,
+      "notes": "Speed changes frame delay only (simulation-canvas.tsx:33-37); the recorded trial is unchanged."
+    },
+    {
+      "id": "SCI-019",
+      "title": "Reduced-motion independence: same science, static presentation",
+      "subject": {
+        "type": "ui",
+        "setup": "Run one trial with motion enabled. Record final values. Enable reduced motion, run an identical trial (same params + seed). Compare.",
+        "steps": [
+          "Run trial seed 42, record outcome",
+          "Enable reduced motion in accessibility settings",
+          "Run identical params + seed 42",
+          "Compare both trials' snapshots"
+        ]
+      },
+      "assertions": [
+        { "path": "run2.snapshots", "operator": "identical_to", "value": "run1.snapshots" },
+        { "path": "canvas.animationCount", "operator": "equals", "value": 0 }
+      ],
+      "severity": "S0",
+      "rubric_axis": "Usability and Accessibility",
+      "calibration_required": false,
+      "notes": "Reduced motion renders static frames with '!' markers (simulation-canvas.tsx:323-335); data must be identical to the motion run."
+    },
+    {
+      "id": "SCI-020",
+      "title": "Reset behavior: clear session restores defaults and replay reproduces",
+      "subject": {
+        "type": "ui",
+        "setup": "Run a trial, change variables, then clear session via Research mode. Verify defaults restored. Run again with identical params + seed and compare snapshots.",
+        "steps": [
+          "Run trial with defaults seed 42, record snapshots",
+          "Change absorber and rerun flow",
+          "Clear session (two-step confirm)",
+          "Verify controls show defaults and no trial remains",
+          "Run defaults seed 42 again, compare with first run"
+        ]
+      },
+      "assertions": [
+        { "path": "afterClear.trial", "operator": "equals", "value": "none" },
+        { "path": "rerun.snapshots", "operator": "identical_to", "value": "first.snapshots" },
+        { "path": "afterClear.parameters", "operator": "equals", "value": "defaults" }
+      ],
+      "severity": "S2",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": false,
+      "notes": "Reset is also the only current path to a second primary run (single-run session constraint)."
+    },
+    {
+      "id": "SCI-021",
+      "title": "Pause behavior: playback halts and resumes without altering the trial",
+      "subject": {
+        "type": "ui",
+        "setup": "Start playback. Pause. Wait 1 second; verify current step does not advance. Resume; verify it advances from the paused step.",
+        "steps": [
+          "Run trial, start animation playback",
+          "Pause",
+          "Wait 1 second, record currentStep twice",
+          "Resume, verify step advances"
+        ]
+      },
+      "assertions": [
+        { "path": "paused.stepDeltaAfter1s", "operator": "equals", "value": 0 },
+        { "path": "resumed.stepIncrements", "operator": "equals", "value": true },
+        { "path": "trial.snapshots", "operator": "equals", "value": "unchanged" }
+      ],
+      "severity": "S3",
+      "rubric_axis": "Usability and Accessibility",
+      "calibration_required": false,
+      "notes": "Pause is presentation-only; the recorded trial never changes."
+    },
+    {
+      "id": "SCI-022",
+      "title": "Step-forward behavior: single-step advances exactly one step",
+      "subject": {
+        "type": "ui",
+        "setup": "Pause playback at step k. Press step-forward three times; record steps. Press step-back twice; record.",
+        "steps": [
+          "Run trial, pause at step k",
+          "Step forward 3 times",
+          "Record visited steps",
+          "Step back 2 times"
+        ]
+      },
+      "assertions": [
+        { "path": "stepsVisited", "operator": "equals", "value": "[k, k+1, k+2, k+3, k+2, k+1]" },
+        { "path": "neverSkips", "operator": "equals", "value": true }
+      ],
+      "severity": "S3",
+      "rubric_axis": "Usability and Accessibility",
+      "calibration_required": false,
+      "notes": "Guards the reduced-motion / stepwise-learning path."
+    },
+    {
+      "id": "SCI-023",
+      "title": "Overflow prevention: finite values, bounded counters at max settings",
+      "subject": {
+        "type": "run",
+        "params": { "absorberPosition": 0.2, "startingNeutrons": 10, "materialDensity": 1, "absorptionProbability": 0.01, "durationSteps": 120, "seed": 12345 }
+      },
+      "assertions": [
+        { "path": "final.cumulativeEnergyUnits", "operator": "equals", "value": "final.reactionEvents * 2" },
+        { "path": "final.freeNeutrons", "operator": "lte", "value": 500 },
+        { "path": "final.reactionEvents", "operator": "lte", "value": 5000 },
+        { "path": "snapshots", "operator": "all_of", "value": [ { "path": ".", "operator": "all_fields_gte_zero", "value": null } ] }
+      ],
+      "severity": "S1",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": false,
+      "notes": "Also asserts the abstract-unit arithmetic: cumulativeEnergyUnits = reactionEvents x ENERGY_PER_REACTION (2). No NaN/Infinity may appear."
+    },
+    {
+      "id": "SCI-024",
+      "title": "Corrupt parameter rejection: NaN, Infinity, and non-numbers are rejected",
+      "subject": {
+        "type": "schema",
+        "params": { "absorberPosition": "NaN", "startingNeutrons": null, "materialDensity": "Infinity", "absorptionProbability": {}, "durationSteps": "5", "seed": -1 }
+      },
+      "assertions": [
+        { "path": "valid", "operator": "equals", "value": false }
+      ],
+      "severity": "S1",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": false,
+      "notes": "zod schema (experiments.ts:48-55) must reject NaN/Infinity/null/objects. KNOWN GAP: the engine's clampParameters does not itself guard NaN (Math.min/max pass NaN through) — the schema is the boundary. If any path bypasses the schema, NaN could propagate into snapshots. Add Number.isFinite guard in clampParameter (S1, ~0.5h)."
+    },
+    {
+      "id": "SCI-025",
+      "title": "Large trial safety: burst of max-size runs stays bounded and responsive",
+      "subject": {
+        "type": "ui",
+        "setup": "Run 50 trials of the max-duration explosive configuration in a loop (via clear-session between runs or engine loop). Verify no error, bounded snapshots, bounded population, and the UI remains responsive.",
+        "steps": [
+          "Execute 50 runs of params: absorber 0.2, start 10, density 1, absorption 0.01, duration 120, varying seeds",
+          "Assert every run completed with a stop reason",
+          "Assert snapshots length <= 121 each",
+          "Assert freeNeutrons <= 500 each",
+          "Assert page stays interactive (no frozen main thread)"
+        ]
+      },
+      "assertions": [
+        { "path": "allRunsCompleted", "operator": "equals", "value": true },
+        { "path": "maxSnapshotsPerRun", "operator": "lte", "value": 121 },
+        { "path": "maxFreeNeutrons", "operator": "lte", "value": 500 },
+        { "path": "mainThreadResponsive", "operator": "equals", "value": true }
+      ],
+      "severity": "S2",
+      "rubric_axis": "Technical Execution",
+      "calibration_required": false,
+      "notes": "Guards the demo risk of a learner (or judge) mashing Run. localStorage growth is bounded by evidence size per trial; watch quota on repeated exports."
+    },
+    {
+      "id": "SCI-026",
+      "title": "Replay consistency: identical evidence yields identical replay and proposals",
+      "subject": {
+        "type": "ui",
+        "setup": "Open Adaptation Replay twice from the same session state; the rendered journey must be identical. Call the adaptation provider twice with the same input; the proposal types and order must be identical.",
+        "steps": [
+          "Run a trial, generate proposals",
+          "Open Adaptation Replay, record rendered steps",
+          "Close and reopen, compare",
+          "Call provider.propose(sameInput) twice, compare rule selections"
+        ]
+      },
+      "assertions": [
+        { "path": "replay1", "operator": "identical_to", "value": "replay2" },
+        { "path": "proposals1.types", "operator": "identical_to", "value": "proposals2.types" }
+      ],
+      "severity": "S2",
+      "rubric_axis": "Innovation in AI Application",
+      "calibration_required": false,
+      "notes": "Determinism of the adaptation layer is part of the scientific honesty story (deterministic-provider.ts). Proposal UUIDs may vary; rule selection must not."
+    }
+  ]
+}
