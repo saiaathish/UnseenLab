@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NUCLEAR_CHAIN_REACTION_EXPERIMENT } from "@/domain/experiments";
 import { ExperimentShell } from "@/components/lab/experiment-shell";
@@ -30,14 +30,14 @@ async function runTrial(user: ReturnType<typeof userEvent.setup>) {
 
 describe("ExperimentShell main learner flow", () => {
   it("requires a prediction before a trial can run", async () => {
-    const user = userEvent.setup();
     render(<ExperimentShell experiment={NUCLEAR_CHAIN_REACTION_EXPERIMENT} />);
-    await runTrial(user);
+    // Guided flow: the Run trial control only exists once a prediction has
+    // been submitted, so the gate is structural rather than a notice.
     expect(
-      screen.getByText(/prediction is required before running a trial/i),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: /run trial/i }),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/run a trial to see the animation/i),
+      screen.getByRole("heading", { name: /predict first/i }),
     ).toBeInTheDocument();
   });
 
@@ -69,8 +69,13 @@ describe("ExperimentShell main learner flow", () => {
       await user.click(button);
     }
 
-    await screen.findByText(/no suggestions right now/i);
-    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+    // All proposals resolved: the whole suggestion section disappears.
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Accept" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText(/try one helpful change/i)).not.toBeInTheDocument();
   });
 
   it("rejects all offered adaptations and keeps control", async () => {
@@ -87,8 +92,13 @@ describe("ExperimentShell main learner flow", () => {
       await user.click(button);
     }
 
-    await screen.findByText(/no suggestions right now/i);
-    expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+    // All proposals resolved: the whole suggestion section disappears.
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Reject" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText(/try one helpful change/i)).not.toBeInTheDocument();
   });
 
   it("shows the safety-ceiling notice for an explosive run", async () => {
@@ -103,7 +113,7 @@ describe("ExperimentShell main learner flow", () => {
     ).toBeInTheDocument();
   });
 
-  it("clears the session and returns to the empty state", async () => {
+  it("clears the session and returns to the predict step", async () => {
     const user = userEvent.setup();
     render(<ExperimentShell experiment={NUCLEAR_CHAIN_REACTION_EXPERIMENT} />);
     await submitPrediction(user);
@@ -114,9 +124,14 @@ describe("ExperimentShell main learner flow", () => {
     await user.click(screen.getByRole("button", { name: /clear local session/i }));
     await user.click(screen.getByRole("button", { name: /really clear/i }));
 
+    // Guided flow: clearing the session returns to the first step, so the
+    // trial control is gated again until a new prediction is submitted.
     expect(
-      screen.getByText(/run a trial to see the animation/i),
+      screen.getByRole("heading", { name: /predict first/i }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /run trial/i }),
+    ).not.toBeInTheDocument();
   });
 });
 
