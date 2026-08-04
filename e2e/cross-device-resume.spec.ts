@@ -136,8 +136,8 @@ async function signInContext(
     session.chunks.map((chunk) => ({
       name: chunk.name,
       value: chunk.value,
+      // Playwright accepts `url` alone (path is implied); url+path is invalid.
       url: BASE_URL,
-      path: "/",
     })),
   );
 }
@@ -194,8 +194,11 @@ test("device A: guest trial, then sign-in imports the session to the account", a
   const page = await deviceAContext.newPage();
   await page.goto("/lab/nuclear-chain-reaction");
 
-  // The header proves the signed-out phase (no avatar menu yet).
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  // The header proves the signed-out phase (no avatar menu yet). Exact match:
+  // the lab's sync strip also has a "Sign in to save progress…" button.
+  await expect(
+    page.getByRole("button", { name: "Sign in", exact: true }),
+  ).toBeVisible();
 
   await runFirstTrial(page);
   await expect(
@@ -203,14 +206,13 @@ test("device A: guest trial, then sign-in imports the session to the account", a
   ).toBeVisible();
 
   // Capture the guest evidence ids BEFORE any cloud write so the resume on
-  // device B can prove id-for-id identity.
+  // device B can prove id-for-id identity. The session id is created lazily
+  // at sign-in (by design), so it is captured after the import below.
   const local = await readLocalEvidence(page);
   expect(local.trials).toHaveLength(1);
   expect(local.predictions).toHaveLength(1);
-  const sessionId = await page.evaluate((key) => localStorage.getItem(key), SESSION_ID_KEY);
-  expect(sessionId).toMatch(/^[0-9a-f-]{36}$/i);
   deviceAEvidence = {
-    sessionId: sessionId as string,
+    sessionId: "",
     trialIds: local.trials.map((t) => t.id),
     predictionIds: local.predictions.map((p) => p.id),
     trialCount: local.trials.length,
@@ -235,6 +237,9 @@ test("device A: guest trial, then sign-in imports the session to the account", a
   expect(afterImport.trials).toHaveLength(1);
   expect(afterImport.trials[0].id).toBe(deviceAEvidence.trialIds[0]);
   expect(afterImport.predictions[0].id).toBe(deviceAEvidence.predictionIds[0]);
+  const sessionId = await page.evaluate((key) => localStorage.getItem(key), SESSION_ID_KEY);
+  expect(sessionId).toMatch(/^[0-9a-f-]{36}$/i);
+  deviceAEvidence = { ...deviceAEvidence, sessionId: sessionId as string };
 });
 
 test("device B (same account): dashboard shows the imported session", async ({
@@ -256,7 +261,9 @@ test("device B (same account): dashboard shows the imported session", async ({
     page.getByRole("heading", { name: "Recent sessions" }),
   ).toBeVisible();
   await expect(page.getByText(/1 completed trial/)).toBeVisible();
-  const resumeLink = page.getByRole("link", { name: "Resume" });
+  // The same resume link appears in "Recommended next step" and "Recent
+  // sessions" with an identical href — take the first.
+  const resumeLink = page.getByRole("link", { name: "Resume" }).first();
   await expect(resumeLink).toBeVisible();
   const href = await resumeLink.getAttribute("href");
   expect(href).toMatch(/\/lab\/nuclear-chain-reaction\?resume=/);
@@ -370,12 +377,14 @@ test("isolation: learner_b's dashboard shows zero learner_a sessions", async ({
   ).toBeVisible({ timeout: 20_000 });
 
   // RLS-verified empty state (copy §5.5 EMP-01 / §5.2 DASH-15): learner_b can
-  // see the dashboard scaffolding but never learner_a's rows.
+  // see the dashboard scaffolding but never learner_a's rows. Exact match:
+  // the empty-state line "Nothing in progress right now." also contains the
+  // words "in progress".
   await expect(page.getByText("No sessions yet.")).toBeVisible();
   await expect(
     page.getByText("Your lab sessions will appear here once you start one."),
   ).toBeVisible();
   await expect(page.getByText("Nothing in progress right now.")).toBeVisible();
-  await expect(page.getByText("In progress")).toHaveCount(0);
+  await expect(page.getByText("In progress", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/1 completed trial/)).toHaveCount(0);
 });

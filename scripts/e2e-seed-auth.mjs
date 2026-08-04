@@ -211,7 +211,7 @@ async function ensureOnboardingComplete(userId, email) {
   };
 
   let patched = await fetch(
-    `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`,
+    `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${encodeURIComponent(userId)}`,
     {
       method: "PATCH",
       headers,
@@ -248,11 +248,31 @@ async function ensureOnboardingComplete(userId, email) {
   return false;
 }
 
+async function clearUserData(userIds) {
+  // Clean slate for repeatable runs: sessions and preferences from previous
+  // runs would otherwise make "exactly one session" assertions meaningless.
+  const headers = {
+    apikey: adminApikey(),
+    Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+    "Content-Type": "application/json",
+  };
+  const filter = `user_id=in.(${userIds.join(",")})`;
+  await fetch(`${SUPABASE_URL}/rest/v1/learning_sessions?${filter}`, {
+    method: "DELETE",
+    headers,
+  });
+  await fetch(`${SUPABASE_URL}/rest/v1/learner_preferences?${filter}`, {
+    method: "DELETE",
+    headers,
+  });
+}
+
 async function runCreate() {
   const existing = await listAuthUsers();
   const byEmail = new Map(existing.map((u) => [u.email, u]));
 
   const summary = [];
+  const ids = [];
   for (const { email, password } of USERS) {
     const known = byEmail.get(email);
     let user = known;
@@ -262,9 +282,11 @@ async function runCreate() {
     } else {
       console.log(`[e2e-seed-auth] ${email} already exists (${user.id}) — skipped`);
     }
+    ids.push(user.id);
     const onboardingOk = await ensureOnboardingComplete(user.id, email);
     summary.push({ email, id: user.id, onboardingComplete: onboardingOk });
   }
+  await clearUserData(ids);
   console.log("[e2e-seed-auth] create complete:", JSON.stringify(summary));
 }
 

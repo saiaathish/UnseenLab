@@ -148,6 +148,8 @@ export function ExperimentShell({
     useState<LearnerPreferencesRow | null>(null);
   const cloudPrefsApplied = useRef(false);
   const localPrefsChanged = useRef(false);
+  /** Set when a cloud session is resumed; suppresses the guest-import offer. */
+  const resumedCloudId = useRef<string | null>(null);
 
   const preferences = session.preferences;
   // The pending prediction lives inside the persisted workflow, so a reload
@@ -563,7 +565,10 @@ export function ExperimentShell({
   const handleResume = useCallback(
     (restored: LocalSession, cloudId: string) => {
       // Adopt the cloud row id so later saves continue the same row instead
-      // of forking a duplicate; keep saved preferences applied.
+      // of forking a duplicate; keep saved preferences applied. Once the
+      // local session id is a cloud row, the guest-import offer must not
+      // appear — the session is already in the account.
+      resumedCloudId.current = cloudId;
       setLocalSessionId(cloudId);
       const withPrefs = profilePrefs
         ? { ...restored, preferences: profileToLearnerPreferences(profilePrefs) }
@@ -665,7 +670,8 @@ export function ExperimentShell({
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 {user &&
                 hasGuestEvidence(session) &&
-                !isSessionImported(getLocalSessionId()) ? (
+                !isSessionImported(getLocalSessionId()) &&
+                getLocalSessionId() !== resumedCloudId.current ? (
                   <button
                     type="button"
                     onClick={() => setImportRequested(true)}
@@ -1035,6 +1041,7 @@ export function ExperimentShell({
         title={experiment.title}
         requestOpen={importRequested}
         onRequestHandled={() => setImportRequested(false)}
+        autoOfferEnabled={getLocalSessionId() !== resumedCloudId.current}
       />
     </>
   );

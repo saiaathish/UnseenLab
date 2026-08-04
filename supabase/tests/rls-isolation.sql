@@ -66,18 +66,21 @@ begin
     insert into auth.users
       (id, instance_id, aud, role, email, encrypted_password,
        email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+       confirmation_token, recovery_token, email_change_token_new, email_change,
        created_at, updated_at)
     values
       ('00000000-0000-4000-8000-00000000000a', '00000000-0000-4000-8000-000000000000',
        'authenticated', 'authenticated', 'unseenlab_rls_a@test.local',
        crypt('unseenlab-rls-test-pw', gen_salt('bf')), now(),
        '{"provider":"email","providers":["email"]}',
-       '{"full_name":"RLS Test A"}', now(), now()),
+       '{"full_name":"RLS Test A"}',
+       '', '', '', '', now(), now()),
       ('00000000-0000-4000-8000-00000000000b', '00000000-0000-4000-8000-000000000000',
        'authenticated', 'authenticated', 'unseenlab_rls_b@test.local',
        crypt('unseenlab-rls-test-pw', gen_salt('bf')), now(),
        '{"provider":"email","providers":["email"]}',
-       '{"full_name":"RLS Test B"}', now(), now())
+       '{"full_name":"RLS Test B"}',
+       '', '', '', '', now(), now())
     on conflict (id) do nothing;
     raise notice 'INFO: provisioned real auth.users test identities — RLS tests fully conclusive.';
   exception when others then

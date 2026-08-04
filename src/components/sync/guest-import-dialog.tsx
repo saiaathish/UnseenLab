@@ -34,6 +34,7 @@ export function GuestImportDialog({
   title,
   requestOpen,
   onRequestHandled,
+  autoOfferEnabled = true,
 }: {
   user: User | null;
   session: LocalSession;
@@ -42,6 +43,12 @@ export function GuestImportDialog({
   requestOpen: boolean;
   /** Called once the explicit request has been handled so it cannot stick. */
   onRequestHandled: () => void;
+  /**
+   * When false, the auto-offer is suppressed — used after a cloud session
+   * was resumed (the session is already in the account; asking to import it
+   * would be nonsense). Explicit requests still work.
+   */
+  autoOfferEnabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -50,6 +57,7 @@ export function GuestImportDialog({
   // yet imported, not dismissed this visit). "Not now" and "Save" both make
   // the derived condition false, so the dialog closes by itself.
   const shouldAutoOffer =
+    autoOfferEnabled &&
     Boolean(user) &&
     hasGuestEvidence(session) &&
     !isSessionImported(getLocalSessionId()) &&
