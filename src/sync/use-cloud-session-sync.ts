@@ -55,7 +55,10 @@ export function useCloudSessionSync(
       evidenceRef as unknown as Record<string, unknown>,
       workflowRef as unknown as Record<string, unknown>
     );
-    return sync.save(snapshot).then((outcome: SyncOutcome) => {
+    // One idempotency key per save attempt: replaying the same attempt (a
+    // retry after a timeout, a second tab) can never double-apply a write.
+    const mutationId = crypto.randomUUID();
+    return sync.save(snapshot, { mutationId }).then((outcome: SyncOutcome) => {
       setStatus(
         outcome === "saved"
           ? "saved"

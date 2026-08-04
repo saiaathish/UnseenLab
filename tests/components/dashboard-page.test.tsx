@@ -95,6 +95,8 @@ function sessionFixture(
       counterfactuals: [],
     },
     workflow: { pendingPrediction: null },
+    revision: 1,
+    last_client_mutation_id: null,
     created_at: "2026-08-03T09:30:00.000Z",
     updated_at: hoursAgo(2),
     completed_at: completedAt,

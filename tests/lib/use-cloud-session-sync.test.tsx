@@ -53,16 +53,20 @@ interface FetchCall {
 
 /**
  * Minimal stand-in for the /api/cloud/sessions server: GET by id consults an
- * in-memory row map, PUT upserts into it. Failures and a deferred read are
- * scriptable per test via `mock.flags`.
+ * in-memory row map, PUT upserts into it, mirroring the route's optimistic
+ * concurrency (idempotent replay on a repeated mutation id, 409 on a stale
+ * expected revision, revision advanced on every accepted write). Failures and
+ * a deferred read are scriptable per test via `mock.flags`.
  */
 function createFetchMock() {
   const calls: FetchCall[] = [];
   const state = new Map<string, LearningSessionRow>();
+  let writeCount = 0;
   const flags = {
     readGate: null as (() => Promise<Response>) | null,
     failReadNext: false,
     failPut: false,
+    conflictOnPut: false,
   };
 
   const fetcher: FetchLike = async (input, init) => {
@@ -96,19 +100,76 @@ function createFetchMock() {
     if (method === "PUT" && url === "/api/cloud/sessions") {
       const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
       const existing = state.get(payload.id as string);
-      const row = {
-        ...(existing ?? ({} as LearningSessionRow)),
-        ...(payload as object),
+
+      // Scriptable conflict: the row moved on between read and write.
+      if (flags.conflictOnPut) {
+        flags.conflictOnPut = false;
+        return jsonResponse(
+          { error: "conflict", data: { session: existing ?? null } },
+          409
+        );
+      }
+
+      // Server semantics: a PUT repeating the last accepted mutation id is an
+      // acknowledged replay — the stored row is returned without writing.
+      if (
+        existing &&
+        payload.mutation_id !== undefined &&
+        existing.last_client_mutation_id === payload.mutation_id
+      ) {
+        return jsonResponse({ data: { session: existing } });
+      }
+
+      // Server semantics: a stale expected revision is a 409 with the current
+      // row so the client can adopt it.
+      if (
+        existing &&
+        payload.expected_revision !== undefined &&
+        (existing.revision ?? 0) !== payload.expected_revision
+      ) {
+        return jsonResponse(
+          { error: "conflict", data: { session: existing } },
+          409
+        );
+      }
+
+      const row: LearningSessionRow = {
+        ...(existing ?? ({} as Partial<LearningSessionRow>)),
+        id: payload.id as string,
+        user_id: existing?.user_id ?? USER.id,
+        lab_slug: payload.lab_slug as string,
+        status: payload.status as LearningSessionRow["status"],
+        title: payload.title as string,
+        schema_version: payload.schema_version as number,
+        evidence: payload.evidence as Record<string, unknown>,
+        workflow: payload.workflow as Record<string, unknown>,
+        completed_at: payload.completed_at as string | null,
+        // Mirror the route: wire-only concurrency params are never stored.
+        revision: (existing?.revision ?? 0) + 1,
+        last_client_mutation_id:
+          payload.mutation_id !== undefined
+            ? (payload.mutation_id as string)
+            : null,
         created_at: existing?.created_at ?? "2026-08-03T00:00:00.000Z",
         updated_at: new Date().toISOString(),
-      } as LearningSessionRow;
+      };
+      writeCount += 1;
       state.set(payload.id as string, row);
       return jsonResponse({ data: { session: row } });
     }
     return jsonResponse({ error: "not_found" }, 404);
   };
 
-  return { fetcher, calls, state, flags };
+  return {
+    fetcher,
+    calls,
+    state,
+    flags,
+    /** Number of effective PUT writes (replays and 409s do not count). */
+    get writeCount() {
+      return writeCount;
+    },
+  };
 }
 
 type FetchMock = ReturnType<typeof createFetchMock>;
@@ -244,6 +305,9 @@ describe("useCloudSessionSync", () => {
       status: "active",
       schema_version: 1,
       title: TITLE,
+      // Every save attempt carries a fresh idempotency key for the server's
+      // mutation-id replay protection.
+      mutation_id: expect.any(String),
     });
     // Security invariant: ownership comes from the session cookie, so the
     // wire payload never carries a user id.
@@ -344,6 +408,8 @@ describe("useCloudSessionSync", () => {
       created_at: "2026-08-03T00:00:00.000Z",
       updated_at: "2026-08-03T12:00:00.000Z",
       completed_at: null,
+      revision: 1,
+      last_client_mutation_id: null,
     });
 
     const { result } = renderSyncHook(sessionWithTrial());
@@ -384,5 +450,117 @@ describe("useCloudSessionSync", () => {
     });
     expect(result.current.status).toBe("idle");
     expect(mock.calls).toHaveLength(0);
+  });
+
+  it("a server 409 (row moved on between read and write) maps to cloud_newer and keeps the cloud copy", async () => {
+    localStorage.setItem(SESSION_ID_KEY, FIXED_SESSION_ID);
+    mock.state.set(FIXED_SESSION_ID, {
+      id: FIXED_SESSION_ID,
+      user_id: USER.id,
+      lab_slug: "nuclear-chain-reaction",
+      status: "active",
+      title: TITLE,
+      schema_version: 1,
+      // Older than the local trial (10:00), so the evidence-time policy allows
+      // the save — but the server then rejects the stale expected_revision.
+      evidence: { trials: [{ completedAt: "2026-08-03T09:00:00.000Z" }] },
+      workflow: { pendingPrediction: null },
+      created_at: "2026-08-03T00:00:00.000Z",
+      updated_at: "2026-08-03T09:00:00.000Z",
+      completed_at: null,
+      revision: 2,
+      last_client_mutation_id: "other-device-mutation",
+    });
+    mock.flags.conflictOnPut = true;
+
+    const { result } = renderSyncHook(sessionWithTrial());
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    await act(async () => {});
+    expect(result.current.status).toBe("cloud_newer");
+    // The rejected write never landed: revision and cloud evidence are intact,
+    // so the local unsynced copy remains the caller's to keep.
+    expect(mock.writeCount).toBe(0);
+    expect(mock.state.get(FIXED_SESSION_ID)?.revision).toBe(2);
+    expect(
+      (
+        mock.state.get(FIXED_SESSION_ID)?.evidence as {
+          trials: Array<{ completedAt: string }>;
+        }
+      ).trials[0]?.completedAt
+    ).toBe("2026-08-03T09:00:00.000Z");
+  });
+
+  it("threads the fetched cloud revision as expected_revision, never a user id", async () => {
+    localStorage.setItem(SESSION_ID_KEY, FIXED_SESSION_ID);
+    mock.state.set(FIXED_SESSION_ID, {
+      id: FIXED_SESSION_ID,
+      user_id: USER.id,
+      lab_slug: "nuclear-chain-reaction",
+      status: "active",
+      title: TITLE,
+      schema_version: 1,
+      evidence: { trials: [{ completedAt: "2026-08-03T09:00:00.000Z" }] },
+      workflow: { pendingPrediction: null },
+      created_at: "2026-08-03T00:00:00.000Z",
+      updated_at: "2026-08-03T09:00:00.000Z",
+      completed_at: null,
+      revision: 3,
+      last_client_mutation_id: null,
+    });
+
+    const { result } = renderSyncHook(sessionWithTrial());
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    await act(async () => {});
+    expect(result.current.status).toBe("saved");
+
+    const putCall = mock.calls.find((c) => c.method === "PUT");
+    expect(putCall?.body).toMatchObject({
+      id: FIXED_SESSION_ID,
+      expected_revision: 3,
+      mutation_id: expect.any(String),
+    });
+    // Security invariant: ownership comes from the session cookie only.
+    expect(putCall?.body?.user_id).toBeUndefined();
+    expect(mock.state.get(FIXED_SESSION_ID)?.revision).toBe(4);
+  });
+
+  it("a repeated mutation id across attempts is an idempotent no-op (single effective write)", async () => {
+    localStorage.setItem(SESSION_ID_KEY, FIXED_SESSION_ID);
+    // Pin the per-attempt idempotency key so the second attempt replays the
+    // first (as a retried request would).
+    vi.stubGlobal("crypto", {
+      ...globalThis.crypto,
+      randomUUID: () => "replayed-mutation",
+    });
+
+    const { result, rerender } = renderSyncHook(sessionWithTrial());
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    await act(async () => {});
+    expect(result.current.status).toBe("saved");
+    expect(mock.writeCount).toBe(1);
+    expect(mock.state.get(FIXED_SESSION_ID)?.revision).toBe(1);
+
+    // A second meaningful event (newer trial) schedules another save carrying
+    // the same mutation id. The server recognizes the accepted id and serves
+    // the stored row without writing.
+    const newer = sessionWithTrial();
+    newer.evidence = {
+      ...newer.evidence,
+      trials: [trialFixture("2026-08-03T11:00:00.000Z")],
+    };
+    rerender({ session: newer });
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    await act(async () => {});
+    expect(result.current.status).toBe("saved");
+    expect(mock.writeCount).toBe(1);
+    expect(mock.state.get(FIXED_SESSION_ID)?.revision).toBe(1);
   });
 });

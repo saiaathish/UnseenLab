@@ -67,4 +67,11 @@ export type LearningSessionRow = {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  /** Server-incremented optimistic-concurrency counter; bumped on every write. */
+  revision: number;
+  /**
+   * Idempotency key of the last accepted client write. A PUT repeating this
+   * mutation id is an acknowledged replay and is served without writing.
+   */
+  last_client_mutation_id: string | null;
 };

@@ -43,6 +43,9 @@ export async function POST(
           completed_at: now,
           updated_at: now,
         },
+        // A completion is a write like any other: it advances the concurrency
+        // revision so a stale client upsert can never clobber it silently.
+        $inc: { revision: 1 },
       }
     );
   } catch {

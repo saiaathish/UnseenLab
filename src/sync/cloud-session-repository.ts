@@ -20,6 +20,30 @@ export interface SessionSnapshot {
   evidence: Record<string, unknown>;
   workflow: Record<string, unknown>;
   completedAt: string | null;
+  /**
+   * Server-incremented optimistic-concurrency counter of the cloud row this
+   * snapshot was read from. Local-only snapshots carry 0. Absent on legacy
+   * rows; `sessionRowToSnapshot` normalizes those to 0.
+   */
+  revision: number;
+}
+
+/**
+ * The server answered a write with HTTP 409: the cloud row moved on since the
+ * client read it (its `revision` no longer matches the client's expected one).
+ * `cloudSnapshot` carries the current cloud copy so the caller can adopt it.
+ * The sync layer maps this to its existing "cloud newer, keep local" outcome.
+ */
+export class CloudConflictError extends Error {
+  readonly cloudSnapshot: SessionSnapshot | null;
+
+  constructor(cloudSnapshot: SessionSnapshot | null) {
+    super(
+      "cloud session conflict: the cloud copy is newer (revision mismatch)"
+    );
+    this.name = "CloudConflictError";
+    this.cloudSnapshot = cloudSnapshot;
+  }
 }
 
 export const SESSION_SCHEMA_VERSION = 1;
@@ -41,6 +65,9 @@ export function sessionRowToSnapshot(row: LearningSessionRow): SessionSnapshot {
     evidence: row.evidence,
     workflow: row.workflow,
     completedAt: row.completed_at,
+    // Legacy rows written before optimistic concurrency have no revision;
+    // treat them as revision 0 so the first concurrency-aware save can land.
+    revision: row.revision ?? 0,
   };
 }
 
@@ -58,11 +85,22 @@ export class CloudSessionRepository {
   /**
    * Issues a request and returns the parsed JSON body. Throws on network
    * failure (fetch rejection), non-2xx status, or a `{ error }` envelope —
-   * the caller decides what "offline" means.
+   * the caller decides what "offline" means. An HTTP 409 (optimistic
+   * concurrency conflict) is NOT swallowed: it becomes a `CloudConflictError`
+   * carrying the current cloud copy so the caller can adopt it.
    */
   private async request(path: string, init: RequestInit = {}): Promise<unknown> {
     const response = await this.fetcher(path, init);
     if (!response.ok) {
+      if (response.status === 409) {
+        const body = (await response.json().catch(() => null)) as {
+          data?: { session?: LearningSessionRow };
+        } | null;
+        const row = body?.data?.session;
+        throw new CloudConflictError(
+          row ? sessionRowToSnapshot(row) : null
+        );
+      }
       throw new Error(
         `cloud session request failed: ${init.method ?? "GET"} ${path} (${response.status})`
       );
@@ -100,21 +138,38 @@ export class CloudSessionRepository {
    * Idempotent upsert keyed on the stable session id — importing twice or
    * saving repeatedly can never create duplicates, and original evidence IDs
    * are preserved (evidence is stored verbatim).
+   *
+   * `opts.mutationId` is a per-attempt idempotency key: a PUT repeating the
+   * server's last accepted mutation id is served without writing (the server
+   * treats it as an acknowledged replay). `opts.expectedRevision` is the
+   * revision the client last read from the cloud row; a mismatch makes the
+   * server answer 409 and this method throws `CloudConflictError` (carrying
+   * the current cloud copy) instead of overwriting it.
    */
-  async upsert(snapshot: SessionSnapshot): Promise<void> {
+  async upsert(
+    snapshot: SessionSnapshot,
+    opts?: { expectedRevision?: number; mutationId?: string }
+  ): Promise<void> {
+    const payload: Record<string, unknown> = {
+      id: snapshot.id,
+      lab_slug: snapshot.labSlug,
+      status: snapshot.status,
+      title: snapshot.title.slice(0, MAX_TITLE_LENGTH),
+      schema_version: snapshot.schemaVersion,
+      evidence: snapshot.evidence,
+      workflow: snapshot.workflow,
+      completed_at: snapshot.completedAt,
+    };
+    if (opts?.expectedRevision !== undefined) {
+      payload.expected_revision = opts.expectedRevision;
+    }
+    if (opts?.mutationId !== undefined) {
+      payload.mutation_id = opts.mutationId;
+    }
     await this.request("/api/cloud/sessions", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: snapshot.id,
-        lab_slug: snapshot.labSlug,
-        status: snapshot.status,
-        title: snapshot.title.slice(0, MAX_TITLE_LENGTH),
-        schema_version: snapshot.schemaVersion,
-        evidence: snapshot.evidence,
-        workflow: snapshot.workflow,
-        completed_at: snapshot.completedAt,
-      }),
+      body: JSON.stringify(payload),
     });
   }
 
@@ -153,5 +208,7 @@ export function snapshotFromLocal(
     evidence,
     workflow,
     completedAt,
+    // Local-only snapshots have never been written to the cloud.
+    revision: 0,
   };
 }

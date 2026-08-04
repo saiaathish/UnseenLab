@@ -1,4 +1,5 @@
 import {
+  CloudConflictError,
   CloudSessionRepository,
   type SessionSnapshot,
 } from "@/sync/cloud-session-repository";
@@ -60,8 +61,18 @@ export class CloudSessionSync {
    * session for review must not flip the dashboard row back to in-progress).
    * Returns the outcome; never throws for network/offline failures (the
    * caller surfaces a calm "saved on this device" status).
+   *
+   * `opts.mutationId` (a fresh id per attempt) makes the write idempotent
+   * server-side. The revision of the cloud copy fetched here is threaded into
+   * the write as `expected_revision`: if another device changed the row
+   * between our read and write, the server answers 409 and we report
+   * `cloud_newer_kept` — the same outcome as the evidence-time policy above,
+   * so the existing conflict semantics are unchanged.
    */
-  async save(snapshot: SessionSnapshot): Promise<SyncOutcome> {
+  async save(
+    snapshot: SessionSnapshot,
+    opts?: { mutationId?: string }
+  ): Promise<SyncOutcome> {
     let cloud: SessionSnapshot | null;
     try {
       cloud = await this.repo.getById(snapshot.id);
@@ -89,9 +100,18 @@ export class CloudSessionSync {
         : snapshot;
 
     try {
-      await this.repo.upsert(effective);
+      await this.repo.upsert(effective, {
+        mutationId: opts?.mutationId,
+        expectedRevision: cloud ? cloud.revision : undefined,
+      });
       return "saved";
-    } catch {
+    } catch (error) {
+      if (error instanceof CloudConflictError) {
+        // Defense-in-depth: the server rejected the write because the cloud
+        // row moved on. Same product semantics as the evidence-time check
+        // above: the cloud copy is newer, the local unsynced copy is kept.
+        return "cloud_newer_kept";
+      }
       return "offline";
     }
   }
