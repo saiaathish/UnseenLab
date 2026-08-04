@@ -4,7 +4,6 @@ import {
   DashboardContent,
   DashboardSkeleton,
   LoadError,
-  loadDashboardData,
 } from "@/app/dashboard/page";
 import { AvailableLabCard } from "@/components/dashboard/available-lab-card";
 import {
@@ -22,7 +21,7 @@ import type {
   LearnerPreferencesRow,
   LearningSessionRow,
   ProfileRow,
-} from "@/lib/supabase/types";
+} from "@/lib/mongo/types";
 
 /**
  * Dashboard tests (test plan §E1). Seeded real data renders real UI;
@@ -33,15 +32,6 @@ import type {
  * tests/app/dashboard-page.test.tsx.
  */
 
-const { createClientMock, redirectMock } = vi.hoisted(() => ({
-  createClientMock: vi.fn(),
-  redirectMock: vi.fn(),
-}));
-
-vi.mock("@/lib/supabase/server-client", () => ({
-  createClient: createClientMock,
-}));
-vi.mock("next/navigation", () => ({ redirect: redirectMock }));
 vi.mock("@/components/navigation/app-header", () => ({
   AppHeader: () => <header>app header</header>,
 }));
@@ -480,28 +470,5 @@ describe("DashboardContent (all sections from real data)", () => {
       "href",
       "/dashboard",
     );
-  });
-
-  it("returns an error load when any cloud query fails", async () => {
-    const client = {
-      from: vi.fn((table: string) => {
-        const fail = { data: null, error: new Error("boom") };
-        if (table === "profiles" || table === "learner_preferences") {
-          return {
-            select: vi.fn(() => ({ maybeSingle: vi.fn(async () => fail) })),
-          };
-        }
-        if (table === "learning_sessions") {
-          return {
-            select: vi.fn(() => ({
-              order: vi.fn(() => ({ limit: vi.fn(async () => fail) })),
-            })),
-          };
-        }
-        throw new Error(`Unexpected table ${table}`);
-      }),
-    } as never;
-    const load = await loadDashboardData(client, null);
-    expect(load).toEqual({ kind: "error" });
   });
 });

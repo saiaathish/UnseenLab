@@ -10,7 +10,7 @@ import {
   profileToLearnerPreferences,
 } from "@/personalization/profile-to-learner-preferences";
 import { emptyOnboardingDraft, type OnboardingDraft } from "@/personalization/onboarding-schema";
-import type { LearnerPreferencesRow } from "@/lib/supabase/types";
+import type { LearnerPreferencesRow } from "@/lib/mongo/types";
 
 const rowFixture = (overrides: Partial<LearnerPreferencesRow> = {}): LearnerPreferencesRow => ({
   user_id: "user-1",

@@ -16,10 +16,7 @@ const { signOutMock, routerPushMock, routerRefreshMock } = vi.hoisted(() => ({
   routerRefreshMock: vi.fn(),
 }));
 
-vi.mock("@/lib/supabase/auth", () => ({ signOut: signOutMock }));
-vi.mock("@/lib/supabase/use-session", () => ({
-  useSession: () => ({ user: null, loading: false, client: null }),
-}));
+vi.mock("@/lib/firebase/auth", () => ({ signOut: signOutMock }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: routerPushMock, refresh: routerRefreshMock }),
 }));

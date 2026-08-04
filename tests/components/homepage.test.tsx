@@ -16,15 +16,15 @@ vi.mock("@/components/ui/topic-input-hero", () => ({
 
 // The platform header (client) renders auth state and its own SignInDialog.
 // Keep it deterministic: signed-out session, no search params, no OAuth calls.
-vi.mock("@/lib/supabase/use-session", () => ({
-  useSession: () => ({ user: null, loading: false, client: null }),
+// isSafeRedirectPath comes from the real (pure) allowlist module, so only the
+// Firebase hooks and the popup call are stubbed.
+vi.mock("@/lib/firebase/use-session", () => ({
+  useSession: () => ({ user: null, loading: false }),
 }));
 
-vi.mock("@/lib/supabase/auth", () => ({
+vi.mock("@/lib/firebase/auth", () => ({
   signInWithGoogle: vi.fn(async () => null),
   signOut: vi.fn(async () => null),
-  isSafeRedirectPath: (next: string | null) =>
-    typeof next === "string" && next.startsWith("/") && !next.startsWith("//"),
 }));
 
 vi.mock("next/navigation", () => ({

@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
-import type { User } from "@supabase/supabase-js";
+import type { AppUser } from "@/lib/firebase/use-session";
 import {
   Dialog,
   DialogContent,
@@ -11,7 +11,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { getBrowserClient } from "@/lib/supabase/browser-client";
 import { CloudSessionRepository } from "@/sync/cloud-session-repository";
 import {
   dismissImportForVisit,
@@ -36,7 +35,7 @@ export function GuestImportDialog({
   onRequestHandled,
   autoOfferEnabled = true,
 }: {
-  user: User | null;
+  user: AppUser | null;
   session: LocalSession;
   title: string;
   /** Explicit re-trigger (e.g. "Save this session to your account"). */
@@ -64,10 +63,9 @@ export function GuestImportDialog({
     !isImportDismissedForVisit(getLocalSessionId());
 
   const handleSave = useCallback(async () => {
-    const client = getBrowserClient();
-    if (!client || !user) return;
+    if (!user) return;
     setBusy(true);
-    const repo = new CloudSessionRepository(client, user.id);
+    const repo = new CloudSessionRepository(user.id);
     const outcome = await importGuestSession(
       repo,
       session,

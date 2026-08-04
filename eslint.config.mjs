@@ -5,6 +5,16 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  // `const { _id, ...row } = doc` strips the driver-managed Mongo id from
+  // every document read — the extracted `_id` is intentionally unused.
+  {
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { ignoreRestSiblings: true },
+      ],
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -12,9 +22,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Local Supabase stack artifacts (generated, never committed).
-    "supabase/.temp/**",
-    "supabase/.branches/**",
+    // External artifact under evaluation — not part of the app.
+    "dstl/**",
   ]),
 ]);
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { User } from "@supabase/supabase-js";
+import type { AppUser } from "@/lib/firebase/use-session";
 
 // Auth state is injected per test via mockSessionState (see test-plan §2.3
 // pattern: components read useSession, tests control the return value).
@@ -9,10 +9,10 @@ const { mockSessionState } = vi.hoisted(() => ({
   mockSessionState: vi.fn(),
 }));
 
-vi.mock("@/lib/supabase/use-session", () => ({
+vi.mock("@/lib/firebase/use-session", () => ({
   useSession: () => {
     const { user, loading } = mockSessionState();
-    return { user, loading, client: null };
+    return { user, loading };
   },
 }));
 
@@ -28,23 +28,22 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(""),
 }));
 
-vi.mock("@/lib/supabase/auth", () => ({
+// The dialog's OAuth call is stubbed; isSafeRedirectPath comes from the real
+// (pure) allowlist module and needs no mock.
+vi.mock("@/lib/firebase/auth", () => ({
   signInWithGoogle: vi.fn(async () => null),
   signOut: vi.fn(async () => null),
-  isSafeRedirectPath: (next: string | null) =>
-    typeof next === "string" && next.startsWith("/") && !next.startsWith("//"),
 }));
 
 import { AppHeader } from "@/components/navigation/app-header";
 
-const signedInUser = {
+const signedInUser: AppUser = {
   id: "user-platform-a",
   email: "sai@example.com",
-  user_metadata: { full_name: "Sai" },
-  app_metadata: {},
-  aud: "authenticated",
-  created_at: "2026-01-01T00:00:00.000Z",
-} as User;
+  displayName: "Sai",
+  avatarUrl: null,
+  provider: "google.com",
+};
 
 describe("AppHeader", () => {
   beforeEach(() => {

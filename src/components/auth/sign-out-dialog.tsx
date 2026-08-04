@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { signOut } from "@/lib/supabase/auth";
+import { signOut } from "@/lib/firebase/auth";
 import {
   clearLocalSession,
   rotateLocalSessionId,
@@ -22,7 +22,8 @@ import {
  * local lab evidence is kept private to this browser; when they sign out, the
  * next person on the same browser could see it. The dialog makes the choice
  * explicit: keep the local data (current behavior) or clear it too. Cloud
- * data is never touched by either action — rows are RLS-owned and unaffected.
+ * data is never touched by either action — rows are owned server-side by
+ * the signed-in user and unaffected.
  */
 export function SignOutDialog({
   open,
@@ -49,7 +50,7 @@ export function SignOutDialog({
         // Ignore: storage unavailable means nothing to clear.
       }
     }
-    // Only Supabase session state is cleared; local evidence is either kept
+    // Only the account session is cleared; local evidence is either kept
     // (primary action) or was cleared above (secondary action). Cloud rows
     // are untouched either way.
     await signOut();

@@ -13,11 +13,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { getBrowserClient } from "@/lib/supabase/browser-client";
-import { useSession } from "@/lib/supabase/use-session";
+import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { clearLocalSession, rotateLocalSessionId } from "@/storage/session-storage";
 import { SignOutDialog } from "@/components/auth/sign-out-dialog";
-import type { SettingsUserInfo } from "./settings-tabs";
+import type {
+  LearnerPreferencesRow,
+  LearningSessionRow,
+} from "@/lib/mongo/types";
 
 /**
  * Privacy and data tab (copy spec §6.4). Export, delete saved learning data
@@ -27,10 +29,8 @@ import type { SettingsUserInfo } from "./settings-tabs";
 
 const ONBOARDING_DRAFT_KEY = "unseenlab.onboarding-draft.v1";
 
-export function PrivacySettings({ user }: { user: SettingsUserInfo }) {
+export function PrivacySettings() {
   const router = useRouter();
-  const { user: sessionUser } = useSession();
-  const userId = sessionUser?.id ?? user.id;
 
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -39,21 +39,26 @@ export function PrivacySettings({ user }: { user: SettingsUserInfo }) {
   const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
 
   const handleExport = async () => {
-    const supabase = getBrowserClient();
-    if (!supabase) return;
+    if (!isFirebaseConfigured()) return;
     setExporting(true);
     try {
-      const [sessionsResult, preferencesResult] = await Promise.all([
-        supabase
-          .from("learning_sessions")
-          .select("*")
-          .order("updated_at", { ascending: false }),
-        supabase.from("learner_preferences").select("*").maybeSingle(),
+      const [accountResponse, sessionsResponse] = await Promise.all([
+        fetch("/api/account"),
+        fetch("/api/cloud/sessions?limit=1000"),
+      ]);
+      if (!accountResponse.ok || !sessionsResponse.ok) return;
+      const [accountBody, sessionsBody] = await Promise.all([
+        accountResponse.json() as Promise<{
+          data: { preferences: LearnerPreferencesRow | null };
+        }>,
+        sessionsResponse.json() as Promise<{
+          data: { sessions: LearningSessionRow[] };
+        }>,
       ]);
       const payload = {
         exportedAt: new Date().toISOString(),
-        preferences: preferencesResult.data ?? null,
-        sessions: sessionsResult.data ?? [],
+        preferences: accountBody.data.preferences,
+        sessions: sessionsBody.data.sessions,
         label:
           "Initial design case study evidence. Not a statistically validated learning study.",
       };
@@ -73,14 +78,11 @@ export function PrivacySettings({ user }: { user: SettingsUserInfo }) {
   };
 
   const handleDelete = async () => {
-    const supabase = getBrowserClient();
-    if (!supabase) return;
+    if (!isFirebaseConfigured()) return;
     setDeleting(true);
     try {
-      await Promise.all([
-        supabase.from("learning_sessions").delete().eq("user_id", userId),
-        supabase.from("learner_preferences").delete().eq("user_id", userId),
-      ]);
+      const response = await fetch("/api/account", { method: "DELETE" });
+      if (!response.ok) return;
       setDeleteDialogOpen(false);
       toast.success("Your saved learning data was deleted.");
       router.refresh();

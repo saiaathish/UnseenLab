@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogOut, Settings, LayoutDashboard } from "lucide-react";
-import type { User } from "@supabase/supabase-js";
+import type { AppUser } from "@/lib/firebase/use-session";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,8 +14,8 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SignOutDialog } from "@/components/auth/sign-out-dialog";
 
-function initialsFor(user: User): string {
-  const name = user.user_metadata?.full_name as string | undefined;
+function initialsFor(user: AppUser): string {
+  const name = user.displayName;
   if (name && name.trim().length > 0) {
     return name
       .trim()
@@ -27,8 +27,8 @@ function initialsFor(user: User): string {
   return (user.email ?? "U").slice(0, 1).toUpperCase();
 }
 
-function firstNameFor(user: User): string {
-  const name = user.user_metadata?.full_name as string | undefined;
+function firstNameFor(user: AppUser): string {
+  const name = user.displayName;
   if (name && name.trim().length > 0) {
     return name.trim().split(/\s+/)[0] ?? "";
   }
@@ -36,12 +36,12 @@ function firstNameFor(user: User): string {
 }
 
 /** Signed-in avatar menu (copy spec §2.2, AUTH-11/12). */
-export function UserMenu({ user }: { user: User }) {
+export function UserMenu({ user }: { user: AppUser }) {
   const router = useRouter();
   const [signOutOpen, setSignOutOpen] = useState(false);
 
   const displayName = firstNameFor(user);
-  const avatarUrl = user.user_metadata?.avatar_url as string | undefined;
+  const avatarUrl = user.avatarUrl;
 
   return (
     <>

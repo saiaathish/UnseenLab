@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { User } from "@supabase/supabase-js";
+import type { AppUser } from "@/lib/firebase/use-session";
 
 /**
  * UserMenu sign-out path (PRIV-01): the "Sign out" item opens the choice
@@ -17,9 +17,9 @@ const { signOutMock, routerPushMock, routerRefreshMock } = vi.hoisted(() => ({
   routerRefreshMock: vi.fn(),
 }));
 
-vi.mock("@/lib/supabase/auth", () => ({ signOut: signOutMock }));
-vi.mock("@/lib/supabase/use-session", () => ({
-  useSession: () => ({ user: null, loading: false, client: null }),
+vi.mock("@/lib/firebase/auth", () => ({ signOut: signOutMock }));
+vi.mock("@/lib/firebase/use-session", () => ({
+  useSession: () => ({ user: null, loading: false }),
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: routerPushMock, refresh: routerRefreshMock }),
@@ -27,17 +27,13 @@ vi.mock("next/navigation", () => ({
 
 import { UserMenu } from "@/components/auth/user-menu";
 
-const signedInUser = {
+const signedInUser: AppUser = {
   id: "user-platform-a",
   email: "ada@example.com",
-  user_metadata: {
-    full_name: "Ada Lovelace",
-    avatar_url: "https://example.com/ada.jpg",
-  },
-  app_metadata: {},
-  aud: "authenticated",
-  created_at: "2026-01-01T00:00:00.000Z",
-} as User;
+  displayName: "Ada Lovelace",
+  avatarUrl: "https://example.com/ada.jpg",
+  provider: "google.com",
+};
 
 async function openMenu() {
   const user = userEvent.setup();
@@ -99,5 +95,20 @@ describe("UserMenu", () => {
     await user.click(screen.getByRole("menuitem", { name: /Settings/ }));
 
     await waitFor(() => expect(routerPushMock).toHaveBeenCalledWith("/settings"));
+  });
+
+  it("shows the email local-part when the display name is missing", async () => {
+    const user = userEvent.setup();
+    render(
+      <UserMenu
+        user={{ ...signedInUser, displayName: null }}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Account menu for ada" }),
+    );
+    await screen.findByRole("menu");
+
+    expect(screen.getByText("ada@example.com")).toBeInTheDocument();
   });
 });

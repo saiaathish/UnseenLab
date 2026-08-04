@@ -8,7 +8,7 @@ import { GOAL_LABELS } from "@/personalization/profile-to-learner-preferences";
 import type {
   LearnerPreferencesRow,
   LearningSessionRow,
-} from "@/lib/supabase/types";
+} from "@/lib/mongo/types";
 import { formatRelativeTime, labTitleFromSlug } from "./continue-learning-card";
 
 /**

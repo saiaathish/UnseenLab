@@ -13,7 +13,7 @@ import type {
   LearningGoal,
   LearningPace,
   PreferredRepresentation,
-} from "@/lib/supabase/types";
+} from "@/lib/mongo/types";
 import type { OnboardingDraft } from "@/personalization/onboarding-schema";
 
 /**

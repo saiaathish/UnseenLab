@@ -7,10 +7,10 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { getBrowserClient } from "@/lib/supabase/browser-client";
-import { useSession } from "@/lib/supabase/use-session";
+import { isFirebaseConfigured } from "@/lib/firebase/config";
+import { useSession } from "@/lib/firebase/use-session";
 import { CURRENT_ONBOARDING_VERSION } from "@/personalization/onboarding-schema";
-import type { ProfileRow } from "@/lib/supabase/types";
+import type { ProfileRow } from "@/lib/mongo/types";
 import type { SettingsUserInfo } from "./settings-tabs";
 
 /**
@@ -44,8 +44,7 @@ export function ProfileSettings({
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<"idle" | "saved" | "error">("idle");
 
-  const userId = sessionUser?.id ?? user.id;
-  const provider = sessionUser?.app_metadata?.provider ?? user.provider;
+  const provider = sessionUser?.provider ?? user.provider;
   const avatarUrl = profile?.avatar_url ?? user.avatarUrl;
 
   const onboardingComplete =
@@ -57,16 +56,18 @@ export function ProfileSettings({
     setSaving(true);
     setStatus("idle");
     try {
-      const supabase = getBrowserClient();
-      if (!supabase) {
+      if (!isFirebaseConfigured()) {
         setStatus("error");
         return;
       }
-      const { error } = await supabase
-        .from("profiles")
-        .update({ display_name: trimmed.length > 0 ? trimmed : null })
-        .eq("user_id", userId);
-      if (error) {
+      const response = await fetch("/api/account/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          display_name: trimmed.length > 0 ? trimmed : null,
+        }),
+      });
+      if (!response.ok) {
         setStatus("error");
         return;
       }
@@ -74,6 +75,8 @@ export function ProfileSettings({
         onProfileChange({ ...profile, display_name: trimmed || null });
       }
       setStatus("saved");
+    } catch {
+      setStatus("error");
     } finally {
       setSaving(false);
     }

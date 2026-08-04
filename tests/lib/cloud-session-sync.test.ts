@@ -2,109 +2,127 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   CloudSessionRepository,
   snapshotFromLocal,
+  type FetchLike,
   type SessionSnapshot,
 } from "@/sync/cloud-session-repository";
 import { CloudSessionSync, newestEvidenceTime } from "@/sync/cloud-session-sync";
 import type {
   LearningSessionRow,
   LearningSessionStatus,
-} from "@/lib/supabase/types";
+} from "@/lib/mongo/types";
 
 /**
- * Stateful, semantically honest mock of the supabase query chain for
- * learning_sessions: it records every call (including order/limit args, eq
- * filters, and upsert options), applies the recorded filters/sort/limit to the
- * in-memory row map, and applies upserts/updates/deletes to the map. A test
- * that relies on the mock's insertion order alone would now fail if
- * production stopped ordering or filtering.
+ * Stateful, semantically honest mock of the session-cookie-protected API
+ * routes: it records every fetch (method, URL, body), applies the route's
+ * filtering/sorting/limiting to the in-memory row map, and applies
+ * upserts/updates/deletes to the map. A test that relies on the mock's
+ * insertion order alone would now fail if production stopped ordering or
+ * filtering.
  */
-interface MockCall {
-  op: string;
-  args?: unknown[];
-  payload?: unknown;
-  options?: unknown;
+interface FetchCall {
+  method: string;
+  url: string;
+  body?: Record<string, unknown>;
 }
 
-function createMockClient() {
-  const calls: MockCall[] = [];
+function jsonResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  } as unknown as Response;
+}
+
+function createMockFetcher() {
+  const calls: FetchCall[] = [];
   const state = new Map<string, LearningSessionRow>();
   let failNext = false;
+  let failNextStatus: number | null = null;
 
-  function buildQuery(_table: string) {
-    const filters: Array<{ column: string; value: unknown }> = [];
-    let order: { column: string; ascending: boolean } | null = null;
-    let limitCount: number | null = null;
+  const fetcher: FetchLike = async (input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    calls.push({
+      method,
+      url,
+      body:
+        init?.body !== undefined
+          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+          : undefined,
+    });
 
-    async function finish(single: boolean) {
-      let rows = [...state.values()].filter((row) =>
-        filters.every(
-          ({ column, value }) =>
-            (row as unknown as Record<string, unknown>)[column] === value
-        )
-      );
-      if (order) {
-        const o = order;
-        rows.sort((a, b) => {
-          const av = (a as unknown as Record<string, unknown>)[o.column];
-          const bv = (b as unknown as Record<string, unknown>)[o.column];
-          if (typeof av === "string" && typeof bv === "string") {
-            const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-            return o.ascending ? cmp : -cmp;
-          }
-          return 0;
-        });
-      }
-      if (limitCount !== null) rows = rows.slice(0, limitCount);
-      if (failNext) {
-        failNext = false;
-        throw new Error("network down");
-      }
-      return single
-        ? { data: rows[0] ?? null, error: null }
-        : { data: rows, error: null };
+    if (failNext) {
+      failNext = false;
+      throw new Error("network down");
+    }
+    if (failNextStatus !== null) {
+      const status = failNextStatus;
+      failNextStatus = null;
+      return jsonResponse({ error: "internal" }, status);
     }
 
-    const chain = {
-      select: () => {
-        calls.push({ op: "select", args: [_table] });
-        return chain;
-      },
-      order: (column: string, options: { ascending: boolean }) => {
-        calls.push({ op: "order", args: [column, options] });
-        order = { column, ascending: options.ascending };
-        return chain;
-      },
-      // Like the real postgrest-js builder, `limit` returns the chain (so
-      // `.limit(1).maybeSingle()` works); awaiting the chain itself runs the
-      // list query.
-      limit: (n: number) => {
-        calls.push({ op: "limit", args: [n] });
-        limitCount = n;
-        return chain;
-      },
-      eq: (column: string, value: unknown) => {
-        calls.push({ op: "eq", args: [column, value] });
-        filters.push({ column, value });
-        return chain;
-      },
-      maybeSingle: async () => {
-        calls.push({ op: "maybeSingle" });
-        return finish(true);
-      },
-      then: (
-        onFulfilled: (value: { data: LearningSessionRow[]; error: null }) => unknown,
-        onRejected: (reason: unknown) => unknown
-      ) =>
-        finish(false).then(
-          (result) =>
-            onFulfilled(result as { data: LearningSessionRow[]; error: null }),
-          onRejected
-        ),
-    };
-    return chain;
-  }
+    if (method === "GET" && url.startsWith("/api/cloud/sessions")) {
+      const params = new URL(url, "http://unseenlab.test").searchParams;
+      const rows = [...state.values()];
+      const id = params.get("id");
+      if (id) {
+        return jsonResponse({
+          data: { session: rows.find((r) => r.id === id) ?? null },
+        });
+      }
+      const labSlug = params.get("lab_slug");
+      const status = params.get("status");
+      const filtered = rows.filter(
+        (row) =>
+          (labSlug === null || row.lab_slug === labSlug) &&
+          (status === null || row.status === status)
+      );
+      filtered.sort((a, b) =>
+        a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0
+      );
+      const limit = Number(params.get("limit") ?? "20");
+      return jsonResponse({ data: { sessions: filtered.slice(0, limit) } });
+    }
 
-  const client = {
+    if (method === "PUT" && url === "/api/cloud/sessions") {
+      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      const existing = state.get(payload.id as string);
+      const row = {
+        ...(existing ?? ({} as LearningSessionRow)),
+        ...(payload as object),
+        created_at: existing?.created_at ?? "2026-08-03T00:00:00.000Z",
+        updated_at: new Date().toISOString(),
+      } as LearningSessionRow;
+      state.set(payload.id as string, row);
+      return jsonResponse({ data: { session: row } });
+    }
+
+    if (method === "DELETE" && url === "/api/cloud/sessions") {
+      const { ids } = JSON.parse(String(init?.body)) as { ids: string[] };
+      for (const id of ids) state.delete(id);
+      return jsonResponse({ ok: true });
+    }
+
+    if (method === "POST" && url.endsWith("/complete")) {
+      // /api/cloud/sessions/<id>/complete
+      const id = url.split("/")[4];
+      const existing = state.get(id);
+      if (existing) {
+        state.set(id, {
+          ...existing,
+          status: "complete",
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+      return jsonResponse({ ok: true });
+    }
+
+    return jsonResponse({ error: "not_found" }, 404);
+  };
+
+  return {
+    fetcher,
     calls,
     state,
     get failNext() {
@@ -113,45 +131,13 @@ function createMockClient() {
     set failNext(value: boolean) {
       failNext = value;
     },
-    from: (table: string) => {
-      const chain = buildQuery(table);
-      return {
-        select: chain.select,
-        upsert: async (payload: Record<string, unknown>, options: unknown) => {
-          calls.push({ op: "upsert", payload, options });
-          const existing = state.get(payload.id as string);
-          state.set(payload.id as string, {
-            ...(existing ?? ({} as LearningSessionRow)),
-            ...payload,
-            created_at: existing?.created_at ?? "2026-08-03T00:00:00.000Z",
-            updated_at: new Date().toISOString(),
-          } as LearningSessionRow);
-          return { error: null };
-        },
-        update: (payload: unknown) => ({
-          eq: async (column: string, value: string) => {
-            calls.push({ op: "update", payload, args: [column, value] });
-            const existing = state.get(value);
-            if (existing) {
-              state.set(value, { ...existing, ...(payload as object) } as LearningSessionRow);
-            }
-            return { error: null };
-          },
-        }),
-        delete: () => ({
-          in: async (column: string, ids: string[]) => {
-            calls.push({ op: "delete", args: [column, ids] });
-            for (const id of ids) state.delete(id);
-            return { error: null };
-          },
-        }),
-      };
+    set failNextStatus(value: number | null) {
+      failNextStatus = value;
     },
   };
-  return client;
 }
 
-type MockClient = ReturnType<typeof createMockClient>;
+type MockFetcher = ReturnType<typeof createMockFetcher>;
 
 function rowFor(
   snapshot: SessionSnapshot,
@@ -205,44 +191,49 @@ describe("newestEvidenceTime", () => {
 });
 
 describe("CloudSessionRepository", () => {
-  let client: MockClient;
+  let mock: MockFetcher;
 
   beforeEach(() => {
-    client = createMockClient();
+    mock = createMockFetcher();
   });
 
-  it("upserts with the authenticated user id (RLS with check requires it)", async () => {
-    const repo = new CloudSessionRepository(client as never, "user-a");
+  it("PUTs the snapshot to /api/cloud/sessions without a user id (ownership comes from the session cookie)", async () => {
+    const repo = new CloudSessionRepository("user-a", mock.fetcher);
     await repo.upsert(snapshotWith("s-1", "2026-08-03T10:00:00.000Z"));
-    const upsertCall = client.calls.find((c) => c.op === "upsert");
-    expect(upsertCall?.payload).toMatchObject({
+    const putCall = mock.calls.find((c) => c.method === "PUT");
+    expect(putCall?.url).toBe("/api/cloud/sessions");
+    expect(putCall?.body).toMatchObject({
       id: "s-1",
-      user_id: "user-a",
       lab_slug: "nuclear-chain-reaction",
+      status: "active",
+      title: "Nuclear Chain Reaction",
+      schema_version: 1,
+      evidence: expect.any(Object),
+      workflow: expect.any(Object),
+      completed_at: null,
     });
+    // Security invariant: the body must never carry a user id — the server
+    // derives ownership from the verified session cookie only.
+    expect(putCall?.body?.user_id).toBeUndefined();
   });
 
-  it("upserts are idempotent: every call carries { onConflict: 'id' } and one row per session id", async () => {
-    const repo = new CloudSessionRepository(client as never, "user-a");
+  it("upserts are idempotent: re-saving the same id never creates a duplicate row", async () => {
+    const repo = new CloudSessionRepository("user-a", mock.fetcher);
     const snapshot = snapshotWith("s-1", "2026-08-03T10:00:00.000Z");
     // Re-importing the same stable id (two devices / import twice) must never
-    // create a duplicate row: the upsert options are the contract.
+    // create a duplicate row: the server upserts on { id }.
     await repo.upsert(snapshot);
     await repo.upsert(snapshot);
-    const upsertCalls = client.calls.filter((c) => c.op === "upsert");
-    expect(upsertCalls).toHaveLength(2);
-    for (const call of upsertCalls) {
-      expect(call.options).toEqual({ onConflict: "id" });
-    }
-    expect(client.state.size).toBe(1);
-    expect(client.state.get("s-1")?.id).toBe("s-1");
+    expect(mock.calls.filter((c) => c.method === "PUT")).toHaveLength(2);
+    expect(mock.state.size).toBe(1);
+    expect(mock.state.get("s-1")?.id).toBe("s-1");
   });
 
-  it("lists newest first: issues order(updated_at desc) + limit(20) and returns the sorted rows", async () => {
+  it("lists newest first: GET with limit=20 and the server returns rows sorted by updated_at desc", async () => {
     // s-1 is inserted first, but s-2 has the newer updated_at. If the mock
-    // were consulted in insertion order (or production dropped the order
-    // clause) this assertion would fail.
-    client.state.set(
+    // were consulted in insertion order (or production dropped the sort) this
+    // assertion would fail.
+    mock.state.set(
       "s-1",
       rowFor(
         snapshotWith("s-1", "2026-08-03T10:00:00.000Z"),
@@ -250,7 +241,7 @@ describe("CloudSessionRepository", () => {
         "2026-08-03T10:00:00.000Z"
       )
     );
-    client.state.set(
+    mock.state.set(
       "s-2",
       rowFor(
         snapshotWith("s-2", "2026-08-03T11:00:00.000Z"),
@@ -258,31 +249,25 @@ describe("CloudSessionRepository", () => {
         "2026-08-03T11:00:00.000Z"
       )
     );
-    const repo = new CloudSessionRepository(client as never, "user-a");
+    const repo = new CloudSessionRepository("user-a", mock.fetcher);
     const rows = await repo.list();
     expect(rows.map((r) => r.id)).toEqual(["s-2", "s-1"]);
     expect(rows[0]?.labSlug).toBe("nuclear-chain-reaction");
-    expect(client.calls.find((c) => c.op === "order")).toEqual({
-      op: "order",
-      args: ["updated_at", { ascending: false }],
-    });
-    expect(client.calls.find((c) => c.op === "limit")).toEqual({
-      op: "limit",
-      args: [20],
+    expect(mock.calls[0]).toEqual({
+      method: "GET",
+      url: "/api/cloud/sessions?limit=20",
+      body: undefined,
     });
   });
 
   it("honors a custom limit", async () => {
     for (const id of ["s-1", "s-2", "s-3"]) {
-      client.state.set(id, rowFor(snapshotWith(id, "2026-08-03T10:00:00.000Z")));
+      mock.state.set(id, rowFor(snapshotWith(id, "2026-08-03T10:00:00.000Z")));
     }
-    const repo = new CloudSessionRepository(client as never, "user-a");
+    const repo = new CloudSessionRepository("user-a", mock.fetcher);
     const rows = await repo.list(2);
     expect(rows).toHaveLength(2);
-    expect(client.calls.find((c) => c.op === "limit")).toEqual({
-      op: "limit",
-      args: [2],
-    });
+    expect(mock.calls[0]?.url).toBe("/api/cloud/sessions?limit=2");
   });
 
   it("getIncompleteForLab filters lab_slug + status active and returns the newest match", async () => {
@@ -296,116 +281,115 @@ describe("CloudSessionRepository", () => {
       updated_at: updatedAt,
     });
     // s-2 has the newest updated_at but is complete — it must be filtered out.
-    client.state.set("s-1", mk("s-1", "active", "2026-08-03T08:00:00.000Z"));
-    client.state.set("s-2", mk("s-2", "complete", "2026-08-03T11:00:00.000Z"));
-    client.state.set("s-3", mk("s-3", "active", "2026-08-03T10:00:00.000Z"));
+    mock.state.set("s-1", mk("s-1", "active", "2026-08-03T08:00:00.000Z"));
+    mock.state.set("s-2", mk("s-2", "complete", "2026-08-03T11:00:00.000Z"));
+    mock.state.set("s-3", mk("s-3", "active", "2026-08-03T10:00:00.000Z"));
 
-    const repo = new CloudSessionRepository(client as never, "user-a");
+    const repo = new CloudSessionRepository("user-a", mock.fetcher);
     const row = await repo.getIncompleteForLab("nuclear-chain-reaction");
 
     expect(row?.id).toBe("s-3");
-    const eqCalls = client.calls
-      .filter((c) => c.op === "eq")
-      .map((c) => c.args);
-    expect(eqCalls).toContainEqual(["lab_slug", "nuclear-chain-reaction"]);
-    expect(eqCalls).toContainEqual(["status", "active"]);
-    expect(client.calls.find((c) => c.op === "order")).toEqual({
-      op: "order",
-      args: ["updated_at", { ascending: false }],
-    });
-    expect(client.calls.find((c) => c.op === "limit")).toEqual({
-      op: "limit",
-      args: [1],
-    });
-    expect(client.calls.some((c) => c.op === "maybeSingle")).toBe(true);
+    expect(mock.calls[0]?.url).toBe(
+      "/api/cloud/sessions?lab_slug=nuclear-chain-reaction&status=active&limit=1"
+    );
   });
 
   it("getIncompleteForLab returns null when nothing matches the filters", async () => {
-    client.state.set(
+    mock.state.set(
       "s-1",
       rowFor(snapshotWith("s-1", "2026-08-03T10:00:00.000Z"))
     );
-    const repo = new CloudSessionRepository(client as never, "user-a");
+    const repo = new CloudSessionRepository("user-a", mock.fetcher);
     const row = await repo.getIncompleteForLab("some-other-lab");
     expect(row).toBeNull();
   });
 
-  it("marks a session complete with an update payload and the id filter", async () => {
-    const repo = new CloudSessionRepository(client as never, "user-a");
+  it("marks a session complete via POST to the id-scoped complete route", async () => {
+    mock.state.set(
+      "s-1",
+      rowFor(snapshotWith("s-1", "2026-08-03T10:00:00.000Z"))
+    );
+    const repo = new CloudSessionRepository("user-a", mock.fetcher);
     await repo.markComplete("s-1");
-    const updateCall = client.calls.find((c) => c.op === "update");
-    expect(updateCall?.payload).toMatchObject({ status: "complete" });
-    expect(
-      typeof (updateCall?.payload as { completed_at?: unknown })
-        .completed_at
-    ).toBe("string");
-    expect(updateCall?.args).toEqual(["id", "s-1"]);
+    expect(mock.calls[0]).toMatchObject({
+      method: "POST",
+      url: "/api/cloud/sessions/s-1/complete",
+    });
+    expect(mock.state.get("s-1")?.status).toBe("complete");
+    expect(typeof mock.state.get("s-1")?.completed_at).toBe("string");
   });
 
   it("deletes only requested ids", async () => {
-    const repo = new CloudSessionRepository(client as never, "user-a");
+    mock.state.set("s-1", rowFor(snapshotWith("s-1", "2026-08-03T10:00:00.000Z")));
+    mock.state.set("s-2", rowFor(snapshotWith("s-2", "2026-08-03T10:00:00.000Z")));
+    mock.state.set("s-3", rowFor(snapshotWith("s-3", "2026-08-03T10:00:00.000Z")));
+    const repo = new CloudSessionRepository("user-a", mock.fetcher);
     await repo.deleteByIds(["s-1", "s-2"]);
-    const deleteCall = client.calls.find((c) => c.op === "delete");
-    expect(deleteCall?.args).toEqual(["id", ["s-1", "s-2"]]);
+    const deleteCall = mock.calls.find((c) => c.method === "DELETE");
+    expect(deleteCall?.url).toBe("/api/cloud/sessions");
+    expect(deleteCall?.body).toEqual({ ids: ["s-1", "s-2"] });
+    expect(mock.state.has("s-1")).toBe(false);
+    expect(mock.state.has("s-2")).toBe(false);
+    expect(mock.state.has("s-3")).toBe(true);
     await repo.deleteByIds([]);
-    expect(client.calls.filter((c) => c.op === "delete")).toHaveLength(1);
+    expect(mock.calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("throws on HTTP errors instead of swallowing them (caller maps to offline)", async () => {
+    mock.failNextStatus = 500;
+    const repo = new CloudSessionRepository("user-a", mock.fetcher);
+    await expect(
+      repo.upsert(snapshotWith("s-1", "2026-08-03T10:00:00.000Z"))
+    ).rejects.toThrow();
   });
 });
 
 describe("CloudSessionSync conflict policy", () => {
-  let client: MockClient;
+  let mock: MockFetcher;
 
   beforeEach(() => {
-    client = createMockClient();
+    mock = createMockFetcher();
   });
 
+  function makeSync(): CloudSessionSync {
+    return new CloudSessionSync(new CloudSessionRepository("user-a", mock.fetcher));
+  }
+
   it("saves when no cloud copy exists", async () => {
-    const sync = new CloudSessionSync(
-      new CloudSessionRepository(client as never, "user-a")
-    );
-    const outcome = await sync.save(
+    const outcome = await makeSync().save(
       snapshotWith("s-1", "2026-08-03T10:00:00.000Z")
     );
     expect(outcome).toBe("saved");
   });
 
   it("saves when the local snapshot is newer", async () => {
-    client.state.set(
+    mock.state.set(
       "s-1",
       rowFor(snapshotWith("s-1", "2026-08-03T09:00:00.000Z"))
     );
-    const sync = new CloudSessionSync(
-      new CloudSessionRepository(client as never, "user-a")
-    );
-    const outcome = await sync.save(
+    const outcome = await makeSync().save(
       snapshotWith("s-1", "2026-08-03T10:00:00.000Z")
     );
     expect(outcome).toBe("saved");
   });
 
   it("keeps a newer cloud copy (never overwrites with older local evidence)", async () => {
-    client.state.set(
+    mock.state.set(
       "s-1",
       rowFor(snapshotWith("s-1", "2026-08-03T11:00:00.000Z"))
     );
-    const sync = new CloudSessionSync(
-      new CloudSessionRepository(client as never, "user-a")
-    );
-    const outcome = await sync.save(
+    const outcome = await makeSync().save(
       snapshotWith("s-1", "2026-08-03T10:00:00.000Z")
     );
     expect(outcome).toBe("cloud_newer_kept");
-    expect(client.calls.some((c) => c.op === "upsert")).toBe(false);
+    expect(mock.calls.some((c) => c.method === "PUT")).toBe(false);
   });
 
   it("keeps a cloud copy with a newer schema version", async () => {
     const cloud = rowFor(snapshotWith("s-1", "2026-08-03T09:00:00.000Z"));
     cloud.schema_version = 99;
-    client.state.set("s-1", cloud);
-    const sync = new CloudSessionSync(
-      new CloudSessionRepository(client as never, "user-a")
-    );
-    const outcome = await sync.save(
+    mock.state.set("s-1", cloud);
+    const outcome = await makeSync().save(
       snapshotWith("s-1", "2026-08-03T10:00:00.000Z")
     );
     expect(outcome).toBe("cloud_schema_newer_kept");
@@ -415,20 +399,17 @@ describe("CloudSessionSync conflict policy", () => {
     // Reviewing an old completed session must not flip the dashboard row back
     // to in progress: the local snapshot is active and newer, but the cloud
     // copy is complete.
-    client.state.set("s-1", {
+    mock.state.set("s-1", {
       ...rowFor(snapshotWith("s-1", "2026-08-03T09:00:00.000Z")),
       status: "complete",
       completed_at: "2026-08-03T11:00:00.000Z",
     });
-    const sync = new CloudSessionSync(
-      new CloudSessionRepository(client as never, "user-a")
-    );
-    const outcome = await sync.save(
+    const outcome = await makeSync().save(
       snapshotWith("s-1", "2026-08-03T10:00:00.000Z")
     );
     expect(outcome).toBe("saved");
-    const upsertCall = client.calls.find((c) => c.op === "upsert");
-    expect(upsertCall?.payload).toMatchObject({
+    const putCall = mock.calls.find((c) => c.method === "PUT");
+    expect(putCall?.body).toMatchObject({
       id: "s-1",
       status: "complete",
       completed_at: "2026-08-03T11:00:00.000Z",
@@ -439,42 +420,40 @@ describe("CloudSessionSync conflict policy", () => {
     // Policy: "the newer valid snapshot wins" — a tie (cloudTime === localTime)
     // is not strictly newer, so the local save proceeds instead of keeping the
     // cloud copy.
-    client.state.set(
+    mock.state.set(
       "s-1",
       rowFor(snapshotWith("s-1", "2026-08-03T10:00:00.000Z"))
     );
-    const sync = new CloudSessionSync(
-      new CloudSessionRepository(client as never, "user-a")
-    );
-    const outcome = await sync.save(
+    const outcome = await makeSync().save(
       snapshotWith("s-1", "2026-08-03T10:00:00.000Z")
     );
     expect(outcome).toBe("saved");
-    expect(client.calls.some((c) => c.op === "upsert")).toBe(true);
+    expect(mock.calls.some((c) => c.method === "PUT")).toBe(true);
   });
 
   it("reports offline instead of throwing when the cloud is unreachable", async () => {
-    const broken = createMockClient();
-    broken.failNext = true;
-    const sync = new CloudSessionSync(
-      new CloudSessionRepository(broken as never, "user-a")
+    mock.failNext = true;
+    const outcome = await makeSync().save(
+      snapshotWith("s-1", "2026-08-03T10:00:00.000Z")
     );
-    const outcome = await sync.save(
+    expect(outcome).toBe("offline");
+  });
+
+  it("reports offline when the server answers with an HTTP error", async () => {
+    mock.failNextStatus = 500;
+    const outcome = await makeSync().save(
       snapshotWith("s-1", "2026-08-03T10:00:00.000Z")
     );
     expect(outcome).toBe("offline");
   });
 
   it("does not touch other sessions with different ids", async () => {
-    client.state.set(
+    mock.state.set(
       "other",
       rowFor(snapshotWith("other", "2026-08-03T11:00:00.000Z"))
     );
-    const sync = new CloudSessionSync(
-      new CloudSessionRepository(client as never, "user-a")
-    );
-    await sync.save(snapshotWith("s-1", "2026-08-03T10:00:00.000Z"));
-    expect(client.state.has("other")).toBe(true);
-    expect(client.state.get("other")?.id).toBe("other");
+    await makeSync().save(snapshotWith("s-1", "2026-08-03T10:00:00.000Z"));
+    expect(mock.state.has("other")).toBe(true);
+    expect(mock.state.get("other")?.id).toBe("other");
   });
 });

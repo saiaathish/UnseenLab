@@ -83,9 +83,9 @@ npm install
 npm run dev        # http://localhost:3000
 ```
 
-Requires Node 20+ (built against Node 22). **Guest-first by design**: the lab is fully usable with no account, no Supabase project, and no hosted model — everything works locally and offline (deterministic rules, localStorage evidence, JSON export).
+Requires Node 20+ (built against Node 22). **Guest-first by design**: the lab is fully usable with no account, no Firebase project, no MongoDB, and no hosted model — everything works locally and offline (deterministic rules, localStorage evidence, JSON export).
 
-The optional platform layer (Supabase + Google OAuth) adds: saved preferences, cloud-saved sessions, cross-device resume, a personalized dashboard, and account settings. Without Supabase env vars the app degrades gracefully to guest-only mode (no crash, no auth wall). The core app has no telemetry; the only logging in the product is the optional server bridge's safe telemetry (model, fallback reason, elapsed milliseconds) when the hosted path is enabled. See `docs/supabase-setup.md` for the exact external configuration checklist.
+The optional platform layer (Firebase Auth + MongoDB) adds: Google sign-in, saved preferences, cloud-saved sessions, cross-device resume, a personalized dashboard, and account settings. Without the Firebase/Mongo env vars the app degrades gracefully to guest-only mode (no crash, no auth wall). The core app has no telemetry; the only logging in the product is the optional server bridge's safe telemetry (model, fallback reason, elapsed milliseconds) when the hosted path is enabled. See `docs/firebase-mongodb-setup.md` for the exact external configuration checklist.
 
 ### Optional: enable the hosted model
 
@@ -128,10 +128,15 @@ npm run build       # production build
 src/
   app/                     Next.js App Router (landing + lab page)
     api/adapt/route.ts     server bridge: typed payload -> hosted model -> validated answer
+    api/auth/              session-cookie mint (POST /api/auth/session) + logout
+    api/account/           profile + preferences (GET/PATCH/PUT/DELETE)
+    api/cloud/sessions/    cloud session upsert/list/delete/complete
   components/lab/          experiment shell, prediction, variables, canvas,
                            representation tabs, adaptation card,
                            counterfactual, replay, accessibility, research mode
   components/ui/           homepage: topic-input hero, wave background, mini navbar
+  lib/firebase/            Firebase browser config + admin session-cookie verify/mint
+  lib/mongo/               server-only MongoDB client + row types
   lib/topic-routing.ts     homepage topic -> supported/unsupported lab routing
   domain/                  typed schemas: experiments, learner, evidence,
                            adaptation contract (Zod-validated)
@@ -154,7 +159,7 @@ See `docs/architecture.md` for the component diagram and data flow.
 - One lab (Nuclear Chain Reaction) is functional; two are registered as planned.
 - The structured LLM provider is implemented but optional: it activates only with `NEXT_PUBLIC_LLM_ENABLED=1` (build time) plus a server-side `LLM_API_KEY`; without them everything runs on the deterministic offline rules.
 - Free-text research answers are held in component state only (not persisted) in this commit.
-- Cloud features (Google sign-in, cross-device sync) require a Supabase project and Google OAuth credentials; they are fully implemented and tested with mocks, but the real OAuth smoke test is `NOT_RUN_EXTERNAL_CREDENTIALS` until credentials are configured (see `docs/supabase-setup.md`).
+- Cloud features (Google sign-in, cross-device sync) require a Firebase project (Google sign-in enabled) and a MongoDB Atlas cluster (or local MongoDB); they are fully implemented and tested with mocked clients, but the real OAuth smoke test is `NOT_RUN_EXTERNAL_CREDENTIALS` until credentials are configured (see `docs/firebase-mongodb-setup.md`).
 - On a shared device, local guest evidence is device-scoped (not per-account) by design — sign-in never deletes it.
 - `npm audit` reports 3 high findings in `sharp` (transitive via Next.js image optimization; the app does not use `next/image`). Fixing requires `next@16.3.0`, intentionally deferred from this branch.
 - **User research is honest but incomplete: the initial design participant was interviewed and his confirmed preferences shaped the product, but no structured product-test session has been performed yet.** The testing kit (`docs/user-testing-kit.md`) and the templates in `docs/user-research.md` are ready and empty — a real participant session is still required, and nothing in this repo claims a result that session has not produced. There is no "validated" or "statistically significant" claim anywhere.

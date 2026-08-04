@@ -1,14 +1,14 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
-  Database,
   LearningSessionRow,
   LearningSessionStatus,
-} from "@/lib/supabase/types";
+} from "@/lib/mongo/types";
 
 /**
- * Cloud session repository. All access goes through the authenticated client,
- * so RLS enforces row ownership server-side; this module never trusts the
- * caller to filter by user.
+ * Cloud session repository. All requests go to the session-cookie-protected
+ * API routes (/api/cloud/sessions), which derive ownership from the verified
+ * cookie — the wire payload never carries a `user_id`, and this module never
+ * trusts the caller to filter by user. Network and HTTP failures propagate:
+ * the caller (CloudSessionSync / importGuestSession) maps them to "offline".
  */
 
 export interface SessionSnapshot {
@@ -26,6 +26,11 @@ export const SESSION_SCHEMA_VERSION = 1;
 const SESSION_LAB_SLUG = "nuclear-chain-reaction";
 export const MAX_TITLE_LENGTH = 120;
 
+export type FetchLike = (
+  input: string | URL,
+  init?: RequestInit
+) => Promise<Response>;
+
 export function sessionRowToSnapshot(row: LearningSessionRow): SessionSnapshot {
   return {
     id: row.id,
@@ -41,49 +46,54 @@ export function sessionRowToSnapshot(row: LearningSessionRow): SessionSnapshot {
 
 export class CloudSessionRepository {
   /**
-   * @param userId The authenticated user's id. Every write carries it, and
-   * RLS `with check` guarantees it can only ever be the caller's own id.
+   * @param userId The verified session-cookie uid. Routes derive ownership
+   * from it server-side; it never appears in request bodies (security
+   * invariant — the role RLS played in Postgres).
    */
   constructor(
-    private readonly client: SupabaseClient<Database>,
-    private readonly userId: string
+    private readonly userId: string,
+    private readonly fetcher: FetchLike = fetch
   ) {}
 
-  /** Most recent sessions first; caller must be the row owner (RLS). */
+  /**
+   * Issues a request and returns the parsed JSON body. Throws on network
+   * failure (fetch rejection), non-2xx status, or a `{ error }` envelope —
+   * the caller decides what "offline" means.
+   */
+  private async request(path: string, init: RequestInit = {}): Promise<unknown> {
+    const response = await this.fetcher(path, init);
+    if (!response.ok) {
+      throw new Error(
+        `cloud session request failed: ${init.method ?? "GET"} ${path} (${response.status})`
+      );
+    }
+    return (await response.json()) as unknown;
+  }
+
+  /** Most recent sessions first; caller must be the row owner (cookie). */
   async list(limit = 20): Promise<SessionSnapshot[]> {
-    const { data, error } = await this.client
-      .from("learning_sessions")
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .limit(limit);
-    if (error) throw error;
-    return (data ?? []).map(sessionRowToSnapshot);
+    const body = (await this.request(
+      `/api/cloud/sessions?limit=${limit}`
+    )) as { data: { sessions: LearningSessionRow[] } };
+    return body.data.sessions.map(sessionRowToSnapshot);
   }
 
   async getById(id: string): Promise<SessionSnapshot | null> {
-    const { data, error } = await this.client
-      .from("learning_sessions")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
-    if (error) throw error;
-    return data ? sessionRowToSnapshot(data) : null;
+    const body = (await this.request(
+      `/api/cloud/sessions?id=${encodeURIComponent(id)}`
+    )) as { data: { session: LearningSessionRow | null } };
+    return body.data.session ? sessionRowToSnapshot(body.data.session) : null;
   }
 
   /** First incomplete session for a lab, newest first. */
   async getIncompleteForLab(
     labSlug: string
   ): Promise<SessionSnapshot | null> {
-    const { data, error } = await this.client
-      .from("learning_sessions")
-      .select("*")
-      .eq("lab_slug", labSlug)
-      .eq("status", "active")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw error;
-    return data ? sessionRowToSnapshot(data) : null;
+    const body = (await this.request(
+      `/api/cloud/sessions?lab_slug=${encodeURIComponent(labSlug)}&status=active&limit=1`
+    )) as { data: { sessions: LearningSessionRow[] } };
+    const row = body.data.sessions[0] ?? null;
+    return row ? sessionRowToSnapshot(row) : null;
   }
 
   /**
@@ -92,10 +102,11 @@ export class CloudSessionRepository {
    * are preserved (evidence is stored verbatim).
    */
   async upsert(snapshot: SessionSnapshot): Promise<void> {
-    const { error } = await this.client.from("learning_sessions").upsert(
-      {
+    await this.request("/api/cloud/sessions", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         id: snapshot.id,
-        user_id: this.userId,
         lab_slug: snapshot.labSlug,
         status: snapshot.status,
         title: snapshot.title.slice(0, MAX_TITLE_LENGTH),
@@ -103,27 +114,24 @@ export class CloudSessionRepository {
         evidence: snapshot.evidence,
         workflow: snapshot.workflow,
         completed_at: snapshot.completedAt,
-      },
-      { onConflict: "id" }
-    );
-    if (error) throw error;
+      }),
+    });
   }
 
   async markComplete(id: string): Promise<void> {
-    const { error } = await this.client
-      .from("learning_sessions")
-      .update({ status: "complete", completed_at: new Date().toISOString() })
-      .eq("id", id);
-    if (error) throw error;
+    await this.request(
+      `/api/cloud/sessions/${encodeURIComponent(id)}/complete`,
+      { method: "POST" }
+    );
   }
 
   async deleteByIds(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
-    const { error } = await this.client
-      .from("learning_sessions")
-      .delete()
-      .in("id", ids);
-    if (error) throw error;
+    await this.request("/api/cloud/sessions", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
   }
 }
 

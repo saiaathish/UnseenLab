@@ -1,12 +1,10 @@
 /**
- * Hand-written Supabase Database types for the platform schema.
- * Matches supabase/migrations/20260803193000_platform_schema.sql exactly.
- * Regenerate with `supabase gen types` once a project is linked.
- */
-
-/**
- * Rows are type aliases (not interfaces) so they carry the implicit index
- * signature postgrest-js's GenericTable constraint requires.
+ * Hand-written MongoDB document types for the platform schema.
+ * Mirrors supabase/migrations/20260803193000_platform_schema.sql, which the
+ * migration replaced (collections + indexes live in scripts/mongo-setup.mjs).
+ *
+ * `_id` is driver-managed and never part of the row contract: reads must
+ * not leak it to clients, and writes must never accept it.
  */
 
 export type LearningGoal =
@@ -70,34 +68,3 @@ export type LearningSessionRow = {
   updated_at: string;
   completed_at: string | null;
 };
-
-export interface Database {
-  public: {
-    Tables: {
-      profiles: {
-        Row: ProfileRow;
-        Insert: Partial<ProfileRow> & { user_id: string };
-        Update: Partial<ProfileRow>;
-        Relationships: [];
-      };
-      learner_preferences: {
-        Row: LearnerPreferencesRow;
-        Insert: Partial<LearnerPreferencesRow> & { user_id: string };
-        Update: Partial<LearnerPreferencesRow>;
-        Relationships: [];
-      };
-      learning_sessions: {
-        Row: LearningSessionRow;
-        Insert: Partial<LearningSessionRow> & {
-          user_id: string;
-          lab_slug: string;
-          title: string;
-        };
-        Update: Partial<LearningSessionRow>;
-        Relationships: [];
-      };
-    };
-    Views: Record<string, never>;
-    Functions: Record<string, never>;
-  };
-}

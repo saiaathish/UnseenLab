@@ -1,5 +1,3 @@
-import { getBrowserClient } from "@/lib/supabase/browser-client";
-
 /**
  * Rejects open-redirect targets. Only same-origin relative paths are allowed.
  * `//evil.com`, `/\evil.com`, control-character injection (`/%09/evil.com`,
@@ -23,28 +21,4 @@ export function isSafeRedirectPath(next: string | null): next is string {
     if (resolved.origin !== "https://unseenlab.local") return false;
   }
   return true;
-}
-
-/** Google OAuth entry point. Returns the error (or null) — never throws. */
-export async function signInWithGoogle(redirectTo?: string): Promise<Error | null> {
-  const supabase = getBrowserClient();
-  if (!supabase) return new Error("Authentication is not configured yet.");
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo,
-    },
-  });
-  return error;
-}
-
-/**
- * Sign out in the browser. Preserves local guest evidence by design: only
- * Supabase session state is cleared; localStorage lab data is untouched.
- */
-export async function signOut(): Promise<Error | null> {
-  const supabase = getBrowserClient();
-  if (!supabase) return null;
-  const { error } = await supabase.auth.signOut();
-  return error;
 }

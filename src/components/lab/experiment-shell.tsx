@@ -47,13 +47,13 @@ import {
   setLocalSessionId,
   type LocalSession,
 } from "@/storage/session-storage";
-import { useSession } from "@/lib/supabase/use-session";
-import { getBrowserClient } from "@/lib/supabase/browser-client";
+import { useSession } from "@/lib/firebase/use-session";
+import { isFirebaseConfigured } from "@/lib/firebase/config";
 import {
   profileToLearnerPreferences,
   preferenceSummary,
 } from "@/personalization/profile-to-learner-preferences";
-import type { LearnerPreferencesRow } from "@/lib/supabase/types";
+import type { LearnerPreferencesRow } from "@/lib/mongo/types";
 import { CloudSessionRepository } from "@/sync/cloud-session-repository";
 import { useCloudSessionSync } from "@/sync/use-cloud-session-sync";
 import {
@@ -141,7 +141,6 @@ export function ExperimentShell({
   const { user, loading: sessionLoading } = useSession();
   const { status: syncStatus, flush: flushSync } = useCloudSessionSync(
     session,
-    user,
     experiment.title
   );
   const [profilePrefs, setProfilePrefs] =
@@ -277,15 +276,15 @@ export function ExperimentShell({
   // adjusted something locally, in which case the local session wins. The
   // preferred representation also selects the initial lab view.
   const applyCloudPreferences = useCallback(async () => {
-    const client = getBrowserClient();
-    if (!user || !client || cloudPrefsApplied.current) return;
+    if (!user || !isFirebaseConfigured() || cloudPrefsApplied.current) return;
     cloudPrefsApplied.current = true;
     try {
-      const { data } = await client
-        .from("learner_preferences")
-        .select("*")
-        .eq("user_id", user.id)
-        .maybeSingle();
+      const response = await fetch("/api/account");
+      if (!response.ok) return;
+      const body = (await response.json()) as {
+        data: { preferences: LearnerPreferencesRow | null };
+      };
+      const data = body.data.preferences;
       if (!data) return;
       if (localPrefsChanged.current) return;
       setProfilePrefs(data);
@@ -531,13 +530,10 @@ export function ExperimentShell({
     const hadTrials = session.evidence.trials.length > 0;
     if (hadTrials && user) {
       await flushSync();
-      const client = getBrowserClient();
-      if (client) {
-        const repo = new CloudSessionRepository(client, user.id);
-        void repo.markComplete(getLocalSessionId()).catch(() => {
-          // Cloud unavailable: the local session remains the source of truth.
-        });
-      }
+      const repo = new CloudSessionRepository(user.id);
+      void repo.markComplete(getLocalSessionId()).catch(() => {
+        // Cloud unavailable: the local session remains the source of truth.
+      });
     }
     rotateLocalSessionId();
     clearLocalSession();

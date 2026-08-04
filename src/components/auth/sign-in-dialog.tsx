@@ -4,9 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { signInWithGoogle } from "@/lib/supabase/auth";
-import { useSession } from "@/lib/supabase/use-session";
-import { isSafeRedirectPath } from "@/lib/supabase/auth";
+import { signInWithGoogle } from "@/lib/firebase/auth";
+import { useSession } from "@/lib/firebase/use-session";
+import { isSafeRedirectPath } from "@/lib/auth/redirect-safety";
 
 /**
  * Single auth surface for the whole app (copy spec §2.1). Controlled by the
@@ -58,15 +58,18 @@ export function SignInDialog({
   const handleGoogle = async () => {
     setSubmitting(true);
     setErrorKey(null);
-    const origin = window.location.origin;
-    const safeNext = isSafeRedirectPath(next) ? `?next=${encodeURIComponent(next)}` : "";
-    const redirectTo = `${origin}/auth/callback${safeNext}`;
-    const error = await signInWithGoogle(redirectTo);
+    // The popup flow mints the httpOnly session cookie server-side; the
+    // caller then routes through /auth/callback so onboarding and the safe
+    // `next` destination are handled in exactly one place.
+    const error = await signInWithGoogle();
     if (error) {
       setErrorKey("generic");
       setSubmitting(false);
+      return;
     }
-    // Success: the browser navigates to Google; keep the dialog open until then.
+    const origin = window.location.origin;
+    const safeNext = isSafeRedirectPath(next) ? `?next=${encodeURIComponent(next)}` : "";
+    window.location.assign(`${origin}/auth/callback${safeNext}`);
   };
 
   return (

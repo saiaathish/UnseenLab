@@ -10,21 +10,21 @@ import { RecentSessions } from "@/components/dashboard/recent-sessions";
 import { RecommendedNextStepCard } from "@/components/dashboard/recommendation-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { createClient } from "@/lib/supabase/server-client";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { CURRENT_ONBOARDING_VERSION } from "@/personalization/onboarding-schema";
+import type { Db } from "mongodb";
+import { verifySessionUser, type SessionUser } from "@/lib/firebase/server";
+import { COLLECTIONS, getPlatformDb } from "@/lib/mongo/client";
 import type {
-  Database,
   LearnerPreferencesRow,
   LearningSessionRow,
   ProfileRow,
-} from "@/lib/supabase/types";
+} from "@/lib/mongo/types";
+import { CURRENT_ONBOARDING_VERSION } from "@/personalization/onboarding-schema";
 
 export const dynamic = "force-dynamic";
 
 export type SessionGate =
   | { kind: "redirect"; to: "/?auth=open" }
-  | { kind: "ok"; supabase: SupabaseClient<Database>; email: string | null };
+  | { kind: "ok"; user: SessionUser };
 
 export type DashboardLoad =
   | { kind: "error" }
@@ -38,18 +38,24 @@ export type DashboardLoad =
     };
 
 /**
+ * Mongo rows carry a driver-managed `_id`; destructure it away so documents
+ * match the snake_case row contract the UI expects.
+ */
+function stripDocId<T extends { _id: unknown }>(doc: T): Omit<T, "_id"> {
+  const { _id, ...row } = doc;
+  return row;
+}
+
+/**
  * Session gate for the protected dashboard. Returns a redirect target when
- * Supabase is unconfigured or no session user exists, otherwise the client.
+ * no verified session user exists, otherwise the user (uid derived from the
+ * session cookie — never from a request body).
  */
 export async function resolveSession(
-  supabase: SupabaseClient<Database> | null,
+  user: SessionUser | null,
 ): Promise<SessionGate> {
-  if (!supabase) return { kind: "redirect", to: "/?auth=open" };
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
   if (!user) return { kind: "redirect", to: "/?auth=open" };
-  return { kind: "ok", supabase, email: user.email ?? null };
+  return { kind: "ok", user };
 }
 
 /**
@@ -58,24 +64,32 @@ export async function resolveSession(
  * incomplete, or a calm error state instead of crashing on query failure.
  */
 export async function loadDashboardData(
-  supabase: SupabaseClient<Database>,
-  email: string | null,
+  db: Db,
+  user: SessionUser,
 ): Promise<DashboardLoad> {
-  const [profileResult, preferencesResult, sessionsResult] = await Promise.all([
-    supabase.from("profiles").select("*").maybeSingle(),
-    supabase.from("learner_preferences").select("*").maybeSingle(),
-    supabase
-      .from("learning_sessions")
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .limit(10),
-  ]);
-
-  if (profileResult.error || preferencesResult.error || sessionsResult.error) {
+  let profileDoc;
+  let preferencesDoc;
+  let sessionDocs;
+  try {
+    [profileDoc, preferencesDoc, sessionDocs] = await Promise.all([
+      db
+        .collection<ProfileRow>(COLLECTIONS.profiles)
+        .findOne({ user_id: user.uid }),
+      db
+        .collection<LearnerPreferencesRow>(COLLECTIONS.learnerPreferences)
+        .findOne({ user_id: user.uid }),
+      db
+        .collection<LearningSessionRow>(COLLECTIONS.learningSessions)
+        .find({ user_id: user.uid })
+        .sort({ updated_at: -1 })
+        .limit(10)
+        .toArray(),
+    ]);
+  } catch {
     return { kind: "error" };
   }
 
-  const profile = profileResult.data;
+  const profile = profileDoc ? stripDocId(profileDoc) : null;
   if (!profile || profile.onboarding_version < CURRENT_ONBOARDING_VERSION) {
     return { kind: "redirect", to: "/onboarding" };
   }
@@ -83,9 +97,9 @@ export async function loadDashboardData(
   return {
     kind: "ready",
     profile,
-    preferences: preferencesResult.data,
-    sessions: sessionsResult.data ?? [],
-    email,
+    preferences: preferencesDoc ? stripDocId(preferencesDoc) : null,
+    sessions: sessionDocs.map((doc) => stripDocId(doc)),
+    email: user.email ?? null,
   };
 }
 
@@ -158,14 +172,8 @@ export function LoadError() {
   );
 }
 
-async function DashboardData({
-  supabase,
-  email,
-}: {
-  supabase: SupabaseClient<Database>;
-  email: string | null;
-}) {
-  const load = await loadDashboardData(supabase, email);
+async function DashboardData({ db, user }: { db: Db; user: SessionUser }) {
+  const load = await loadDashboardData(db, user);
   if (load.kind === "redirect") redirect(load.to);
   if (load.kind === "error") return <LoadError />;
   return (
@@ -179,15 +187,21 @@ async function DashboardData({
 }
 
 export default async function DashboardPage() {
-  const gate = await resolveSession(await createClient());
+  const user = await verifySessionUser();
+  const gate = await resolveSession(user);
   if (gate.kind === "redirect") redirect(gate.to);
+
+  // Unconfigured MongoDB means no stored platform rows — the same guest mode
+  // as an unverified session, so redirect to sign-in rather than render empty.
+  const db = await getPlatformDb();
+  if (!db) redirect("/?auth=open");
 
   return (
     <div className="bg-background text-foreground">
       <AppHeader />
       <main id="main-content" className="min-h-screen bg-background">
         <Suspense fallback={<DashboardSkeleton />}>
-          <DashboardData supabase={gate.supabase} email={gate.email} />
+          <DashboardData db={db} user={gate.user} />
         </Suspense>
       </main>
     </div>

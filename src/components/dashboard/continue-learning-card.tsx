@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EXPERIMENT_REGISTRY } from "@/domain/experiments";
-import type { LearningSessionRow } from "@/lib/supabase/types";
+import type { LearningSessionRow } from "@/lib/mongo/types";
 
 /**
  * Continue learning card (copy spec §5.2). Shows the first in-progress

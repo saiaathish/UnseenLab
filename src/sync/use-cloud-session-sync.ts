@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { User } from "@supabase/supabase-js";
-import { getBrowserClient } from "@/lib/supabase/browser-client";
+import { useSession } from "@/lib/firebase/use-session";
 import {
   CloudSessionRepository,
   snapshotFromLocal,
@@ -23,6 +22,8 @@ const SAVE_DEBOUNCE_MS = 800;
 /**
  * Saves the local session to the cloud after meaningful events only.
  *
+ * - The signed-in user comes from Firebase auth state (`useSession`); the
+ *   repository is built per save, and only when a user is present.
  * - A fingerprint of evidence + workflow gates the save, so animation frames
  *   and preference-only changes never trigger a request.
  * - The effect depends on the evidence/workflow REFERENCES (not the whole
@@ -33,9 +34,9 @@ const SAVE_DEBOUNCE_MS = 800;
  */
 export function useCloudSessionSync(
   session: LocalSession,
-  user: User | null,
   title: string
 ): { status: CloudSyncStatus; flush: () => Promise<void> } {
+  const { user } = useSession();
   const [status, setStatus] = useState<CloudSyncStatus>("idle");
   const lastFingerprint = useRef<string | null>(null);
   const timer = useRef<number | null>(null);
@@ -44,10 +45,9 @@ export function useCloudSessionSync(
   const workflowRef = session.workflow;
 
   const runSave = useCallback(() => {
-    const client = getBrowserClient();
-    if (!client || !user) return Promise.resolve();
+    if (!user) return Promise.resolve();
     setStatus("saving");
-    const repo = new CloudSessionRepository(client, user.id);
+    const repo = new CloudSessionRepository(user.id);
     const sync = new CloudSessionSync(repo);
     const snapshot = snapshotFromLocal(
       getLocalSessionId(),

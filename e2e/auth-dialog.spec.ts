@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Auth dialog behavior, browser level (guest build — no Supabase config):
+ * Auth dialog behavior, browser level (guest build — no Firebase config):
  * - opens from the header with the mandated copy (AUTH-01..07)
  * - Escape closes and restores focus to the trigger
  * - "Continue with Google" degrades gracefully when sign-in is unavailable

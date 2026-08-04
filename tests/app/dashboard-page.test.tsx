@@ -1,36 +1,67 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import {
+import DashboardPage, {
   DashboardContent,
   loadDashboardData,
   resolveSession,
 } from "@/app/dashboard/page";
+import type { SessionUser } from "@/lib/firebase/server";
+import type { Db } from "mongodb";
 import type {
-  Database,
   LearnerPreferencesRow,
   LearningSessionRow,
   ProfileRow,
-} from "@/lib/supabase/types";
+} from "@/lib/mongo/types";
 
 /**
  * Dashboard server logic (test plan §E2, UNIT): the page redirects signed-out
- * visitors to /?auth=open, incomplete onboarding to /onboarding, and renders
- * when onboarding is complete. The page is an async server component that
- * Next renders natively, so its decisions are extracted into the exported
- * `resolveSession` / `loadDashboardData` functions and tested directly with
- * a mocked Supabase client — the honest substitute for a live session.
+ * visitors to /?auth=open (no session or unconfigured MongoDB), incomplete
+ * onboarding to /onboarding, and renders when onboarding is complete. The
+ * page is an async server component that Next renders natively, so its
+ * decisions are extracted into the exported `resolveSession` /
+ * `loadDashboardData` functions and tested directly with a fake Mongo handle
+ * — the honest substitute for a live session.
  */
 
-vi.mock("@/lib/supabase/server-client", () => ({
-  createClient: vi.fn(),
+const mocks = vi.hoisted(() => {
+  const redirect = vi.fn((path: string): never => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  });
+  return {
+    redirect,
+    verifySessionUser: vi.fn(),
+    getPlatformDb: vi.fn(),
+  };
+});
+
+vi.mock("next/navigation", () => ({
+  redirect: (path: string) => mocks.redirect(path),
 }));
-vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+
+vi.mock("@/lib/firebase/server", () => ({
+  verifySessionUser: mocks.verifySessionUser,
+}));
+
+vi.mock("@/lib/mongo/client", () => ({
+  COLLECTIONS: {
+    profiles: "profiles",
+    learnerPreferences: "learner_preferences",
+    learningSessions: "learning_sessions",
+  },
+  getPlatformDb: mocks.getPlatformDb,
+}));
+
 vi.mock("@/components/navigation/app-header", () => ({
   AppHeader: () => <header>app header</header>,
 }));
 
-const USER = { id: "user-platform-a", email: "ada@example.com" };
+const USER: SessionUser = {
+  uid: "user-platform-a",
+  email: "ada@example.com",
+  displayName: "Ada",
+  avatarUrl: null,
+  provider: "google.com",
+};
 
 function profileFixture(overrides: Partial<ProfileRow> = {}): ProfileRow {
   return {
@@ -86,135 +117,137 @@ function sessionFixture(): LearningSessionRow {
   };
 }
 
-function mockSupabaseClient({
-  user = USER,
+interface FakeDb {
+  db: Db;
+  findOneSpies: {
+    profiles: ReturnType<typeof vi.fn>;
+    learnerPreferences: ReturnType<typeof vi.fn>;
+    learningSessions: ReturnType<typeof vi.fn>;
+  };
+  findSpy: ReturnType<typeof vi.fn>;
+  sortSpy: ReturnType<typeof vi.fn>;
+  limitSpy: ReturnType<typeof vi.fn>;
+}
+
+/**
+ * Fake Mongo handle mirroring the driver chain the page uses, with the
+ * spies exposed so tests can assert the security invariant (every query
+ * filtered by the verified session uid).
+ */
+function fakeDb({
   profile = profileFixture(),
   preferences = preferencesFixture(),
   sessions = [sessionFixture()],
   failQueries = false,
 }: {
-  user?: typeof USER | null;
   profile?: ProfileRow | null;
   preferences?: LearnerPreferencesRow | null;
   sessions?: LearningSessionRow[];
   failQueries?: boolean;
-} = {}) {
-  const fail = failQueries
-    ? { data: null, error: new Error("boom") }
-    : undefined;
-  return {
-    auth: {
-      getUser: vi.fn(async () => ({ data: { user }, error: null })),
-    },
-    from: vi.fn((table: string) => {
-      if (table === "profiles") {
-        return {
-          select: vi.fn(() => ({
-            maybeSingle: vi.fn(async () =>
-              fail ?? { data: profile, error: null },
-            ),
-          })),
-        };
-      }
-      if (table === "learner_preferences") {
-        return {
-          select: vi.fn(() => ({
-            maybeSingle: vi.fn(async () =>
-              fail ?? { data: preferences, error: null },
-            ),
-          })),
-        };
-      }
-      if (table === "learning_sessions") {
-        return {
-          select: vi.fn(() => ({
-            order: vi.fn(() => ({
-              limit: vi.fn(async () =>
-                fail ?? { data: sessions, error: null },
-              ),
-            })),
-          })),
-        };
-      }
-      throw new Error(`Unexpected table ${table}`);
-    }),
+} = {}): FakeDb {
+  const fail = (): never => {
+    throw new Error("boom");
   };
+  const findOneSpies = {
+    profiles: vi.fn(async () => (failQueries ? fail() : profile)),
+    learnerPreferences: vi.fn(async () =>
+      failQueries ? fail() : preferences
+    ),
+    learningSessions: vi.fn(async () => (failQueries ? fail() : null)),
+  };
+  const limitSpy = vi.fn(() => ({
+    toArray: vi.fn(async () => (failQueries ? fail() : sessions)),
+  }));
+  const sortSpy = vi.fn(() => ({ limit: limitSpy }));
+  const findSpy = vi.fn(() => ({ sort: sortSpy }));
+  const db = {
+    collection: vi.fn((name: string) => {
+      if (name === "profiles") return { findOne: findOneSpies.profiles };
+      if (name === "learner_preferences") {
+        return { findOne: findOneSpies.learnerPreferences };
+      }
+      if (name === "learning_sessions") {
+        return { findOne: findOneSpies.learningSessions, find: findSpy };
+      }
+      throw new Error(`Unexpected collection ${name}`);
+    }),
+  } as unknown as Db;
+  return { db, findOneSpies, findSpy, sortSpy, limitSpy };
 }
 
-/** Test double accepted where the page's data functions expect a real client. */
-function asSupabaseClient(
-  client: object,
-): SupabaseClient<Database> {
-  return client as unknown as SupabaseClient<Database>;
-}
+describe("DashboardPage (server component) — session gating", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("redirects to /?auth=open when the session cookie verifies to no user", async () => {
+    mocks.verifySessionUser.mockResolvedValue(null);
+
+    await expect(DashboardPage()).rejects.toThrow("NEXT_REDIRECT:/?auth=open");
+    expect(mocks.redirect).toHaveBeenCalledWith("/?auth=open");
+    expect(mocks.getPlatformDb).not.toHaveBeenCalled();
+  });
+
+  it("redirects to /?auth=open when MongoDB is not configured (db → null)", async () => {
+    mocks.verifySessionUser.mockResolvedValue(USER);
+    mocks.getPlatformDb.mockResolvedValue(null);
+
+    await expect(DashboardPage()).rejects.toThrow("NEXT_REDIRECT:/?auth=open");
+    expect(mocks.redirect).toHaveBeenCalledWith("/?auth=open");
+  });
+});
 
 describe("resolveSession — signed-in gating", () => {
-  it("redirects to /?auth=open when Supabase is not configured", async () => {
+  it("redirects to /?auth=open when there is no verified session user", async () => {
     expect(await resolveSession(null)).toEqual({
       kind: "redirect",
       to: "/?auth=open",
     });
   });
 
-  it("redirects to /?auth=open when there is no session user", async () => {
-    const client = mockSupabaseClient({ user: null });
-    expect(await resolveSession(asSupabaseClient(client))).toEqual({
-      kind: "redirect",
-      to: "/?auth=open",
-    });
-  });
-
-  it("passes the client and email through for a signed-in user", async () => {
-    const client = mockSupabaseClient();
-    const gate = await resolveSession(asSupabaseClient(client));
-    expect(gate).toMatchObject({ kind: "ok", email: "ada@example.com" });
-    if (gate.kind === "ok") {
-      expect(gate.supabase).toBe(client);
-    }
+  it("passes the user through for a verified session", async () => {
+    const gate = await resolveSession(USER);
+    expect(gate).toEqual({ kind: "ok", user: USER });
   });
 });
 
 describe("loadDashboardData — onboarding gate and data loading", () => {
   it("returns an error load instead of crashing when queries fail", async () => {
-    const client = mockSupabaseClient({ failQueries: true });
-    expect(await loadDashboardData(asSupabaseClient(client), null)).toEqual({ kind: "error" });
+    const { db } = fakeDb({ failQueries: true });
+    expect(await loadDashboardData(db, USER)).toEqual({ kind: "error" });
   });
 
   it("redirects to /onboarding when the profile is missing", async () => {
-    const client = mockSupabaseClient({ profile: null });
-    expect(await loadDashboardData(asSupabaseClient(client), null)).toEqual({
+    const { db } = fakeDb({ profile: null });
+    expect(await loadDashboardData(db, USER)).toEqual({
       kind: "redirect",
       to: "/onboarding",
     });
   });
 
   it("redirects to /onboarding when onboarding is incomplete", async () => {
-    const client = mockSupabaseClient({
-      profile: profileFixture({ onboarding_version: 0 }),
-    });
-    expect(await loadDashboardData(asSupabaseClient(client), null)).toEqual({
+    const { db } = fakeDb({ profile: profileFixture({ onboarding_version: 0 }) });
+    expect(await loadDashboardData(db, USER)).toEqual({
       kind: "redirect",
       to: "/onboarding",
     });
   });
 
   it("does not redirect when onboarding is complete", async () => {
-    const client = mockSupabaseClient({
-      profile: profileFixture({ onboarding_version: 1 }),
-    });
-    const load = await loadDashboardData(asSupabaseClient(client), "ada@example.com");
+    const { db } = fakeDb({ profile: profileFixture({ onboarding_version: 1 }) });
+    const load = await loadDashboardData(db, USER);
     expect(load.kind).toBe("ready");
   });
 
-  it("loads profile, preferences, and the ten most recent sessions", async () => {
+  it("loads profile, preferences, and the ten most recent sessions by user id", async () => {
     const sessions = [sessionFixture()];
-    const client = mockSupabaseClient({
+    const { db, findOneSpies, findSpy } = fakeDb({
       profile: profileFixture(),
       preferences: preferencesFixture(),
       sessions,
     });
 
-    const load = await loadDashboardData(asSupabaseClient(client), "ada@example.com");
+    const load = await loadDashboardData(db, USER);
     expect(load).toMatchObject({
       kind: "ready",
       email: "ada@example.com",
@@ -222,18 +255,27 @@ describe("loadDashboardData — onboarding gate and data loading", () => {
     if (load.kind === "ready") {
       expect(load.profile.display_name).toBe("Ada");
       expect(load.preferences?.learning_goal).toBe("understand_concept");
-      expect(load.sessions).toBe(sessions);
+      // stripDocId copies the rows, so compare structurally rather than by
+      // identity.
+      expect(load.sessions).toStrictEqual(sessions);
     }
 
-    const fromMock = client.from as ReturnType<typeof vi.fn>;
-    const tables = fromMock.mock.calls.map(([table]) => table);
-    expect(tables).toEqual(
-      expect.arrayContaining([
-        "profiles",
-        "learner_preferences",
-        "learning_sessions",
-      ]),
-    );
+    // The security invariant: every read filters by the verified session uid,
+    // never a client-supplied id.
+    expect(findOneSpies.profiles).toHaveBeenCalledWith({
+      user_id: "user-platform-a",
+    });
+    expect(findOneSpies.learnerPreferences).toHaveBeenCalledWith({
+      user_id: "user-platform-a",
+    });
+    expect(findSpy).toHaveBeenCalledWith({ user_id: "user-platform-a" });
+  });
+
+  it("sorts sessions by updated_at descending and limits to ten", async () => {
+    const { db, sortSpy, limitSpy } = fakeDb();
+    await loadDashboardData(db, USER);
+    expect(sortSpy).toHaveBeenCalledWith({ updated_at: -1 });
+    expect(limitSpy).toHaveBeenCalledWith(10);
   });
 });
 
@@ -267,8 +309,8 @@ describe("Dashboard server gating — no dangling redirects", () => {
   });
 
   it("the ready path never produces a redirect", async () => {
-    const client = mockSupabaseClient();
-    const load = await loadDashboardData(asSupabaseClient(client), null);
+    const { db } = fakeDb();
+    const load = await loadDashboardData(db, USER);
     expect(load).not.toHaveProperty("to");
   });
 });

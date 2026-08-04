@@ -5,8 +5,7 @@ import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { getBrowserClient } from "@/lib/supabase/browser-client";
-import { useSession } from "@/lib/supabase/use-session";
+import { isFirebaseConfigured } from "@/lib/firebase/config";
 import {
   DENSITY_LABELS,
   EXPLANATION_LABELS,
@@ -22,8 +21,7 @@ import type {
   LearningGoal,
   LearningPace,
   PreferredRepresentation,
-} from "@/lib/supabase/types";
-import type { SettingsUserInfo } from "./settings-tabs";
+} from "@/lib/mongo/types";
 
 /**
  * Learning preferences tab (copy spec §6.2). Option sets match the schema
@@ -100,14 +98,10 @@ function SelectField({
 export function LearningPreferencesSettings({
   preferences,
   onPreferencesChange,
-  user,
 }: {
   preferences: LearnerPreferencesRow;
   onPreferencesChange: (preferences: LearnerPreferencesRow) => void;
-  user: SettingsUserInfo;
 }) {
-  const { user: sessionUser } = useSession();
-  const userId = sessionUser?.id ?? user.id;
   const initial = useRef(preferences);
   const [saveError, setSaveError] = useState(false);
 
@@ -117,19 +111,19 @@ export function LearningPreferencesSettings({
   };
 
   // Immediate save (500 ms debounce) — optimistic UI: the row above is
-  // already the new state while the upsert is in flight.
+  // already the new state while the upsert is in flight. The full row is sent
+  // without `user_id` — the server derives ownership from the session cookie.
   useEffect(() => {
     if (preferences === initial.current) return;
     const timer = window.setTimeout(() => {
-      const supabase = getBrowserClient();
-      if (!supabase) {
+      if (!isFirebaseConfigured()) {
         setSaveError(true);
         return;
       }
-      void supabase
-        .from("learner_preferences")
-        .upsert({
-          user_id: userId,
+      void fetch("/api/account/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           learning_goal: preferences.learning_goal,
           preferred_representation: preferences.preferred_representation,
           explanation_style: preferences.explanation_style,
@@ -142,13 +136,15 @@ export function LearningPreferencesSettings({
           one_variable_mode: preferences.one_variable_mode,
           topic_interests: preferences.topic_interests,
           schema_version: preferences.schema_version,
+        }),
+      })
+        .then((response) => {
+          if (!response.ok) setSaveError(true);
         })
-        .then(({ error }) => {
-          if (error) setSaveError(true);
-        });
+        .catch(() => setSaveError(true));
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [preferences, userId]);
+  }, [preferences]);
 
   return (
     <section

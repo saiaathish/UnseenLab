@@ -2,22 +2,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import OnboardingPage from "@/app/onboarding/page";
 import { CURRENT_ONBOARDING_VERSION } from "@/personalization/onboarding-schema";
+import type { LearnerPreferencesRow } from "@/lib/mongo/types";
 
 /**
  * Server-side behavior of /onboarding (defense in depth on top of the proxy):
- * no session or unconfigured Supabase → /?auth=open; completed onboarding
- * (onboarding_version >= CURRENT_ONBOARDING_VERSION) → /dashboard; otherwise
- * the header + wizard render.
+ * no session or unconfigured Firebase/MongoDB → /?auth=open; completed
+ * onboarding (onboarding_version >= CURRENT_ONBOARDING_VERSION) → /dashboard;
+ * otherwise the header + wizard render. Rerun mode (?rerun=1) passes the
+ * saved preferences into the wizard as initialPrefs.
  */
 
 const mocks = vi.hoisted(() => {
   const redirect = vi.fn((path: string): never => {
     throw new Error(`NEXT_REDIRECT:${path}`);
   });
-  const createClient = vi.fn();
-  const push = vi.fn();
-  const browserUser = { id: "user-platform-a", email: "ada@example.com" };
-  return { redirect, createClient, push, browserUser };
+  return {
+    redirect,
+    verifySessionUser: vi.fn(),
+    getPlatformDb: vi.fn(),
+    push: vi.fn(),
+  };
 });
 
 vi.mock("next/navigation", () => ({
@@ -26,69 +30,84 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-vi.mock("@/lib/supabase/server-client", () => ({
-  createClient: () => mocks.createClient(),
+vi.mock("@/lib/firebase/server", () => ({
+  verifySessionUser: mocks.verifySessionUser,
 }));
 
-vi.mock("@/lib/supabase/browser-client", () => ({
-  getBrowserClient: () => ({
-    auth: {
-      getUser: async () => ({ data: { user: mocks.browserUser }, error: null }),
-      onAuthStateChange: () => ({
-        data: { subscription: { unsubscribe() {} } },
-      }),
-    },
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          maybeSingle: async () => ({ data: null, error: null }),
-          single: async () => ({ data: null, error: null }),
-          order: async () => ({ data: [], error: null }),
-        }),
-        maybeSingle: async () => ({ data: null, error: null }),
-        order: async () => ({ data: [], error: null }),
-      }),
-      upsert: async () => ({ error: null }),
-      update: () => ({ eq: async () => ({ error: null }) }),
-    }),
-  }),
+vi.mock("@/lib/mongo/client", () => ({
+  COLLECTIONS: {
+    profiles: "profiles",
+    learnerPreferences: "learner_preferences",
+    learningSessions: "learning_sessions",
+  },
+  getPlatformDb: mocks.getPlatformDb,
 }));
 
 vi.mock("@/components/navigation/app-header", () => ({
   AppHeader: () => <header>App header marker</header>,
 }));
 
-interface ServerClientShape {
-  auth: { getUser: () => Promise<{ data: { user: unknown }; error: null }> };
-  from: (
-    table: string
-  ) => {
-    select: () => {
-      maybeSingle: () => Promise<{ data: unknown; error: null }>;
-    };
+// The wizard is a client component: mock the current useSession module so
+// the render is deterministic.
+vi.mock("@/lib/firebase/use-session", () => ({
+  useSession: () => ({
+    user: {
+      id: "user-platform-a",
+      email: "ada@example.com",
+      displayName: "Ada",
+      avatarUrl: null,
+      provider: "google.com",
+    },
+    loading: false,
+  }),
+}));
+
+const SESSION_USER = {
+  uid: "user-platform-a",
+  email: "ada@example.com",
+  displayName: "Ada",
+  avatarUrl: null,
+  provider: "google.com",
+};
+
+function preferencesFixture(): LearnerPreferencesRow {
+  return {
+    user_id: "user-platform-a",
+    learning_goal: "explore_experiments",
+    preferred_representation: "animation",
+    explanation_style: "step_by_step",
+    learning_pace: "calm",
+    animation_speed: 0.5,
+    information_density: "medium",
+    reduced_motion: true,
+    high_contrast: false,
+    text_scale: 1,
+    one_variable_mode: true,
+    topic_interests: ["quantum"],
+    schema_version: 1,
+    created_at: "2026-08-03T10:00:00.000Z",
+    updated_at: "2026-08-03T10:00:00.000Z",
   };
 }
 
-function serverClient({
-  user,
+/** Fake Mongo handle: profile by onboarding version, optional preferences. */
+function platformDb({
   profileVersion,
+  preferences = null,
 }: {
-  user: unknown;
   profileVersion: number | null;
-}): ServerClientShape {
+  preferences?: LearnerPreferencesRow | null;
+}) {
   return {
-    auth: {
-      getUser: async () => ({ data: { user }, error: null }),
-    },
-    from: (table: string) => ({
-      select: () => ({
-        maybeSingle: async () => ({
-          data:
-            table === "profiles" && profileVersion !== null
-              ? { onboarding_version: profileVersion }
-              : null,
-          error: null,
-        }),
+    collection: (name: string) => ({
+      findOne: vi.fn(async () => {
+        if (name === "profiles") {
+          return profileVersion !== null
+            ? { onboarding_version: profileVersion }
+            : null;
+        }
+        if (name === "learner_preferences") return preferences;
+        return null;
       }),
     }),
   };
@@ -96,31 +115,30 @@ function serverClient({
 
 describe("OnboardingPage (server component)", () => {
   beforeEach(() => {
+    localStorage.clear();
     vi.clearAllMocks();
   });
 
   it("redirects signed-out visitors to /?auth=open", async () => {
-    mocks.createClient.mockResolvedValue(
-      serverClient({ user: null, profileVersion: null })
-    );
+    mocks.verifySessionUser.mockResolvedValue(null);
 
     await expect(OnboardingPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("NEXT_REDIRECT:/?auth=open");
     expect(mocks.redirect).toHaveBeenCalledWith("/?auth=open");
+    expect(mocks.getPlatformDb).not.toHaveBeenCalled();
   });
 
-  it("redirects to /?auth=open when Supabase is not configured", async () => {
-    mocks.createClient.mockResolvedValue(null);
+  it("redirects to /?auth=open when MongoDB is not configured", async () => {
+    mocks.verifySessionUser.mockResolvedValue(SESSION_USER);
+    mocks.getPlatformDb.mockResolvedValue(null);
 
     await expect(OnboardingPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("/?auth=open");
     expect(mocks.redirect).toHaveBeenCalledWith("/?auth=open");
   });
 
   it("sends completed learners straight to /dashboard", async () => {
-    mocks.createClient.mockResolvedValue(
-      serverClient({
-        user: mocks.browserUser,
-        profileVersion: CURRENT_ONBOARDING_VERSION,
-      })
+    mocks.verifySessionUser.mockResolvedValue(SESSION_USER);
+    mocks.getPlatformDb.mockResolvedValue(
+      platformDb({ profileVersion: CURRENT_ONBOARDING_VERSION })
     );
 
     await expect(OnboardingPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("/dashboard");
@@ -128,9 +146,8 @@ describe("OnboardingPage (server component)", () => {
   });
 
   it("renders the header and the wizard when onboarding is incomplete (no profile)", async () => {
-    mocks.createClient.mockResolvedValue(
-      serverClient({ user: mocks.browserUser, profileVersion: null })
-    );
+    mocks.verifySessionUser.mockResolvedValue(SESSION_USER);
+    mocks.getPlatformDb.mockResolvedValue(platformDb({ profileVersion: null }));
 
     const element = await OnboardingPage({ searchParams: Promise.resolve({}) });
     expect(mocks.redirect).not.toHaveBeenCalled();
@@ -150,9 +167,8 @@ describe("OnboardingPage (server component)", () => {
   });
 
   it("renders the wizard when the profile exists but onboarding is incomplete (version 0)", async () => {
-    mocks.createClient.mockResolvedValue(
-      serverClient({ user: mocks.browserUser, profileVersion: 0 })
-    );
+    mocks.verifySessionUser.mockResolvedValue(SESSION_USER);
+    mocks.getPlatformDb.mockResolvedValue(platformDb({ profileVersion: 0 }));
 
     const element = await OnboardingPage({ searchParams: Promise.resolve({}) });
     expect(mocks.redirect).not.toHaveBeenCalled();
@@ -167,11 +183,13 @@ describe("OnboardingPage (server component)", () => {
     );
   });
 
-  it("lets completed learners rerun onboarding via ?rerun=1", async () => {
-    mocks.createClient.mockResolvedValue(
-      serverClient({
-        user: mocks.browserUser,
+  it("lets completed learners rerun onboarding via ?rerun=1 and prefills the wizard", async () => {
+    const preferences = preferencesFixture();
+    mocks.verifySessionUser.mockResolvedValue(SESSION_USER);
+    mocks.getPlatformDb.mockResolvedValue(
+      platformDb({
         profileVersion: CURRENT_ONBOARDING_VERSION,
+        preferences,
       })
     );
 
@@ -184,5 +202,10 @@ describe("OnboardingPage (server component)", () => {
     await screen.findByRole("heading", {
       name: "What would you like help doing?",
     });
+    // initialPrefs flowed into the wizard: the saved learning goal (rather
+    // than the default) is the checked option on step 1.
+    expect(
+      screen.getByRole("radio", { name: "Explore through experiments." })
+    ).toBeChecked();
   });
 });

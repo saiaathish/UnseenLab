@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { TEXT_SCALE_MAX, TEXT_SCALE_MIN } from "@/domain/learner";
-import { useSession } from "@/lib/supabase/use-session";
-import type { LearnerPreferencesRow } from "@/lib/supabase/types";
+import { useSession } from "@/lib/firebase/use-session";
+import { isFirebaseConfigured } from "@/lib/firebase/config";
+import type { LearnerPreferencesRow } from "@/lib/mongo/types";
 import { cn } from "@/lib/utils";
 import {
   CURRENT_ONBOARDING_VERSION,
@@ -33,7 +34,7 @@ import {
  * change is persisted to `unseenlab.onboarding-draft.v1` (zod-validated on
  * read, so corrupt data falls back to a clean draft). Completion writes the
  * learner_preferences row and bumps the profile's onboarding version, then
- * lands on /dashboard. When the browser client is unavailable the wizard
+ * lands on /dashboard. When the account layer is unavailable the wizard
  * still lets the learner finish locally and says so calmly.
  */
 
@@ -138,7 +139,7 @@ export function OnboardingWizard({
   initialPrefs?: LearnerPreferencesRow | null;
 }) {
   const router = useRouter();
-  const { user, loading, client } = useSession();
+  const { user, loading } = useSession();
 
   const [draft, setDraft] = useState<OnboardingDraft>(() => {
     const stored = readStoredDraft();
@@ -203,9 +204,9 @@ export function OnboardingWizard({
   /**
    * Completes onboarding: upserts learner_preferences, bumps
    * profiles.onboarding_version, clears the draft, and redirects. If the
-   * browser client is unavailable the learner still finishes locally — a calm
-   * notice says the account save did not happen. On a real save error the
-   * draft is retained and a Retry is offered (ERR-07).
+   * account layer is unavailable (Firebase unconfigured) the learner still
+   * finishes locally — a calm notice says the account save did not happen. On
+   * a real save error the draft is retained and a Retry is offered (ERR-07).
    */
   const completeWithPreferences = async (finalDraft: OnboardingDraft) => {
     if (!user) return;
@@ -213,20 +214,23 @@ export function OnboardingWizard({
     setSaveError(false);
     setSaveUnavailable(false);
     try {
-      if (client) {
-        const { error: prefsError } = await client
-          .from("learner_preferences")
-          .upsert({ ...draftToPreferencesRow(finalDraft), user_id: user.id });
-        if (prefsError) throw prefsError;
+      if (isFirebaseConfigured()) {
+        const prefsResponse = await fetch("/api/account/preferences", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...draftToPreferencesRow(finalDraft) }),
+        });
+        if (!prefsResponse.ok) throw new Error("preferences save failed");
 
-        const { error: profileError } = await client
-          .from("profiles")
-          .update({
+        const profileResponse = await fetch("/api/account/profile", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
             onboarding_version: CURRENT_ONBOARDING_VERSION,
             onboarding_completed_at: new Date().toISOString(),
-          })
-          .eq("user_id", user.id);
-        if (profileError) throw profileError;
+          }),
+        });
+        if (!profileResponse.ok) throw new Error("profile save failed");
       } else {
         setSaveUnavailable(true);
       }
@@ -247,14 +251,16 @@ export function OnboardingWizard({
    */
   const skipOnboarding = async () => {
     try {
-      if (client && user) {
-        await client
-          .from("profiles")
-          .update({
+      if (isFirebaseConfigured() && user) {
+        const response = await fetch("/api/account/profile", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
             onboarding_version: CURRENT_ONBOARDING_VERSION,
             onboarding_completed_at: new Date().toISOString(),
-          })
-          .eq("user_id", user.id);
+          }),
+        });
+        if (!response.ok) throw new Error("profile save failed");
       }
     } catch {
       // Ignored on purpose.

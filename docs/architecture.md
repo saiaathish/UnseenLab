@@ -50,6 +50,15 @@ flowchart LR
         Session["Local session (localStorage, Zod)"]
     end
 
+    subgraph Platform ["Platform layer (src/lib/firebase + src/lib/mongo + src/app/api)"]
+        SignIn["Google sign-in popup (client)"]
+        SessionRoute["POST /api/auth/session — mint session cookie"]
+        Cookie["unseenlab.session httpOnly cookie (14 days)"]
+        AccountApi["/api/account, /api/account/profile, /api/account/preferences"]
+        CloudApi["/api/cloud/sessions (GET/PUT/DELETE), /:id/complete"]
+        Mongo["MongoDB — profiles, learner_preferences, learning_sessions"]
+    end
+
     Hero --> Routing --> Landing
     MiniNav --> Landing
     Landing --> Shell
@@ -64,6 +73,11 @@ flowchart LR
     LLMProv --> LLMClient --> AdaptRoute --> Schema
     Shell --> Session <--> Evidence
     Shell --> Learner --> Session
+    SignIn --> SessionRoute --> Cookie
+    Shell --> AccountApi --> Mongo
+    Shell --> CloudApi --> Mongo
+    Cookie --> AccountApi
+    Cookie --> CloudApi
 ```
 
 ## Components
@@ -112,6 +126,18 @@ Renders the recorded journey: initial prediction → variables changed → outco
 
 Anonymous localStorage persistence with Zod validation on read; corrupt data fails safe to defaults; no telemetry. `exportSessionJson` / `clearLocalSession` back the research mode.
 
+### Platform layer (`src/lib/firebase/`, `src/lib/mongo/`, `src/app/api/{auth,account,cloud}`)
+
+The optional signed-in layer, replacing the Supabase (Google OAuth + Postgres RLS) stack.
+
+**Auth (Firebase Auth, session cookie).** Sign-in is a Google popup (`signInWithPopup`); on success the client exchanges the fresh ID token for an httpOnly session cookie named `unseenlab.session` via `POST /api/auth/session`. `src/lib/firebase/server.ts` mints it with firebase-admin `createSessionCookie` (14-day expiry, `SESSION_COOKIE_MAX_AGE_MS`) and verifies it on every protected render/route with `verifySessionCookie(cookie, true)`. Each signed-in page mount re-mints the cookie from the in-memory ID token (keepalive) so the server gate never lags the client. When the Firebase `NEXT_PUBLIC_*` config or `FIREBASE_SERVICE_ACCOUNT` is absent, the client/admin singletons return null — pure guest mode, the same null-client convention the Supabase layer used.
+
+**Data (MongoDB, server-side).** `src/lib/mongo/client.ts` exposes a lazy cached client (`getPlatformDb()`; null when `MONGODB_URI` is unset → guest mode) against database `MONGODB_DB` (default `unseenlab`) with collections `profiles`, `learner_preferences`, `learning_sessions` (row contracts in `src/lib/mongo/types.ts`, indexes in `scripts/mongo-setup.mjs` — see `docs/mongo-schema.md`).
+
+**Ownership invariant (replaces RLS).** MongoDB has no row-level security; every server route derives `user_id` from the verified session-cookie UID and never accepts it from a request body. The API layer is the enforcement boundary.
+
+**Server routes.** `POST /api/auth/session` (mint), `POST /api/auth/logout`; `GET/DELETE /api/account`, `PATCH /api/account/profile`, `PUT /api/account/preferences`; `GET/PUT/DELETE /api/cloud/sessions`, `POST /api/cloud/sessions/:id/complete`. All are cookie-authenticated and follow the `/api/adapt` route pattern (`{ data }` | JSON error shape; server-only secrets env-gated). Protected pages verify the cookie server-side and query MongoDB directly (dashboard rows, onboarding state, settings).
+
 ## Data flow (one session, repeatable trials)
 
 1. Learner submits a prediction → `PredictionRecord` appended; the prediction always feeds the NEXT trial (on later trials it is the "updated prediction" that must exist before another run).
@@ -123,6 +149,23 @@ Anonymous localStorage persistence with Zod validation on read; corrupt data fai
 7. Counterfactual runs append `cf-*` trials; replay reads the full evidence.
 8. Updated prediction unlocks the next trial — the loop repeats from step 2 as many times as the learner wants, in the same session, with no reload.
 9. Research mode exports or clears the session.
+
+## Platform data flow (signed-in)
+
+1. Sign-in: Google popup → fresh ID token → `POST /api/auth/session` →
+   firebase-admin verifies the token and sets the httpOnly
+   `unseenlab.session` cookie (14 days). The auth callback then routes by
+   profile onboarding state (`profiles.onboarding_version` from MongoDB).
+2. Every signed-in mount re-mints the cookie from the in-memory ID token
+   (keepalive) so the server gate never lags the client.
+3. Cloud writes (guest import, debounced sync, resume, complete) fetch the
+   cookie-authenticated routes; each route derives `user_id` from the
+   verified cookie and upserts into MongoDB. `user_id` is never accepted
+   from a request body.
+4. Protected pages (`/dashboard`, `/onboarding`, `/settings`) verify the
+   cookie server-side and query MongoDB directly — the dashboard's rows are
+   server-rendered from `learning_sessions`, so another device's upserts
+   appear on refresh without any client polling.
 
 ## Test boundaries
 

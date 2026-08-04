@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import type { LearningSessionRow } from "@/lib/supabase/types";
+import type { LearningSessionRow } from "@/lib/mongo/types";
 import { formatRelativeTime, labTitleFromSlug } from "./continue-learning-card";
 
 /**
