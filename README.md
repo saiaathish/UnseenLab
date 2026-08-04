@@ -119,8 +119,8 @@ npm run test:e2e    # Playwright against a production build on port 3100 (requir
 npm run build       # production build
 ```
 
-- **302 unit/component tests across 29 files** passing (measured on the latest run): simulation invariants, adaptation rules (deterministic + LLM), session persistence, multi-trial flow, reduced motion, replay truthfulness, plus the platform layer — redirect-safety (open-redirect vectors), preference mapping, onboarding wizard (4 steps, persistence, keyboard), dashboard/settings, cloud-session conflict policy, guest-import idempotency, auth callback routing, route protection.
-- **25 Playwright e2e tests across 6 specs**: demo smoke, keyboard-only core flow, homepage topic routing + auth entry, the repeatable multi-trial loop, auth dialog behavior, and route protection (signed-out visitors to /dashboard|/onboarding|/settings land on `/?auth=open` with the dialog; the lab stays public).
+- **407 unit/component tests across 37 files** passing (measured on the latest run): simulation invariants, adaptation rules (deterministic + LLM + retry/circuit-breaker reliability), session persistence, multi-trial flow, reduced motion, replay truthfulness, plus the platform layer — redirect-safety (open-redirect vectors), preference mapping, onboarding wizard, dashboard/settings, cloud-session conflict policy + optimistic concurrency (revision/409/idempotent replay), guest-import idempotency, auth callback routing, session-route security (origin check, rate limit), research-mode consent/recorder/export.
+- **50 Playwright e2e tests across 10 specs** (mode-dependent pass/skip counts; latest runs: guest build 40 passed/10 env-gated, credentialed build 39 passed/11 env-gated, 0 failed): demo smoke, keyboard-only core flow (LLM-aware waits), homepage topic routing + auth entry, the repeatable multi-trial loop, auth dialog behavior (guest-build gated), route protection, an accessibility matrix (keyboard/focus, reduced motion, text scale, 320px, contrast), a console/perf/fallback quality pack, and two env-gated real-backend specs — cross-device resume and two-user browser isolation (4/4 vs live Firebase + Atlas).
 
 ## Architecture
 
