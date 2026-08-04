@@ -1,5 +1,28 @@
 # UnseenLab — Accessibility Audit and Test Plan
 
+> **RE-STAMPED on the final-hardening branch.** The "Current implementation status" lines in
+> the test bodies below reflect the ORIGINAL audit snapshot. On the final-hardening branch the
+> following statuses are **superseded** (verified in source and covered by tests); treat the
+> correction table as authoritative:
+>
+> | Test | Original status | Current status (final-hardening) |
+> |---|---|---|
+> | A11Y-012 (accessibility settings) | IMPLEMENTED (incl. feedback timing radios) | IMPLEMENTED — the `feedbackTiming` radio group was REMOVED (dead control); remaining controls: animation speed, reduced motion, information density, one-variable mode, high contrast, text size, preferred views |
+> | A11Y-016 (replay dialog scroll/closable) | PARTIAL | PARTIAL — unchanged; closes fine, small-viewport scrolling needs manual confirmation |
+> | A11Y-022 (dialog initial focus) | MISSING | **IMPLEMENTED** — focus moves to the Close button on open (`adaptation-replay.tsx`, focus management on mount) |
+> | A11Y-023 (dialog focus trap) | MISSING | **IMPLEMENTED** — Tab/Shift+Tab are trapped inside the dialog |
+> | A11Y-024 (focus restore on close) | MISSING | **IMPLEMENTED** — focus returns to the opener on close |
+> | A11Y-026 (roving tabindex on tabs) | MISSING | **IMPLEMENTED** — representation tabs implement the WAI-ARIA tabs pattern (roving tabindex, Arrow Left/Right with wrap, `representation-tabs.tsx`) |
+> | A11Y-028 (skip-to-content link) | MISSING | MISSING — unchanged |
+> | A11Y-030 (OS `prefers-reduced-motion`) | MISSING | **IMPLEMENTED** — `matchMedia("(prefers-reduced-motion: reduce)")` seeds the preference on load (lab shell and homepage components); manual override wins |
+> | A11Y-043 (aria-live spam while playing) | PARTIAL | **FIXED** — no `aria-live` region exists in the lab components anymore; the state summary is plain content with deliberate announcements only |
+> | A11Y-049 (planned-lab card semantics) | MISSING (semantics) | **RESOLVED** — the landing page no longer renders `aria-disabled` div cards; future labs are a native `<details>`/`<summary>` list |
+> | A11Y-050 (primary-button contrast) | MISSING | **FIXED** — `--accent-strong` is now `#0f766e` (white on it ≈ 5.5:1, passes AA) |
+> | A11Y-052 (text-size effectiveness) | MISSING | **FIXED** — text scale is applied to `document.documentElement.style.fontSize`, so rem-based text scales |
+> | A11Y-061 (one-variable explanation loss) | PARTIAL | PARTIAL — unchanged |
+> | A11Y-066 (announce view switches) | PARTIAL | PARTIAL — unchanged |
+> | A11Y-069 (`feedbackTiming` dead control) | MISSING (consumer) | **RESOLVED** — control removed; nothing in the settings UI promises behavior that does not exist |
+
 **Product:** UnseenLab — Adaptive Virtual STEM Laboratory (Next.js 16 / React 19 / Zod 4 / Tailwind v4), Track 1 (AI for Learners Who Think Differently). Implemented lab: Conceptual Nuclear Chain Reaction at `/lab/nuclear-chain-reaction`.
 
 **Audit date:** 2026-08-03
@@ -23,23 +46,25 @@ Scope: one lab (`/lab/nuclear-chain-reaction`), the landing page, and the learne
 
 | Area | Tests | IMPLEMENTED | PARTIAL | MISSING | NOT YET INSPECTABLE |
 |---|---|---|---|---|---|
-| 1. Keyboard | 17 | 15 | 1 | 0 | 1 |
-| 2. Focus | 9 | 1 | 0 | 5 | 3 |
-| 3. Motion | 7 | 6 | 0 | 1 | 0 |
-| 4. Screen readers | 10 | 8 | 1 | 1 | 0 |
-| 5. Visual presentation | 8 | 3 | 0 | 2 | 3 |
-| 6. Cognitive accessibility | 9 | 5 | 2 | 1 | 1 |
+| 1. Keyboard | 17 | 16 | 0 | 0 | 1 |
+| 2. Focus | 9 | 5 | 0 | 1 | 3 |
+| 3. Motion | 7 | 7 | 0 | 0 | 0 |
+| 4. Screen readers | 10 | 9 | 0 | 1 | 0 |
+| 5. Visual presentation | 8 | 5 | 0 | 0 | 3 |
+| 6. Cognitive accessibility | 9 | 6 | 2 | 0 | 1 |
 | 7. Interactivity and animation | 6 | 4 | 0 | 0 | 2 |
-| **Total** | **66** | **42** | **4** | **10** | **10** |
+| **Total** | **66** | **52** | **2** | **1** | **10** |
 
-Pass count (by inspection): **42** — all pending manual execution. Fail count (static-proven): **10**. Open items: **14** (4 partial, 10 not yet inspectable).
+Pass count (by inspection, after the final-hardening re-stamp): **52** — all pending manual execution. Fail count (static-proven): **1**. Open items: **12** (2 partial, 10 not yet inspectable).
 
-The four most consequential failures, all in the winner-blocking/finalist-blocking range:
+> Re-stamp note: at the original audit the counts were 42 IMPLEMENTED / 4 PARTIAL / 10 MISSING / 10 open. The final-hardening branch fixed nine of the ten static-proven failures (focus management A11Y-022..024, roving tabs A11Y-026, OS reduced motion A11Y-030, planned-card semantics A11Y-049, primary-button contrast A11Y-050, text-scale effectiveness A11Y-052, `feedbackTiming` A11Y-069) and the aria-live spam risk (A11Y-043). The one remaining static-proven miss is the skip-to-content link (A11Y-028, S4).
 
-1. **Adaptation Replay dialog has no focus management** (initial focus, trap, restore) — `src/components/lab/adaptation-replay.tsx:258-290`. The dialog claims `role="dialog" aria-modal="true"` but focus is never moved into it, Tab falls through to the page behind, and closing does not restore focus. Repair ≈ 2.5h.
-2. **No OS `prefers-reduced-motion` support** — reduced motion exists only as a manual toggle (`src/components/lab/accessibility-controls.tsx:49-55`; `src/components/lab/simulation-canvas.tsx:34`). Repair ≈ 2h.
-3. **`aria-live` summary announces every animation step** (~900ms default cadence, down to ~450ms at 2× speed) — `src/components/lab/simulation-canvas.tsx:219-231`. Screen-reader spam risk. Repair ≈ 1.5h.
-4. **Text-size preference is likely a no-op** — applied as container `font-size: %` (`src/components/lab/experiment-shell.tsx:327-329`) but Tailwind v4 utilities are rem-based, so most text does not scale. Repair ≈ 1.5h.
+The original four most consequential failures are all resolved on the final-hardening branch:
+
+1. **Adaptation Replay dialog focus management** (initial focus, trap, restore) — **IMPLEMENTED** (`src/components/lab/adaptation-replay.tsx`: focus moves to the Close button on open, Tab/Shift+Tab are trapped, focus returns to the trigger on close).
+2. **OS `prefers-reduced-motion` support** — **IMPLEMENTED** (seeded from `matchMedia` on load in the lab shell and homepage components; manual override wins).
+3. **`aria-live` summary announcing every animation step** — **FIXED** (no `aria-live` region in the lab components; the summary is announced at deliberate points only).
+4. **Text-size preference no-op** — **FIXED** (applied at `document.documentElement` font-size, so rem-based text scales; also the primary-button contrast failure A11Y-050 is fixed via `--accent-strong: #0f766e`).
 
 ---
 
@@ -51,9 +76,9 @@ Requirement: every task in the learner flow — landing, lab entry, prediction, 
 | Field | Content |
 |---|---|
 | Setup | Load `/` fresh. |
-| Steps | Tab from page load until the "Enter the lab" link; press Enter. Tab past the "Planned" cards. |
-| Expected result | "Enter the lab" (`src/app/page.tsx:26-31`) is reachable and activates on Enter. Planned-lab cards (`src/app/page.tsx:57-76`) are plain divs — never focusable — so Tab skips them cleanly. |
-| Failure condition | Any focusable element inside a planned card, or a page where Enter does not navigate. |
+| Steps | Tab from page load to the topic input ("What topic do you need help with?"); type a supported topic and press Enter, or Tab to the "Start this lab" link and press Enter. Tab past the "Future labs" list. |
+| Expected result | The topic input routes into the lab on Enter, and the "Start this lab" link (`src/app/page.tsx`) is reachable and activates on Enter. Future labs are a native `<details>`/`<summary>` list — cleanly keyboard-operable. (RE-STAMPED: the old "Enter the lab" link was replaced by the topic-input hero + "Start this lab" on the final-hardening branch.) |
+| Failure condition | Any focusable element that traps focus, or a page where Enter does not navigate. |
 | Severity | S3 — keyboard entry is baseline usability, but a skip here does not block judging (S1 requires flow-level breakage). |
 | Rubric weight | Usability and Accessibility (25%) — keyboard entry is the base gate for the whole lab. |
 | Current implementation status | IMPLEMENTED (manual execution pending). |
@@ -183,7 +208,7 @@ Requirement: every task in the learner flow — landing, lab entry, prediction, 
 | Field | Content |
 |---|---|
 | Setup | Open "Accessibility & display". |
-| Steps | Tab through: animation speed slider, reduced-motion toggle (`src/components/lab/accessibility-controls.tsx:49-55`), information density radios (57-76), one-variable toggle (78-84), high-contrast toggle (86-92), text size slider (94-113), feedback timing radios (115-134), preferred views checkboxes (136-165). Toggle switches with Space; confirm `role="switch"` and `aria-checked` flip (`accessibility-controls.tsx:189-206`). |
+| Steps | Tab through: animation speed slider, reduced-motion toggle (`src/components/lab/accessibility-controls.tsx`), information density radios, one-variable toggle, high-contrast toggle, text size slider, preferred views checkboxes. (The former "Feedback timing" radio group was REMOVED on the final-hardening branch — it was a dead control.) Toggle switches with Space; confirm `role="switch"` and `aria-checked` flip. |
 | Expected result | Every control operable with keyboard; each has a visible label and current value. |
 | Failure condition | Any setting unreachable or a toggle that cannot be flipped with Space. |
 | Severity | S1 if broken — the settings block is the product's accessibility promise. |
@@ -889,31 +914,32 @@ Requirement: animation is meaningful rather than decorative, variable changes vi
 
 ---
 
-## Prioritized fix list
+## Prioritized fix list (re-stamped on the final-hardening branch)
 
-### P0 — Before any demo or judging (≈ 8.25h)
-| Fix | Tests | Hours |
+### P0 — Done on the final-hardening branch (originally ≈ 8.25h, now shipped)
+| Fix | Tests | Status |
 |---|---|---|
-| Adaptation Replay dialog: initial focus, focus trap, focus restore | A11Y-022, 023, 024 | 2.5 |
-| Honor OS `prefers-reduced-motion` (init + live subscription; manual override wins) | A11Y-030 | 2.0 |
-| Debounce/pause-gate the `aria-live` state summary (announce on pause/end/step-back) | A11Y-043 | 1.5 |
-| Make text-size preference effective (scale `documentElement` font-size) | A11Y-052 | 1.5 |
-| Fix white-on-teal contrast (`--accent-strong` → #0f766e; causal-view fills) | A11Y-050 | 0.75 |
+| Adaptation Replay dialog: initial focus, focus trap, focus restore | A11Y-022, 023, 024 | **SHIPPED** |
+| Honor OS `prefers-reduced-motion` (init + live subscription; manual override wins) | A11Y-030 | **SHIPPED** |
+| Remove per-frame `aria-live` announcements from the state summary | A11Y-043 | **SHIPPED** |
+| Make text-size preference effective (scale `documentElement` font-size) | A11Y-052 | **SHIPPED** |
+| Fix white-on-teal contrast (`--accent-strong` → `#0f766e`; causal-view fills) | A11Y-050 | **SHIPPED** |
 
-### P1 — Before final judging (≈ 3.75h)
-| Fix | Tests | Hours |
+### P1 — Done on the final-hardening branch (originally ≈ 3.75h)
+| Fix | Tests | Status |
 |---|---|---|
-| Roving tabindex + arrow keys on representation tabs | A11Y-026 | 1.0 |
-| `feedbackTiming`: wire a consumer or remove the control | A11Y-069 | 1.5 |
+| Roving tabindex + arrow keys on representation tabs | A11Y-026 | **SHIPPED** |
+| `feedbackTiming`: remove the dead control | A11Y-069 | **SHIPPED** (control removed) |
+| Honest semantics for planned-lab cards (replaced by native `<details>` list) | A11Y-049 | **SHIPPED** |
+
+### Remaining (verification, not code)
+| Item | Tests | Hours |
+|---|---|---|
+| Skip-to-content link (optional, S4) | A11Y-028 | 0.25 |
 | Restore plain-language explanations for the active slider in one-variable mode | A11Y-061 | 0.5 |
 | Announce view switches caused by accepted adaptations | A11Y-066 | 0.5 |
-| Honest semantics for planned-lab cards | A11Y-049 | 0.25 |
-
-### P2 — Polish (≈ 1.25h)
-| Fix | Tests | Hours |
-|---|---|---|
-| Skip-to-content link | A11Y-028 | 0.25 |
 | Verify/fix control target sizes at 375px | A11Y-055 | 0.5 |
 | Non-color marker for reaction rings (all modes) | A11Y-053 | 0.5 |
+| **Manual verification passes: keyboard-only walkthrough, screen-reader run, axe/WCAG scan** | A11Y-017, A11Y-043 (re-verify), whole battery | 3–5 |
 
-**Total estimate: ≈ 13.25h.** The P0 set is the honest minimum to defend "Usability and Accessibility" at the rubric weight (25%) and to protect "Impact on Neurodivergent Youth" (30%): two of the four P0 items (A11Y-022..024, A11Y-030) are exactly the kind of defect a judge with assistive tech will hit in the first two minutes.
+**Total estimate (remaining): ≈ 5h, almost all verification.** The code-side P0 set that was the honest minimum to defend "Usability and Accessibility" at the rubric weight (25%) is now shipped and covered by tests; what remains is proving it with a person and a screen reader.

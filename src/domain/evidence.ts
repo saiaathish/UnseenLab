@@ -114,6 +114,35 @@ export const adaptationProposalSchema = z.object({
   followUpQuestion: z.string().nullable().default(null),
 });
 
+/**
+ * A recorded counterfactual comparison: the original real trial and the
+ * hypothetical run that differs in EXACTLY one variable with the same seed.
+ * Stored separately from real trials so multi-trial rules and replay never
+ * mistake a comparison for a learner-run trial.
+ */
+export interface CounterfactualRecord {
+  originalTrialId: string;
+  changedVariable: ExperimentParameterKey;
+  original: TrialRecord;
+  counterfactual: TrialRecord;
+  createdAt: string;
+}
+
+export const counterfactualRecordSchema = z.object({
+  originalTrialId: z.string().min(1),
+  changedVariable: z.enum([
+    "absorberPosition",
+    "startingNeutrons",
+    "materialDensity",
+    "absorptionProbability",
+    "durationSteps",
+    "seed",
+  ]),
+  original: trialRecordSchema,
+  counterfactual: trialRecordSchema,
+  createdAt: z.string().datetime(),
+});
+
 export interface RepresentationEvent {
   mode: RepresentationMode;
   openedAt: string;
@@ -130,6 +159,7 @@ export interface SessionEvidence {
   representationEvents: RepresentationEvent[];
   adaptationProposals: AdaptationProposal[];
   conceptEvidence: ConceptEvidence[];
+  counterfactuals: CounterfactualRecord[];
 }
 
 export const sessionEvidenceSchema = z.object({
@@ -138,6 +168,8 @@ export const sessionEvidenceSchema = z.object({
   representationEvents: z.array(representationEventSchema),
   adaptationProposals: z.array(adaptationProposalSchema),
   conceptEvidence: z.array(conceptEvidenceSchema),
+  // Optional so pre-counterfactual sessions (and corrupt storage) stay valid.
+  counterfactuals: z.array(counterfactualRecordSchema).default([]),
 });
 
 export function createEmptySessionEvidence(): SessionEvidence {
@@ -147,6 +179,7 @@ export function createEmptySessionEvidence(): SessionEvidence {
     representationEvents: [],
     adaptationProposals: [],
     conceptEvidence: [],
+    counterfactuals: [],
   };
 }
 
@@ -204,6 +237,16 @@ export function addConceptEvidence(
     (c) => c.conceptId !== concept.conceptId,
   );
   return { ...evidence, conceptEvidence: [...rest, concept] };
+}
+
+export function addCounterfactual(
+  evidence: SessionEvidence,
+  record: CounterfactualRecord,
+): SessionEvidence {
+  return {
+    ...evidence,
+    counterfactuals: [...evidence.counterfactuals, record],
+  };
 }
 
 /** Parameter keys changed in a trial relative to a prior set of parameters. */

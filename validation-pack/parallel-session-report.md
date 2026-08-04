@@ -1,5 +1,11 @@
 # Parallel-Session Report
 
+> **RE-STAMPED on the final-hardening branch.** This isolation record describes the original
+> audit session against the old snapshot. The pack itself was later corrected in place on the
+> final-hardening branch (see the re-stamp notes in each file); the two most valuable handoff
+> notes below are now RESOLVED: the demo can run multiple trials live (handoff note 1), and
+> the disclaimer is always visible regardless of density (handoff note 2).
+
 Isolation record for the adversarial validation session. This pack was produced without touching the product implementation.
 
 ## Isolation facts

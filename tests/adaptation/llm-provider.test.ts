@@ -52,6 +52,7 @@ function makeInput(): AdaptationInput {
       representationEvents: [],
       adaptationProposals: [],
       conceptEvidence: [],
+      counterfactuals: [],
     },
   };
 }
@@ -90,6 +91,7 @@ describe("StructuredLLMAdaptationProvider", () => {
         representationEvents: [],
         adaptationProposals: [],
         conceptEvidence: [],
+        counterfactuals: [],
       },
     };
     const provider = new StructuredLLMAdaptationProvider();

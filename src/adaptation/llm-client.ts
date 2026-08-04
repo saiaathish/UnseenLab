@@ -58,7 +58,11 @@ export async function callLlmModel(
   try {
     const body: Record<string, unknown> = {
       model: config.model,
-      temperature: 0.2,
+      // Lowest randomness supported by the OpenAI-compatible endpoints in
+      // use, so identical trials yield near-identical interpretations. The
+      // interpretation is bounded anyway: output is schema-validated and can
+      // never change simulation values.
+      temperature: 0,
       max_tokens: 400,
       messages: [
         { role: "system", content: buildSystemPrompt() },

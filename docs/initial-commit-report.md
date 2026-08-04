@@ -1,5 +1,11 @@
 # UnseenLab — Initial Commit Report
 
+> ## HISTORICAL SNAPSHOT
+>
+> **This document describes ONLY the initial commit** (`feat: establish UnseenLab adaptive virtual lab foundation`) and is kept verbatim as history. **The current product differs substantially** — it now has a topic-input homepage, a repeatable multi-trial loop (no reload), truthful first-trial change evidence, a working text-size control, OS `prefers-reduced-motion` support, a focus-trapped replay dialog, WAI-ARIA tabs, an implemented (optional) structured LLM provider behind `/api/adapt`, no `feedbackTiming` control, no per-frame `aria-live` announcements, and 166 unit/component tests + 12 e2e tests (this report says 63 unit / 1 e2e — those numbers were true at the initial commit only). See the README and the rest of `docs/` for the current state. Do not cite this file for anything current.
+
+---
+
 Completed after implementation. All commands executed in this repository.
 
 ## What was built

@@ -412,7 +412,7 @@
       "severity": "S2",
       "rubric_axis": "Technical Execution",
       "calibration_required": false,
-      "notes": "Reset is also the only current path to a second primary run (single-run session constraint)."
+      "notes": "RE-STAMPED (final-hardening): a second primary run no longer requires clearing the session — the multi-trial loop (updated prediction gates each next trial, trials appended, no reload) is the normal path. Clearing the session is now only for a full clean slate."
     },
     {
       "id": "SCI-021",

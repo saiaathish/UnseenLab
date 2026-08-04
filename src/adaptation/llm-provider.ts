@@ -1,6 +1,5 @@
 import type { AdaptationInput, AdaptationProvider } from "@/domain/adaptation";
 import type { AdaptationProposal } from "@/domain/evidence";
-import type { TrialRecord } from "@/domain/experiments";
 import {
   buildLlmRequest,
   interventionChanges,
@@ -89,7 +88,15 @@ export class StructuredLLMAdaptationProvider implements AdaptationProvider {
         return null;
       }
       return { ...body.data, predictionId: payload.prediction_id };
-    } catch {
+    } catch (error) {
+      // Safe telemetry: `reason` is a fixed enum code, never key/learner data.
+      const reason =
+        error instanceof Error && error.name === "AbortError"
+          ? "timeout"
+          : "network_error";
+      console.warn(
+        `[adapt] LLM unavailable (${reason}), using offline rules`,
+      );
       return null;
     }
   }

@@ -69,6 +69,7 @@ function makeInput(
     representationEvents,
     adaptationProposals: [],
     conceptEvidence: [],
+    counterfactuals: [],
   };
   return {
     preferences: createDefaultPreferences(),

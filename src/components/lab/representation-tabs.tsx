@@ -1,5 +1,7 @@
 "use client";
 
+import { useRef } from "react";
+import type { KeyboardEvent } from "react";
 import type {
   SimulationStopReason,
   TrialRecord,
@@ -35,17 +37,72 @@ export function RepresentationTabs({
   preferences,
   onChange,
 }: Props) {
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  /**
+   * WAI-ARIA tabs pattern: ArrowRight/ArrowLeft move selection (wrapping),
+   * Home/End jump to the first/last tab. Only keyboard-originated changes
+   * move focus; clicks select without stealing focus. Navigation starts from
+   * the FOCUSED tab (falling back to the selected one) so focus and selection
+   * can never drift apart.
+   */
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const focusedIndex = tabRefs.current.findIndex(
+      (node) => node === document.activeElement,
+    );
+    const currentIndex =
+      focusedIndex >= 0
+        ? focusedIndex
+        : REPRESENTATION_MODES.indexOf(active);
+    let nextIndex: number | null = null;
+
+    switch (event.key) {
+      case "ArrowRight":
+        nextIndex =
+          (currentIndex + 1) % REPRESENTATION_MODES.length;
+        break;
+      case "ArrowLeft":
+        nextIndex =
+          (currentIndex - 1 + REPRESENTATION_MODES.length) %
+          REPRESENTATION_MODES.length;
+        break;
+      case "Home":
+        nextIndex = 0;
+        break;
+      case "End":
+        nextIndex = REPRESENTATION_MODES.length - 1;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    onChange(REPRESENTATION_MODES[nextIndex]);
+    tabRefs.current[nextIndex]?.focus();
+  };
+
   return (
     <section
       aria-label="Representations"
       className="rounded-xl border border-border bg-surface p-4"
     >
-      <div role="tablist" aria-label="View the trial as" className="flex flex-wrap gap-1">
-        {REPRESENTATION_MODES.map((mode) => (
+      <div
+        role="tablist"
+        aria-label="View the trial as"
+        onKeyDown={handleKeyDown}
+        className="flex flex-wrap gap-1"
+      >
+        {REPRESENTATION_MODES.map((mode, index) => (
           <button
             key={mode}
+            ref={(node) => {
+              tabRefs.current[index] = node;
+            }}
             role="tab"
+            id={`rep-tab-${mode}`}
             aria-selected={active === mode}
+            aria-controls="rep-panel"
+            tabIndex={active === mode ? 0 : -1}
             onClick={() => onChange(mode)}
             className={`rounded-lg px-3 py-2 text-sm font-medium ${
               active === mode
@@ -58,7 +115,12 @@ export function RepresentationTabs({
         ))}
       </div>
 
-      <div className="mt-4" role="tabpanel">
+      <div
+        className="mt-4"
+        role="tabpanel"
+        id="rep-panel"
+        aria-labelledby={`rep-tab-${active}`}
+      >
         {!trial ? (
           <p className="text-sm text-muted">
             Run a trial first to see this view.

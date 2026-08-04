@@ -1,5 +1,11 @@
 # UnseenLab — Demo Failure Script
 
+> **RE-STAMPED on the final-hardening branch.** The current build supports a repeatable
+> multi-trial loop (no reload) and an optional hosted model behind `/api/adapt` with a
+> deterministic offline fallback. The former "one trial per session" constraint is gone, and
+> "zero network calls" is now "no network calls except the optional `/api/adapt` when the
+> hosted path is enabled". This file is updated for that product.
+
 **Purpose:** What to do the moment the live demo breaks. Read this before every recording and
 every live pitch.
 
@@ -24,7 +30,7 @@ every live pitch.
 |---|---|
 | **Likely cause** | Dev server not running (`npm run dev` on the main repo — the worktree has no `node_modules`), port in use, or a browser extension blocking the page. |
 | **On-stage admission (verbatim)** | "The app is not loading right now — give me one moment." |
-| **Recovery move** | Immediately: "I captured the full flow earlier — watch this. The demo runs entirely on this laptop, zero network calls." Play the recorded hero flow backup and narrate the causal story over it. Only if a 10-second fix is obvious (server restart), do it silently while the video plays. |
+| **Recovery move** | Immediately: "I captured the full flow earlier — watch this. The science runs entirely on this laptop; the only network path in the whole app is the optional AI interpretation, and it falls back offline." Play the recorded hero flow backup and narrate the causal story over it. Only if a 10-second fix is obvious (server restart), do it silently while the video plays. |
 | **Where the backup lives** | `validation-pack/backups/hero-flow.mp4` (≤3 min, recorded from this exact script) + `validation-pack/backups/screenshots/` |
 
 ### 2. Simulation animation freezes
@@ -76,9 +82,9 @@ every live pitch.
 
 | Field | Content |
 |---|---|
-| **Likely cause** | Irrelevant — there is nothing to fail. The build has zero network calls: dependencies are only next, react, react-dom, zod (`package.json`), the engine, adaptation, and storage are all client-side, and no API keys or env vars exist. |
-| **On-stage admission (verbatim)** | "Offline is the default state for this demo — there are no network calls to make." |
-| **Recovery move** | Open DevTools → Network tab and show that the only requests are the initial page load: "No API keys, no prompts, nothing leaves this laptop — the whole experiment, adaptation included, is computed here." Then keep going. |
+| **Likely cause** | Irrelevant for the core — the scientific core, adaptation rules, storage, and rendering are all client-side. The **only** network call in the app is the optional `POST /api/adapt` when the hosted path is enabled (`NEXT_PUBLIC_LLM_ENABLED=1` + `LLM_API_KEY`). |
+| **On-stage admission (verbatim)** | "Offline is the default state for this demo — the science never depends on a network." |
+| **Recovery move** | Open DevTools → Network tab and show that the only requests during the flow are the initial page load (plus, if the hosted path is enabled, the one `/api/adapt` call): "No prompts, no analytics, nothing leaves this laptop except one optional, labeled AI-interpretation request — and if it fails, the card says 'Offline rules' and the demo continues." Then keep going. |
 | **Where the backup lives** | None required. |
 
 ### 8. Video playback unavailable (venue or recording)
@@ -109,18 +115,26 @@ Mental effort: [C/5] → [D/5]
 Feedback-driven change: [CHANGE]
 ```
 
+### 10. Hosted model down / returns garbage (the fallback proof)
+
+| Field | Content |
+|---|---|
+| **Likely cause** | The optional hosted path is enabled (`NEXT_PUBLIC_LLM_ENABLED=1` + server `LLM_API_KEY`) but the provider is unreachable, times out (12s client / 15s server), returns invalid JSON, or violates the schema (`src/app/api/adapt/route.ts`). |
+| **On-stage admission (verbatim)** | "The hosted model is not responding — this is the exact moment the fallback exists for." |
+| **Recovery move** | Wait for the card (it appears after the timeout with the reason in the server log, not on screen), and point at the badge: "The proposal is labeled 'Offline rules' — deterministic rules took over, same loop, same science, nothing broke. The AI interpretation is a bounded, optional, labeled layer; the lab never depends on it." This IS a demo beat — rehearse it deliberately once with the key set to a bad value. |
+| **Where the backup lives** | `validation-pack/backups/screenshots/step-05-adaptation-card.png` (card with the "Offline rules" badge). |
+
 ---
 
-## Known current-build constraint (not a failure — plan around it)
+## Known current-build behavior (not a constraint — plan with it)
 
-A session supports exactly **one trial**. After the first run, a submitted prediction is recorded
-against the last trial and no pending prediction is created (`experiment-shell.tsx:132-163`),
-so "Run trial" is blocked with "A prediction is required before running a trial. Please submit
-your prediction first." (`experiment-shell.tsx:166-170`). The hero flow and the seeded checklist
-below are single-trial by design. To rerun: Research mode → "Clear local session" (confirm
-twice, `research-mode.tsx:142-159`) and restart the flow. On stage, do not fight this — a
-clean-slate rerun is a legitimate recovery line: "Let's start a fresh session — same seed, same
-setup."
+The build supports a **repeatable multi-trial loop**: after a trial, the learner submits an
+updated prediction, which unlocks the next run — no reload, no session clearing. Trials are
+appended, never overwritten, and the replay lists every trial in order
+(`e2e/multi-trial.spec.ts` runs three trials in one session). The demo uses two trials to
+show the loop. To start completely fresh (e.g., after a mid-demo mistake): Research mode →
+"Clear local session" (confirm twice, `research-mode.tsx`). On stage, a clean-slate rerun is a
+legitimate recovery line: "Let's start a fresh session — same seed, same setup."
 
 ---
 
@@ -136,14 +150,16 @@ setup."
 - [ ] 2:45 timer visible to the presenter only (phone or sticky note) — the video itself must show no timer.
 - [ ] Backup files verified playable: `backups/hero-flow.mp4`, `backups/hero-flow-offline.mp4`, screenshot deck.
 - [ ] Seeded outcomes sanity-checked once today (run at absorber 0.2, seed 42 → "safety ceiling: 500").
-- [ ] The three expected cards visible in the sanity run (show_graph, compare_trials, reduce_density).
+- [ ] **At least one** adaptation card visible in the sanity run, with its reason and source badge (rules path: expect the deterministic set; hosted path: never promise a specific card).
+- [ ] Updated-prediction → second-trial transition sanity-checked (no reload; replay lists two trials).
 
 ## Offline-mode checklist (verify once per recording machine)
 
 - [ ] Disconnect network (Wi-Fi off, or DevTools → Network → Offline).
 - [ ] Load the app; confirm the full page renders (no external asset requests).
 - [ ] Run the complete hero flow offline: prediction → run → animation → adaptation card → accept → counterfactual → replay.
-- [ ] DevTools Network tab shows zero requests beyond the initial page load during run/comparison/replay.
+- [ ] With the hosted path **disabled** (default), DevTools Network tab shows zero requests beyond the initial page load during run/comparison/replay.
+- [ ] With the hosted path **enabled**, confirm the card still appears after the model times out, labeled "Offline rules" — the fallback proof.
 - [ ] No API key prompts, no environment-variable errors, no console errors during the flow.
 - [ ] Confirm the offline flow uses the same seed-42 outcomes as the online sanity run.
 
@@ -186,10 +202,10 @@ with seed 42 at absorber 0.5 is `extinct` (final free neutrons 0) — the demo m
 |---|---|
 | Run at absorber 0.9 (default, seed 42) | Stop reason `extinct` at step 7; final free neutrons 0; reactions 4. Only used as the "do not use" reference. |
 | Hero run at absorber 0.2 (seed 42) | Stop banner: "The simulation stopped at the safety ceiling: 500 free neutrons." at step 28; final free neutrons 500; reactions 1043. |
-| Adaptation cards after the hero run | Exactly three, in this order: `show_graph` ("The prediction and the result differed…"), `compare_trials` ("A side-by-side comparison of two runs…"), `reduce_density` ("The reaction hit the safety ceiling, so the details were hidden…"). If `show_graph` is missing, the prediction was not contradicted — check the radio answer. |
-| Accept `show_graph` | Graph tab opens automatically with the "safety ceiling (500)" annotation on the curve. |
+| Adaptation card(s) after the hero run | **Rules path (default):** exactly three, in this order — `show_graph` ("The prediction and the result differed…"), `compare_trials` ("A side-by-side comparison of two runs…"), `reduce_density` ("The reaction hit the safety ceiling, so the details were hidden…"). If `show_graph` is missing, the prediction was not contradicted — check the radio answer. **Hosted path:** at least one card with a plain-language reason and the "AI interpretation" badge; never require a specific intervention. **Either path:** every card carries a source badge and Accept/Reject/Modify. |
+| Accept the first card | The proposed change applies (e.g., the Graph tab opens); the badge stays visible. |
 | Counterfactual: absorber position 0.2 → 0.9, "Run comparison" | "Changed exactly one variable: Absorber position 0.2 → 0.9"; "Same randomness seed (42), same duration."; original free neutrons 500 / reactions 1043 vs counterfactual free neutrons 0 / reactions 4; explanation "…changed the final free neutrons from 500 to 0 and reactions from 1043 to 4." |
-| Adaptation Replay | 9 steps rendered; step 5 shows "Linear vs. nonlinear growth — evidence suggests: contradicted"; step 6 shows the offer and "Your decision: Accepted". |
+| Updated prediction → second trial | The updated-prediction prompt unlocks "Run trial"; a second trial runs with no reload; the replay lists both trials in order, and the second prediction's alignment is shown in the "What changed in understanding" step. |
 
 If any row does not match, do not ad-lib around it — use the failure recovery for the matching
 mode above, or clear the session and rerun from the browser-reset checklist.

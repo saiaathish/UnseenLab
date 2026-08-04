@@ -17,6 +17,11 @@ interface Props {
     structuredAnswer: PredictionAnswerChoice | null;
     confidence: number;
   } | null;
+  /**
+   * While a trial is processing, the prediction must not change: editing it
+   * mid-run would be silently overwritten when the run completes.
+   */
+  disabled?: boolean;
   onSubmit: (
     answer: string,
     structuredAnswer: PredictionAnswerChoice | null,
@@ -37,14 +42,23 @@ const CONFIDENCE_LABELS = [
  * a trial may run. After a trial, the learner can submit an updated
  * prediction linked to the same trial.
  */
-export function PredictionPanel({ goal, lastPrediction, pending, onSubmit }: Props) {
+export function PredictionPanel({
+  goal,
+  lastPrediction,
+  pending,
+  disabled = false,
+  onSubmit,
+}: Props) {
   const [choice, setChoice] = useState<PredictionAnswerChoice | null>(null);
   const [freeText, setFreeText] = useState("");
   const [confidence, setConfidence] = useState(3);
   const [editing, setEditing] = useState(false);
 
   const editingNow = editing || (!lastPrediction && !pending);
-  const existing = lastPrediction ?? pending ?? null;
+  // The pending prediction belongs to the upcoming trial, so it takes
+  // precedence over the previous trial's recorded prediction while the
+  // learner is preparing to run it.
+  const existing = pending ?? lastPrediction ?? null;
 
   if (existing && !editingNow) {
     return (
@@ -68,7 +82,8 @@ export function PredictionPanel({ goal, lastPrediction, pending, onSubmit }: Pro
         <button
           type="button"
           onClick={() => setEditing(true)}
-          className="mt-3 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-surface-raised"
+          disabled={disabled}
+          className="mt-3 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
         >
           Update my prediction
         </button>
@@ -100,6 +115,7 @@ export function PredictionPanel({ goal, lastPrediction, pending, onSubmit }: Pro
                 type="radio"
                 name="prediction-choice"
                 checked={choice === key}
+                disabled={disabled}
                 onChange={() => setChoice(key)}
                 className="h-4 w-4 accent-current"
               />
@@ -116,8 +132,9 @@ export function PredictionPanel({ goal, lastPrediction, pending, onSubmit }: Pro
         id="prediction-freetext"
         value={freeText}
         onChange={(e) => setFreeText(e.target.value)}
+        disabled={disabled}
         rows={2}
-        className="mt-1 w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm"
+        className="mt-1 w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm disabled:opacity-40"
         placeholder="For example: the reaction will get slightly faster…"
       />
 
@@ -136,6 +153,7 @@ export function PredictionPanel({ goal, lastPrediction, pending, onSubmit }: Pro
           max={5}
           step={1}
           value={confidence}
+          disabled={disabled}
           onChange={(e) => setConfidence(Number(e.target.value))}
           className="w-full accent-accent"
         />
@@ -145,6 +163,7 @@ export function PredictionPanel({ goal, lastPrediction, pending, onSubmit }: Pro
       <button
         type="button"
         onClick={() => {
+          if (disabled) return;
           const answer =
             freeText.trim() !== ""
               ? freeText.trim()
@@ -157,7 +176,7 @@ export function PredictionPanel({ goal, lastPrediction, pending, onSubmit }: Pro
           setChoice(null);
           setEditing(false);
         }}
-        disabled={freeText.trim() === "" && choice === null}
+        disabled={disabled || (freeText.trim() === "" && choice === null)}
         className="mt-4 w-full rounded-lg bg-accent-strong px-4 py-2.5 font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {lastPrediction ? "Submit updated prediction" : "Submit prediction"}
@@ -166,7 +185,8 @@ export function PredictionPanel({ goal, lastPrediction, pending, onSubmit }: Pro
         <button
           type="button"
           onClick={() => setEditing(false)}
-          className="mt-2 w-full rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-raised"
+          disabled={disabled}
+          className="mt-2 w-full rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
         >
           Cancel
         </button>

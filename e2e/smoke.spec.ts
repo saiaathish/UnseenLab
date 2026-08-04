@@ -45,6 +45,8 @@ test("demo smoke: predict, run, adapt, compare, replay", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Adaptation Replay" }),
   ).toBeVisible();
-  await expect(page.getByText("Initial prediction")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Initial prediction" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Close replay" }).click();
 });

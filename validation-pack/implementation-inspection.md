@@ -1,5 +1,31 @@
 # Implementation Inspection — Independent Source Review
 
+> **RE-STAMPED on the final-hardening branch.** This inspection was written against an older
+> snapshot of the product and several findings are now obsolete. The corrections below are
+> the current truth; the body of this file is kept as the historical record. Superseded
+> findings are marked **SUPERSEDED** in the "Corrections" section — do not rely on them.
+
+## Corrections (current product)
+
+| Old finding (below) | Current status |
+|---|---|
+| "**FINDING — single-run session constraint**" (adaptation section) | **SUPERSEDED** — the build now supports a repeatable multi-trial loop: an updated prediction gates each new trial, trials are appended, no reload needed (`experiment-shell.tsx`; covered by `e2e/multi-trial.spec.ts`). |
+| "**FINDING — dead preference** `feedbackTiming`" | **SUPERSEDED** — the control was removed from the UI. The schema field remains for compatibility but nothing renders or consumes it as a control. |
+| "**MISSING:** OS `prefers-reduced-motion` support" | **SUPERSEDED** — OS reduced-motion preference is honored (in addition to the in-app override). |
+| "**MISSING:** dialog focus trap/initial focus/restore in AdaptationReplay" | **SUPERSEDED** — the replay dialog traps focus, moves focus in on open, and restores it on close. |
+| "**MISSING:** roving tabindex for tabs" | **SUPERSEDED** — representation tabs follow the WAI-ARIA tabs pattern (roving tabindex + arrow keys). |
+| "**RISK:** live region updates every step while playing → screen-reader spam" | **SUPERSEDED** — no per-frame `aria-live` announcements during playback. |
+| "Density \| Low-density mode hides disclaimer … safety-regression" | **SUPERSEDED** — the disclaimer is always visible in the lab header regardless of density. |
+| "`textScale` likely ineffective" (accessibility-audit cross-ref) | **SUPERSEDED** — text scale is applied at the root font-size, so all text scales. |
+| "LLM provider: README documents an 'LLM provider designed-for but not implemented' — nothing to inspect" | **SUPERSEDED** — the structured LLM provider IS implemented (`src/adaptation/llm-provider.ts`, `llm-client.ts`, `llm-schema.ts`, `src/app/api/adapt/route.ts`), optional behind `NEXT_PUBLIC_LLM_ENABLED` + server `LLM_API_KEY`, with deterministic fallback and "AI interpretation"/"Offline rules" badges. |
+| "Dependency quality … 4 runtime deps, no AI SDK" | **SUPERSEDED** — runtime deps are now `next`, `react`, `react-dom`, `zod`, `gsap`, `three`. No AI/LLM SDK is bundled; the hosted path calls an OpenAI-compatible API from the server bridge only when enabled. |
+| Hackathon tell #6 "Default create-next-app assets remain (`public/` SVGs …)" | **SUPERSEDED** — the five unused `public/` SVGs (`file.svg`, `globe.svg`, `next.svg`, `vercel.svg`, `window.svg`) were deleted. |
+| Hackathon tell #3 "Test-count claim mismatch: README says 60 …; the repo has 59 … no storage test file" | **SUPERSEDED** — current suite: 166 unit/component tests across 17 files (including storage/session persistence, accessibility controls, homepage topic routing, and LLM provider/schema/factory tests) + 12 Playwright e2e tests across 4 specs. |
+| Hackathon tell #8 "AI framing in README exceeds the implemented capability" | **SUPERSEDED** — README now describes the optional labeled LLM provider and the deterministic default honestly. |
+| Homepage/landing citations (`page.tsx:38-77`, "Enter the lab", planned cards) | **SUPERSEDED** — the homepage is now a topic-input hero ("What topic do you need help with?") with supported/unsupported routing and a "Start this lab" link. |
+
+---
+
 Independent inspection of the UnseenLab build (Next.js 16 / React 19 / Zod 4 / Tailwind v4, TypeScript). Source read at the audit snapshot; **no tests were executed by this audit** (parallel-session isolation). Findings cite `file:line` against the repository root.
 
 ## Architecture
@@ -75,4 +101,4 @@ Independent inspection of the UnseenLab build (Next.js 16 / React 19 / Zod 4 / T
 
 ## Inspection verdict
 
-The core is **technically real and unusually well structured for a hackathon**: deterministic seeded engine, genuine single-variable causal comparison, evidence-linked adaptation with full learner agency, no network/analytics, honest disclaimer. Nothing here is fake. The gaps are: the "AI" claim (S1), the single-run session constraint (S2), dead `feedbackTiming` (S2), disclaimer-in-low-density (S2), five accessibility gaps (S2/S3), missing docs referenced by README (S2), and zero user evidence (S0-adjacent for the Impact criterion).
+The core is **technically real and unusually well structured for a hackathon**: deterministic seeded engine, genuine single-variable causal comparison, evidence-linked adaptation with full learner agency, honest disclaimer. Nothing here is fake. At the audited snapshot the gaps were: the "AI" claim (S1), the single-run session constraint (S2), dead `feedbackTiming` (S2), disclaimer-in-low-density (S2), five accessibility gaps (S2/S3), missing docs referenced by README (S2), and zero user evidence (S0-adjacent for the Impact criterion). **On the final-hardening branch, the code-side gaps are closed** (see Corrections above): multi-trial loop, control removed, disclaimer always visible, focus trap, OS reduced motion, WAI-ARIA tabs, no aria-live spam, effective text scale, and an implemented optional LLM provider with honest framing. The remaining open items are evidence, not code: a real structured user-testing session with the design participant is still required, and no learning-outcome claim may be made until it runs.

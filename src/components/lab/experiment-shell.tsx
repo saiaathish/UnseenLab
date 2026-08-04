@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ExperimentDefinition,
   ExperimentParameters,
   TrialRecord,
   SimulationStopReason,
 } from "@/domain/experiments";
-import { simulationDisclaimer } from "@/domain/experiments";
+import { deriveStopReason, simulationDisclaimer } from "@/domain/experiments";
 import { diffParameters } from "@/domain/evidence";
 import type { LearnerPreferences, RepresentationMode } from "@/domain/learner";
 import {
@@ -24,6 +24,7 @@ import type {
 import {
   addAdaptationProposal,
   addConceptEvidence,
+  addCounterfactual,
   addPrediction,
   addRepresentationEvent,
   addTrial,
@@ -37,6 +38,8 @@ import {
 import { createAdaptationProvider } from "@/adaptation/llm-provider";
 import { classifyConceptEvidence } from "@/adaptation/misconception-taxonomy";
 import {
+  clearLocalSession,
+  createLocalSession,
   loadLocalSession,
   saveLocalSession,
   type LocalSession,
@@ -53,13 +56,6 @@ import { ResearchMode } from "./research-mode";
 
 const adaptationProvider = createAdaptationProvider();
 
-interface PendingPrediction {
-  trialId: string;
-  answer: string;
-  structuredAnswer: PredictionAnswerChoice | null;
-  confidence: number;
-}
-
 const STEPS = [
   { id: "predict", label: "Predict", description: "Say what you expect." },
   {
@@ -74,17 +70,31 @@ const STEPS = [
   },
 ] as const;
 
+/** What the learner is waiting on while a trial runs. */
+type RunPhase = "idle" | "simulating" | "interpreting";
+
 /**
  * Orchestrates one lab through a calm, progressive workflow. Only the controls
  * needed for the learner's current step are shown; optional research and
  * accessibility tools remain available without competing with the experiment.
+ *
+ * The loop is repeatable: predict -> change one variable -> run -> understand
+ * -> update prediction -> run another trial. Every trial is appended to the
+ * recorded evidence; completed trials are never overwritten.
  */
 export function ExperimentShell({
   experiment,
 }: {
   experiment: ExperimentDefinition;
 }) {
-  const [session, setSession] = useState<LocalSession>(() => loadLocalSession());
+  // All persisted state starts EMPTY so the server-rendered HTML and the first
+  // client render always agree (a reload with retained evidence must not
+  // cause a hydration mismatch). The latest valid workflow stage is restored
+  // atomically after mount — never showing an empty initial state while
+  // evidence says trials exist, and never fabricating one.
+  const [session, setSession] = useState<LocalSession>(() =>
+    createLocalSession(),
+  );
   const [currentParameters, setCurrentParameters] =
     useState<ExperimentParameters>(() => ({
       ...experiment.defaultParameters,
@@ -92,23 +102,74 @@ export function ExperimentShell({
   const [lastTrial, setLastTrial] = useState<TrialRecord | null>(null);
   const [lastStopReason, setLastStopReason] =
     useState<SimulationStopReason | null>(null);
-  const [pendingPrediction, setPendingPrediction] =
-    useState<PendingPrediction | null>(null);
   const [activeProposals, setActiveProposals] = useState<AdaptationProposal[]>(
     [],
   );
-  const [activeRepresentation, setActiveRepresentation] =
-    useState<RepresentationMode>("animation");
   const [counterfactual, setCounterfactual] =
     useState<CounterfactualResult | null>(null);
+  const [activeRepresentation, setActiveRepresentation] =
+    useState<RepresentationMode>("animation");
+  const [counterfactualOpen, setCounterfactualOpen] = useState(false);
+  const [runPhase, setRunPhase] = useState<RunPhase>("idle");
   const [showReplay, setShowReplay] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showResearch, setShowResearch] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const reflectSectionRef = useRef<HTMLElement | null>(null);
 
   const preferences = session.preferences;
+  // The pending prediction lives inside the persisted workflow, so a reload
+  // mid-experiment restores the exact guided step.
+  const pendingPrediction = session.workflow.pendingPrediction;
 
+  // Restore AFTER hydration (declared before the save effect). The restore is
+  // deferred out of the effect body so the hydration render is identical to
+  // the server render; the save effect skips its very first run so it can
+  // never clobber persisted evidence with the empty hydration session.
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const restored = loadLocalSession();
+      const latest = restored.evidence.trials.at(-1) ?? null;
+      setSession(restored);
+      setLastTrial(latest);
+      setLastStopReason(deriveStopReason(latest));
+      setCurrentParameters({
+        ...(latest?.parameters ?? experiment.defaultParameters),
+      });
+      setActiveProposals(
+        latest
+          ? restored.evidence.adaptationProposals.filter(
+              (proposal) =>
+                proposal.decision === "pending" &&
+                proposal.evidenceIds.includes(latest.id),
+            )
+          : [],
+      );
+      setCounterfactual(() => {
+        if (!latest) return null;
+        const record = restored.evidence.counterfactuals
+          .filter((item) => item.originalTrialId === latest.id)
+          .at(-1);
+        return record
+          ? {
+              original: record.original,
+              counterfactual: record.counterfactual,
+              changedVariable: record.changedVariable,
+            }
+          : null;
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [experiment.defaultParameters]);
+
+  // The very first render is the empty hydration session — never persist it
+  // over retained evidence before the restore effect has run.
+  const skipInitialSave = useRef(true);
+  useEffect(() => {
+    if (skipInitialSave.current) {
+      skipInitialSave.current = false;
+      return;
+    }
     saveLocalSession(session);
   }, [session]);
 
@@ -130,6 +191,18 @@ export function ExperimentShell({
     return () => media?.removeEventListener("change", apply);
   }, [preferences.highContrast, preferences.reducedMotion]);
 
+  // Text size is applied to the root element so rem-based Tailwind classes
+  // actually scale (a wrapper font-size has no effect on rem units). It is
+  // removed on unmount so it never leaks into other pages, and it composes
+  // with browser zoom instead of fighting it.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.fontSize = `${preferences.textScale * 100}%`;
+    return () => {
+      root.style.fontSize = "";
+    };
+  }, [preferences.textScale]);
+
   const lastPrediction = useMemo(
     () =>
       lastTrial
@@ -145,7 +218,8 @@ export function ExperimentShell({
     [session.evidence.representationEvents],
   );
 
-  const currentStep = lastTrial ? 3 : pendingPrediction ? 2 : 1;
+  const nextTrialNumber = (lastTrial ? session.evidence.trials.length : 0) + 1;
+  const currentStep = pendingPrediction ? 2 : lastTrial ? 3 : 1;
 
   const updatePreferences = useCallback(
     (updates: Partial<LearnerPreferences>) => {
@@ -157,40 +231,41 @@ export function ExperimentShell({
     [],
   );
 
+  /**
+   * Submitting a prediction always feeds the NEXT trial. On the first trial it
+   * creates a pending prediction; on later trials it is the updated prediction
+   * that must exist before another trial can run. Updating an existing pending
+   * prediction keeps the same trial id, so duplicates are impossible.
+   */
   const handlePredictionSubmit = useCallback(
     (
       answer: string,
       structuredAnswer: PredictionAnswerChoice | null,
       confidence: number,
     ) => {
-      if (lastTrial) {
-        const record: PredictionRecord = {
-          id: crypto.randomUUID(),
-          trialId: lastTrial.id,
-          prompt: experiment.goal,
-          answer,
-          structuredAnswer,
-          confidence,
-          createdAt: new Date().toISOString(),
-        };
-        setSession((previous) => ({
+      setSession((previous) => {
+        const pending = previous.workflow.pendingPrediction;
+        return {
           ...previous,
-          evidence: addPrediction(previous.evidence, record),
-        }));
-      } else {
-        setPendingPrediction({
-          trialId: crypto.randomUUID(),
-          answer,
-          structuredAnswer,
-          confidence,
-        });
-      }
+          workflow: {
+            pendingPrediction: pending
+              ? { ...pending, answer, structuredAnswer, confidence }
+              : {
+                  trialId: crypto.randomUUID(),
+                  answer,
+                  structuredAnswer,
+                  confidence,
+                },
+          },
+        };
+      });
       setNotice(null);
     },
-    [experiment.goal, lastTrial],
+    [],
   );
 
   const handleRun = useCallback(async () => {
+    if (runPhase !== "idle") return;
     if (!pendingPrediction) {
       setNotice("Make a prediction first, then run the experiment.");
       return;
@@ -206,10 +281,17 @@ export function ExperimentShell({
       createdAt: new Date().toISOString(),
     };
 
-    const changedVariables = diffParameters(
-      lastTrial?.parameters ?? null,
-      currentParameters,
-    );
+    // First-trial changes are computed against the actual default parameters;
+    // later trials against the previous real trial. Replay and the LLM payload
+    // therefore always receive truthful change evidence.
+    const baseline = lastTrial?.parameters ?? experiment.defaultParameters;
+    const changedVariables = diffParameters(baseline, currentParameters);
+
+    setRunPhase("simulating");
+    // Let the "Running the simulation…" status paint before the synchronous
+    // engine runs and the (possibly slow) AI interpretation starts.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     const result = runSimulation(currentParameters);
     const trial: TrialRecord = {
       ...result.trial,
@@ -237,6 +319,7 @@ export function ExperimentShell({
 
     let proposals: AdaptationProposal[] = [];
     let adaptationFailed = false;
+    setRunPhase("interpreting");
     try {
       proposals = await adaptationProvider.propose(input);
       for (const proposal of proposals) {
@@ -247,24 +330,31 @@ export function ExperimentShell({
       adaptationFailed = true;
     }
 
-    setSession((previous) => ({ ...previous, evidence: nextEvidence }));
+    setSession((previous) => ({
+      ...previous,
+      evidence: nextEvidence,
+      workflow: { pendingPrediction: null },
+    }));
     setLastTrial(trial);
     setLastStopReason(result.stopReason);
-    setPendingPrediction(null);
     setCounterfactual(null);
+    setCounterfactualOpen(false);
     setActiveProposals(proposals);
     setActiveRepresentation("animation");
+    setRunPhase("idle");
     setNotice(
       adaptationFailed
-        ? "Helpful suggestions are unavailable, but your experiment ran normally."
+        ? "Something went wrong while preparing suggestions — your experiment ran normally."
         : null,
     );
   }, [
     currentParameters,
+    experiment.defaultParameters,
     experiment.goal,
     lastTrial,
     pendingPrediction,
     preferences,
+    runPhase,
     session.evidence,
   ]);
 
@@ -293,6 +383,15 @@ export function ExperimentShell({
         if (proposal.type === "show_graph") setActiveRepresentation("graph");
         if (proposal.type === "show_causal_view") {
           setActiveRepresentation("causal");
+        }
+        // Every allowed intervention must lead somewhere visible: comparing
+        // trials opens the one-change comparison tool, and asking for a new
+        // prediction moves focus to the reflection panel.
+        if (proposal.type === "compare_trials") {
+          setCounterfactualOpen(true);
+        }
+        if (proposal.type === "ask_prediction_again") {
+          reflectSectionRef.current?.focus();
         }
       }
 
@@ -334,7 +433,13 @@ export function ExperimentShell({
       setCounterfactual(result);
       setSession((previous) => ({
         ...previous,
-        evidence: addTrial(previous.evidence, result.counterfactual),
+        evidence: addCounterfactual(previous.evidence, {
+          originalTrialId: lastTrial.id,
+          changedVariable: variable,
+          original: result.original,
+          counterfactual: result.counterfactual,
+          createdAt: new Date().toISOString(),
+        }),
       }));
       setNotice(null);
     },
@@ -342,25 +447,27 @@ export function ExperimentShell({
   );
 
   const handleClearSession = useCallback(() => {
+    clearLocalSession();
     const freshSession = loadLocalSession();
     setSession(freshSession);
     setCurrentParameters({ ...experiment.defaultParameters });
     setLastTrial(null);
     setLastStopReason(null);
-    setPendingPrediction(null);
     setActiveProposals([]);
     setCounterfactual(null);
+    setCounterfactualOpen(false);
     setActiveRepresentation("animation");
     setNotice(null);
   }, [experiment.defaultParameters]);
 
   return (
-    <div
-      style={{ fontSize: `${preferences.textScale * 100}%` }}
-      className="flex min-h-screen flex-col"
-    >
+    <>
+      <div
+        inert={showReplay ? true : undefined}
+        className="flex min-h-screen flex-col"
+      >
       <header className="border-b border-border bg-surface">
-        <div className="mx-auto flex w-full max-w-5xl items-start gap-4 px-4 py-5 sm:px-6">
+        <div className="mx-auto flex w-full max-w-5xl flex-wrap items-start gap-3 px-4 py-5 sm:px-6">
           <div className="min-w-0 flex-1">
             <Link
               href="/"
@@ -477,44 +584,64 @@ export function ExperimentShell({
           </section>
         )}
 
-        {!lastTrial && pendingPrediction && (
+        {pendingPrediction && (
           <section className="mt-6">
             <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
               <div className="flex flex-col gap-4">
                 <div>
-                  <h2 className="text-2xl font-semibold">Change one thing</h2>
+                  <h2 className="text-2xl font-semibold">
+                    {lastTrial
+                      ? `Trial ${nextTrialNumber} — run another trial`
+                      : "Change one thing"}
+                  </h2>
                   <p className="mt-2 text-sm leading-6 text-muted">
-                    Adjust a control, then run the experiment. You can always
-                    reset and try again.
+                    {lastTrial
+                      ? `Adjust one control, then run it. Trial ${
+                          nextTrialNumber - 1
+                        } stays on record so you can compare. You can always
+                        start over.`
+                      : "Adjust a control, then run the experiment. You can always start over."}
                   </p>
                 </div>
                 <PredictionPanel
                   goal={experiment.goal}
                   lastPrediction={lastPrediction}
                   pending={pendingPrediction}
+                  disabled={runPhase !== "idle"}
                   onSubmit={handlePredictionSubmit}
                 />
                 <VariableControls
                   parameters={currentParameters}
-                  previousParameters={null}
+                  previousParameters={lastTrial?.parameters ?? null}
                   spec={experiment.parameterSpecs}
-                  oneVariableMode
+                  oneVariableMode={preferences.oneVariableMode}
                   onChange={setCurrentParameters}
                 />
                 <button
                   type="button"
                   onClick={() => void handleRun()}
-                  className="w-full rounded-xl bg-accent-strong px-5 py-3.5 text-base font-semibold text-white shadow-sm hover:brightness-105"
+                  disabled={runPhase !== "idle"}
+                  className="w-full rounded-xl bg-accent-strong px-5 py-3.5 text-base font-semibold text-white shadow-sm hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Run trial
                 </button>
+                {runPhase !== "idle" && (
+                  <p
+                    role="status"
+                    className="rounded-lg bg-surface-raised px-3 py-2 text-sm text-foreground"
+                  >
+                    {runPhase === "simulating"
+                      ? "Running the simulation…"
+                      : "Interpreting your evidence…"}
+                  </p>
+                )}
               </div>
 
               <div className="lg:sticky lg:top-6">
                 <SimulationCanvas
-                  key="empty"
-                  trial={null}
-                  stopReason={null}
+                  key={lastTrial?.id ?? "empty"}
+                  trial={lastTrial}
+                  stopReason={lastStopReason}
                   preferences={preferences}
                 />
               </div>
@@ -522,7 +649,7 @@ export function ExperimentShell({
           </section>
         )}
 
-        {lastTrial && (
+        {lastTrial && !pendingPrediction && (
           <div className="mt-6 space-y-6">
             <section aria-labelledby="watch-result-heading">
               <div className="mb-4">
@@ -587,7 +714,15 @@ export function ExperimentShell({
               </section>
             )}
 
-            <details className="rounded-xl border border-border bg-surface">
+            <details
+              className="rounded-xl border border-border bg-surface"
+              open={counterfactualOpen}
+              onToggle={(event) =>
+                setCounterfactualOpen(
+                  (event.target as HTMLDetailsElement).open,
+                )
+              }
+            >
               <summary className="cursor-pointer px-4 py-4 text-base font-semibold">
                 Compare one change
                 <span className="ml-2 text-sm font-normal text-muted">
@@ -605,17 +740,20 @@ export function ExperimentShell({
             </details>
 
             <section
+              ref={reflectSectionRef}
+              tabIndex={-1}
               aria-labelledby="reflect-heading"
-              className="rounded-2xl border border-border bg-surface p-4 sm:p-6"
+              className="rounded-2xl border border-border bg-surface p-4 outline-none focus-visible:ring-2 focus-visible:ring-focus sm:p-6"
             >
               <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                 <div>
                   <h2 id="reflect-heading" className="text-xl font-semibold">
-                    What do you think now?
+                    Ready for another trial?
                   </h2>
                   <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-                    Update your prediction only when you are ready. Your first
-                    answer is kept so you can see how your thinking changed.
+                    Update your prediction, then change one variable and run
+                    the next trial. Your completed trials stay on record so you
+                    can compare how your thinking changed.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -634,6 +772,13 @@ export function ExperimentShell({
                   >
                     Research mode
                   </button>
+                  <button
+                    type="button"
+                    onClick={handleClearSession}
+                    className="rounded-lg border border-danger/50 px-3 py-2 text-sm font-medium text-danger hover:bg-danger/10"
+                  >
+                    Start over
+                  </button>
                 </div>
               </div>
               <div className="mt-5 max-w-2xl">
@@ -649,7 +794,7 @@ export function ExperimentShell({
         )}
       </main>
 
-      {showResearch && lastTrial && (
+      {showResearch && lastTrial && !pendingPrediction && (
         <section
           aria-label="Research mode"
           className="border-t border-border bg-surface px-4 py-5 sm:px-6"
@@ -663,6 +808,7 @@ export function ExperimentShell({
           </div>
         </section>
       )}
+      </div>
 
       {showReplay && (
         <AdaptationReplay
@@ -672,6 +818,6 @@ export function ExperimentShell({
           onClose={() => setShowReplay(false)}
         />
       )}
-    </div>
+    </>
   );
 }

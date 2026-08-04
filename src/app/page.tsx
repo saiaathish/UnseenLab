@@ -88,7 +88,7 @@ export default function Home() {
                 Start this lab
               </Link>
             </div>
-            <p className="mt-6 text-xs leading-5 text-gray-500">
+            <p className="mt-6 text-xs leading-5 text-gray-400">
               A conceptual, simplified, and fictionalized model — not a real
               reactor.
             </p>
@@ -98,7 +98,7 @@ export default function Home() {
             <summary className="cursor-pointer text-sm font-medium text-gray-400">
               Future labs
             </summary>
-            <ul className="mt-3 space-y-1.5 text-sm leading-6 text-gray-500">
+            <ul className="mt-3 space-y-1.5 text-sm leading-6 text-gray-400">
               {PLANNED_EXPERIMENTS.map((experiment) => (
                 <li key={experiment.id}>{experiment.title} — planned</li>
               ))}
@@ -123,7 +123,7 @@ export default function Home() {
           </p>
         </section>
 
-        <footer className="border-t border-white/10 py-8 text-xs leading-5 text-gray-500">
+        <footer className="border-t border-white/10 py-8 text-xs leading-5 text-gray-400">
           {simulationDisclaimer}
         </footer>
       </div>

@@ -54,7 +54,7 @@ export const DEFAULT_LEARNER_PREFERENCES: LearnerPreferences = {
   informationDensity: "medium",
   preferredRepresentations: ["animation"],
   feedbackTiming: "after_trial",
-  oneVariableMode: false,
+  oneVariableMode: true,
   highContrast: false,
   textScale: 1,
 };

@@ -55,6 +55,8 @@ Walk through the demo flow, narrating the steps only (not the science):
 8. Submit an updated prediction.
 9. Open the Adaptation Replay.
 
+The lab now supports a **repeatable multi-trial loop** (updated prediction → run another trial, no reload). If time allows within the 8-minute window, invite the participant to run a second trial ("Would you like to change one thing and try again?") and note how they use the loop — the replay will list every trial.
+
 **RECORD verbatim:** what the participant does at each step, what he says (exact wording), and any hesitation (pause length, hovering, asking for reassurance). If the adaptation offer does not appear, note that too — that is a finding, not a failure.
 
 ### Phase 3 — Static vs adaptive comparison (5 min) — the winning edge
@@ -113,11 +115,11 @@ Consent to use anonymous findings: [ ] granted   [ ] declined   Date: ______
 
 ---
 
-## Updating the landing page "Design evidence" panel afterwards
+## Recording results after the session
 
-After the session, update `src/app/page.tsx`'s "Design evidence" section (currently: "First structured test session — Pending…" and "Evidence fields to fill"):
+The landing page has no "Design evidence" panel (an earlier draft proposed one; it was dropped — evidence claims belong in the docs, not on the homepage). Record session results instead in:
 
-- Replace the "Pending" text with a one-line summary of the session (date, what was tested, that it is an initial case study, not validated).
-- Fill the evidence fields: observed issue (friction with a real quote), product change (the implemented revision), initial result (baseline vs post-use scores, confidence, mental effort).
+- `docs/user-research.md` — fill the "First structured product test" template (test date, observed friction, direct quote, feature removed/changed, second-test result) and the consent line.
+- `validation-pack/evidence-claims-register.md` — update claim statuses (CLAIM-07, 17, 18, 19, 20) from UNVERIFIED only with real session data.
 
-Keep the same plain, honest voice: no marketing spin, no claims beyond what was measured.
+Keep the same plain, honest voice: no marketing spin, no claims beyond what was measured. Never fabricate quotes or results — a real participant session is still required.

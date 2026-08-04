@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { SessionEvidence } from "@/domain/evidence";
 import { PREDICTION_ANSWER_LABELS } from "@/domain/evidence";
 import type { TrialRecord } from "@/domain/experiments";
+import { DEFAULT_EXPERIMENT_PARAMETERS } from "@/domain/experiments";
+import { deriveStopReason } from "@/domain/experiments";
+import { parametersEqual } from "@/adaptation/misconception-taxonomy";
 import type { CounterfactualResult } from "@/simulation/counterfactual";
 
 interface Props {
@@ -28,11 +31,27 @@ const DECISION_LABELS: Record<string, string> = {
   pending: "Pending",
 };
 
+const PARAMETER_LABELS: Record<string, string> = {
+  absorberPosition: "Absorber position",
+  startingNeutrons: "Starting neutrons",
+  materialDensity: "Material density",
+  absorptionProbability: "Neutron absorption chance",
+  durationSteps: "Duration",
+  seed: "Random seed",
+};
+
+const STOP_REASON_WORDING: Record<string, string> = {
+  max_population:
+    "The population hit the safety ceiling of 500 free neutrons.",
+  extinct: "The population reached zero.",
+};
+
 /**
- * Adaptation Replay: the learner's journey through prediction, trial,
- * adaptation offers, decisions, updated prediction, and counterfactual
- * comparison — rendered entirely from recorded evidence. Non-judgmental,
- * plain language throughout.
+ * Adaptation Replay: the learner's journey through prediction, trials,
+ * adaptation offers, decisions, and counterfactual comparisons — rendered
+ * entirely from recorded evidence, one section per real trial in the order
+ * they ran. Non-judgmental, plain language throughout. Nothing is fabricated:
+ * wording is derived from the same fields that were exported.
  */
 export function AdaptationReplay({
   evidence,
@@ -40,14 +59,6 @@ export function AdaptationReplay({
   counterfactualResult,
   onClose,
 }: Props) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   if (evidence.trials.length === 0) {
     return (
       <Dialog onClose={onClose} title="Adaptation Replay">
@@ -58,12 +69,120 @@ export function AdaptationReplay({
     );
   }
 
+  const lastTrialId = lastTrial?.id ?? evidence.trials.at(-1)?.id ?? null;
+
+  const interactionPattern: string[] = [];
+  if (evidence.trials.length >= 2) {
+    const latest = evidence.trials[evidence.trials.length - 1];
+    const sameParams = evidence.trials.filter(
+      (t) =>
+        t.parameters.seed === latest.parameters.seed &&
+        t.parameters.absorberPosition === latest.parameters.absorberPosition,
+    ).length;
+    if (sameParams >= 2) {
+      interactionPattern.push("repeated the same run settings");
+    }
+  }
+  if (evidence.trials.some((t) => t.changedVariables.length >= 2)) {
+    interactionPattern.push("changed multiple variables at once");
+  }
+  if (!evidence.representationEvents.some((e) => e.mode === "graph")) {
+    interactionPattern.push("did not inspect the graph");
+  }
+  if (interactionPattern.length === 0) {
+    interactionPattern.push("ran a single controlled trial");
+  }
+
   const firstPrediction = evidence.predictions[0] ?? null;
-  const trial = lastTrial ?? evidence.trials[evidence.trials.length - 1];
-  const trialPredictions = evidence.predictions.filter(
-    (p) => p.trialId === trial.id,
+  const latestPrediction = evidence.predictions.at(-1) ?? null;
+
+  return (
+    <Dialog onClose={onClose} title="Adaptation Replay">
+      <ol className="flex flex-col gap-8">
+        {evidence.trials.map((trial, index) => (
+          <TrialSection
+            key={trial.id}
+            trial={trial}
+            number={index + 1}
+            total={evidence.trials.length}
+            evidence={evidence}
+            counterfactual={
+              evidence.counterfactuals
+                .filter((record) => record.originalTrialId === trial.id)
+                .at(-1) ?? (lastTrialId === trial.id ? counterfactualResult : null)
+            }
+          />
+        ))}
+      </ol>
+
+      <div className="mt-8 flex flex-col gap-4 border-t border-border pt-6">
+        <Step n={evidence.trials.length * 5 + 1} title="Observed interaction pattern">
+          <p>{interactionPattern.join("; ")}.</p>
+        </Step>
+
+        <Step n={evidence.trials.length * 5 + 2} title="Possible conceptual friction">
+          {evidence.conceptEvidence.length === 0 ? (
+            <p className="text-sm text-muted">
+              Nothing flagged — the evidence and prediction lined up.
+            </p>
+          ) : (
+            <ul className="list-inside list-disc">
+              {evidence.conceptEvidence.map((concept) => (
+                <li key={concept.conceptId}>
+                  {CONCEPT_LABELS[concept.conceptId] ?? concept.conceptId}{" "}
+                  <span className="text-muted">
+                    — evidence suggests: {concept.status}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Step>
+
+        <Step n={evidence.trials.length * 5 + 3} title="What changed in understanding">
+          {firstPrediction && latestPrediction && firstPrediction.id !== latestPrediction.id ? (
+            <p className="text-sm leading-6">
+              Your first prediction was “{firstPrediction.answer}” (confidence{" "}
+              {firstPrediction.confidence ?? "—"}/5) and your latest is “
+              {latestPrediction.answer}” (confidence{" "}
+              {latestPrediction.confidence ?? "—"}/5). Both are on record, so
+              you can compare whether your later prediction lines up better
+              with the observed trials.
+            </p>
+          ) : (
+            <p className="text-sm leading-6">
+              Only one prediction is on record, so a change in understanding
+              cannot be compared.
+            </p>
+          )}
+        </Step>
+      </div>
+
+      <p className="mt-4 text-xs text-muted">
+        Replay is built from your recorded session data — nothing is
+        fabricated. Evidence stays on this device.
+      </p>
+    </Dialog>
   );
-  const initialPrediction = trialPredictions[0] ?? firstPrediction;
+}
+
+function TrialSection({
+  trial,
+  number,
+  total,
+  evidence,
+  counterfactual,
+}: {
+  trial: TrialRecord;
+  number: number;
+  total: number;
+  evidence: SessionEvidence;
+  counterfactual: CounterfactualResult | null;
+}) {
+  const trialPredictions = evidence.predictions.filter(
+    (prediction) => prediction.trialId === trial.id,
+  );
+  const initialPrediction = trialPredictions[0] ?? null;
   const updatedPrediction =
     trialPredictions.length > 1
       ? trialPredictions[trialPredictions.length - 1]
@@ -72,28 +191,21 @@ export function AdaptationReplay({
   const trialProposals = evidence.adaptationProposals.filter((proposal) =>
     proposal.evidenceIds.includes(trial.id),
   );
-  const concepts = evidence.conceptEvidence;
-
-  const interactionPattern: string[] = [];
-  if (evidence.trials.length >= 2) {
-    const sameParams = evidence.trials.filter(
-      (t) =>
-        t.parameters.seed === trial.parameters.seed &&
-        t.parameters.absorberPosition === trial.parameters.absorberPosition,
-    ).length;
-    if (sameParams >= 2) interactionPattern.push("replayed the animation several times");
-  }
-  if (trial.changedVariables.length >= 2)
-    interactionPattern.push("changed multiple variables at once");
-  if (!evidence.representationEvents.some((e) => e.mode === "graph"))
-    interactionPattern.push("did not inspect the graph");
-  if (interactionPattern.length === 0)
-    interactionPattern.push("ran a single controlled trial");
+  const isFirst = number === 1;
+  const usedDefaults = parametersEqual(
+    trial.parameters,
+    DEFAULT_EXPERIMENT_PARAMETERS,
+  );
+  const stopWording = STOP_REASON_WORDING[deriveStopReason(trial)];
 
   return (
-    <Dialog onClose={onClose} title="Adaptation Replay">
-      <ol className="flex flex-col gap-4">
-        <Step n={1} title="Initial prediction">
+    <li className="rounded-xl border border-border bg-surface-raised/60 p-4">
+      <h3 className="text-sm font-semibold uppercase tracking-widest text-accent">
+        Trial {number} of {total}
+      </h3>
+
+      <ol className="mt-4 flex flex-col gap-4">
+        <Step n={1} title={isFirst ? "Initial prediction" : "Prediction"}>
           {initialPrediction ? (
             <>
               <p className="italic">“{initialPrediction.answer}”</p>
@@ -111,15 +223,38 @@ export function AdaptationReplay({
           ) : (
             <p className="text-sm text-muted">No prediction on record.</p>
           )}
+          {updatedPrediction && updatedPrediction.id !== initialPrediction?.id && (
+            <div className="mt-3 rounded-lg bg-surface-raised p-3">
+              <p className="text-sm font-medium">Updated prediction</p>
+              <p className="mt-1 italic">“{updatedPrediction.answer}”</p>
+              <p className="mt-1 text-sm text-muted">
+                Confidence {updatedPrediction.confidence ?? "—"}/5
+              </p>
+            </div>
+          )}
         </Step>
 
         <Step n={2} title="Variables changed">
           {trial.changedVariables.length === 0 ? (
-            <p className="text-sm text-muted">
-              This was the first trial — defaults were used.
-            </p>
+            isFirst && usedDefaults ? (
+              <p className="text-sm text-muted">
+                This was the first trial — defaults were used.
+              </p>
+            ) : isFirst ? (
+              <p className="text-sm text-muted">
+                No variables were changed from the defaults.
+              </p>
+            ) : (
+              <p className="text-sm text-muted">
+                No variables changed since the previous trial.
+              </p>
+            )
           ) : (
-            <p>{trial.changedVariables.join(", ")}</p>
+            <p>
+              {trial.changedVariables
+                .map((key) => PARAMETER_LABELS[key] ?? key)
+                .join(", ")}
+            </p>
           )}
         </Step>
 
@@ -128,32 +263,10 @@ export function AdaptationReplay({
             Final free neutrons: {final.freeNeutrons} · Reactions:{" "}
             {final.reactionEvents} · Energy units: {final.cumulativeEnergyUnits}
           </p>
+          {stopWording && <p className="mt-1 text-sm text-muted">{stopWording}</p>}
         </Step>
 
-        <Step n={4} title="Observed interaction pattern">
-          <p>{interactionPattern.join("; ")}.</p>
-        </Step>
-
-        <Step n={5} title="Possible conceptual friction">
-          {concepts.length === 0 ? (
-            <p className="text-sm text-muted">
-              Nothing flagged — the evidence and prediction lined up.
-            </p>
-          ) : (
-            <ul className="list-inside list-disc">
-              {concepts.map((concept) => (
-                <li key={concept.conceptId}>
-                  {CONCEPT_LABELS[concept.conceptId] ?? concept.conceptId}{" "}
-                  <span className="text-muted">
-                    — evidence suggests: {concept.status}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Step>
-
-        <Step n={6} title="Adaptation offered">
+        <Step n={4} title="Adaptation offered">
           {trialProposals.length === 0 ? (
             <p className="text-sm text-muted">No adaptations were offered.</p>
           ) : (
@@ -169,10 +282,12 @@ export function AdaptationReplay({
                     className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
                       proposal.source === "llm"
                         ? "bg-accent-soft text-accent"
-                        : "bg-border/40 text-muted"
+                        : "bg-border/60 text-muted-strong"
                     }`}
                   >
-                    {proposal.source === "llm" ? "AI interpretation" : "Offline rules"}
+                    {proposal.source === "llm"
+                      ? "AI interpretation"
+                      : "Offline rules"}
                   </p>
                   {proposal.followUpQuestion && (
                     <p className="mt-1 text-sm">
@@ -189,31 +304,16 @@ export function AdaptationReplay({
           )}
         </Step>
 
-        <Step n={7} title="Updated prediction">
-          {updatedPrediction ? (
-            <>
-              <p className="italic">“{updatedPrediction.answer}”</p>
-              <p className="mt-1 text-sm text-muted">
-                Confidence {updatedPrediction.confidence ?? "—"}/5
-              </p>
-            </>
-          ) : (
-            <p className="text-sm text-muted">
-              No updated prediction was submitted.
-            </p>
-          )}
-        </Step>
-
-        <Step n={8} title="Counterfactual comparison">
-          {counterfactualResult ? (
+        <Step n={5} title="Counterfactual comparison">
+          {counterfactual ? (
             <p>
-              One variable changed: {counterfactualResult.changedVariable}{" "}
-              ({counterfactualResult.original.parameters[
-                counterfactualResult.changedVariable
+              One variable changed: {counterfactual.changedVariable} (
+              {counterfactual.original.parameters[
+                counterfactual.changedVariable
               ]}{" "}
               →{" "}
-              {counterfactualResult.counterfactual.parameters[
-                counterfactualResult.changedVariable
+              {counterfactual.counterfactual.parameters[
+                counterfactual.changedVariable
               ]}
               ), same randomness.
             </p>
@@ -223,25 +323,8 @@ export function AdaptationReplay({
             </p>
           )}
         </Step>
-
-        <Step n={9} title="What changed in understanding">
-          <p className="text-sm leading-6">
-            {updatedPrediction
-              ? "The updated prediction is on record — it can be compared with the observed outcome to see whether the later prediction is better aligned with the evidence."
-              : "Only one prediction was recorded for this trial, so understanding change cannot be compared."}
-            {" "}
-            {initialPrediction && updatedPrediction
-              ? `Confidence moved from ${initialPrediction.confidence ?? "—"}/5 to ${updatedPrediction.confidence ?? "—"}/5.`
-              : ""}
-          </p>
-        </Step>
       </ol>
-
-      <p className="mt-4 text-xs text-muted">
-        Replay is built from your recorded session data — nothing is
-        fabricated. Evidence stays on this device.
-      </p>
-    </Dialog>
+    </li>
   );
 }
 
@@ -263,13 +346,18 @@ function Step({
         {n}
       </span>
       <div>
-        <h3 className="font-semibold">{title}</h3>
+        <h4 className="font-semibold">{title}</h4>
         <div className="mt-1 text-sm leading-6">{children}</div>
       </div>
     </li>
   );
 }
 
+/**
+ * Accessible modal dialog: focus moves in on open, Tab and Shift+Tab are
+ * trapped inside, Escape closes, and focus returns to the opener on close.
+ * The full-screen overlay blocks interaction with background content.
+ */
 function Dialog({
   title,
   onClose,
@@ -279,8 +367,55 @@ function Dialog({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    closeButtonRef.current?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const container = dialogRef.current;
+      if (!container) return;
+      const focusables = Array.from(
+        container.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first || !container.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !container.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      previouslyFocused?.focus();
+    };
+  }, [onClose]);
+
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4"
       role="dialog"
       aria-modal="true"
@@ -290,6 +425,7 @@ function Dialog({
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">{title}</h2>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label="Close replay"

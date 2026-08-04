@@ -146,8 +146,8 @@ export class DeterministicAdaptationProvider implements AdaptationProvider {
       // motion-related suggestions.
       push(
         "slow_animation",
-        "The animation was replayed several times. A slower speed can make " +
-          "the pattern easier to follow.",
+        "The same run was repeated. A slower speed can make the pattern " +
+          "easier to follow.",
         trials
           .filter((trial) =>
             parametersEqual(trial.parameters, latest.parameters),
