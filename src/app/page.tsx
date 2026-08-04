@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AppHeader } from "@/components/navigation/app-header";
 import { TopicInputHero } from "@/components/ui/topic-input-hero";
 import {
   NUCLEAR_CHAIN_REACTION_EXPERIMENT,
@@ -27,6 +28,7 @@ const steps = [
 export default function Home() {
   return (
     <main id="main-content" className="bg-[#070b14] text-white">
+      <AppHeader />
       <TopicInputHero />
       <div className="mx-auto max-w-5xl px-4 sm:px-6">
         <section

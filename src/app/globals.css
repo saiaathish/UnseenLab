@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
 :root {
   --background: #f5f8fa;
@@ -16,6 +17,30 @@
   --info: #175cd3;
   --focus: #0e7490;
   --ok: #15803d;
+
+  /* shadcn base registry tokens, mapped to the UnseenLab palette. */
+  --card: #ffffff;
+  --card-foreground: #17212b;
+  --popover: #ffffff;
+  --popover-foreground: #17212b;
+  --primary: #0f766e;
+  --primary-foreground: #ffffff;
+  --secondary: #edf3f5;
+  --secondary-foreground: #3d4c59;
+  --muted-foreground: #5b6b79;
+  --accent-foreground: #ffffff;
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+  --input: #d8e2e8;
+  --ring: #0e7490;
+  --radius: 0.5rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
 }
 
 body.high-contrast {
@@ -34,6 +59,21 @@ body.high-contrast {
   --info: #1746a2;
   --focus: #0d47a1;
   --ok: #126b33;
+
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #0f5f58;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f4f6;
+  --secondary-foreground: #0a0a0a;
+  --muted-foreground: #333333;
+  --accent-foreground: #ffffff;
+  --destructive: #9f1717;
+  --destructive-foreground: #ffffff;
+  --input: #111111;
+  --ring: #0d47a1;
 }
 
 html[data-reduced-motion="true"] *,
@@ -58,6 +98,20 @@ html[data-reduced-motion="true"] *::after {
   --color-info: var(--info);
   --color-focus: var(--focus);
   --color-ok: var(--ok);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

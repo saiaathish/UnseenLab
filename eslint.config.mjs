@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local Supabase stack artifacts (generated, never committed).
+    "supabase/.temp/**",
+    "supabase/.branches/**",
   ]),
 ]);
 

@@ -3,12 +3,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TopicInputHero } from "@/components/ui/topic-input-hero";
 
-// Keep the hero isolated and fast: the real MiniNavbar and the dynamically
-// imported wave background (next/dynamic) are not needed for these tests.
-vi.mock("@/components/ui/mini-navbar", () => ({
-  MiniNavbar: () => <nav aria-label="test nav">UnseenLab</nav>,
-}));
-
+// Keep the hero isolated and fast: the dynamically imported wave background
+// (next/dynamic) is not needed for these tests.
 vi.mock("@/components/ui/hero-wave-background", () => ({
   default: () => <div aria-hidden="true" />,
 }));
@@ -166,15 +162,46 @@ describe("TopicInputHero", () => {
     expect(textarea().value).toHaveLength(180);
   });
 
-  it("offers no login or signup", () => {
+  it("shows the HOME-04 account-value line as a muted auth link", () => {
     render(<TopicInputHero />);
-    expect(
-      screen.queryByRole("button", { name: /log ?in/i }),
-    ).not.toBeInTheDocument();
+
+    const link = screen.getByRole("link", {
+      name: "Sign in to save preferences and continue across devices.",
+    });
+    expect(link).toHaveAttribute("href", "/?auth=open");
+    // Quieter than the primary action: small, muted gray text, no fill.
+    expect(link.className).toMatch(/text-gray-400/);
+    expect(link.className).not.toMatch(/bg-teal-500/);
+  });
+
+  it("keeps the guest path working with no sign-up surface", async () => {
+    const user = userEvent.setup();
+    render(<TopicInputHero />);
+
+    // The only auth affordance is the HOME-04 link — no sign-up anywhere.
     expect(
       screen.queryByRole("button", { name: /sign ?up/i }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText(/login|signup/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /sign ?up/i }),
+    ).not.toBeInTheDocument();
+
+    // Topic input still works without any auth step.
+    await user.type(textarea(), "nuclear chain reaction");
+    await user.click(
+      screen.getByRole("button", { name: "Find my learning path" }),
+    );
+    expect(
+      screen.getByRole("heading", {
+        name: "We found an interactive lab for this topic.",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Start this lab" }),
+    ).toHaveAttribute(
+      "href",
+      expect.stringContaining("/lab/nuclear-chain-reaction"),
+    );
   });
 
   it("shows the character counter past 140 characters", async () => {

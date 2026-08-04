@@ -45,3 +45,9 @@ next-env.d.ts
 /test-results/
 /playwright-report/
 /blob-report/
+/.playwright-mcp/
+/gui-test-screenshots/
+
+# supabase local dev (CLI-generated state; the CLI also writes supabase/.gitignore)
+/.supabase/
+/supabase/.temp/

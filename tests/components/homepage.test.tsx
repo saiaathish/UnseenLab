@@ -14,6 +14,31 @@ vi.mock("@/components/ui/topic-input-hero", () => ({
   ),
 }));
 
+// The platform header (client) renders auth state and its own SignInDialog.
+// Keep it deterministic: signed-out session, no search params, no OAuth calls.
+vi.mock("@/lib/supabase/use-session", () => ({
+  useSession: () => ({ user: null, loading: false, client: null }),
+}));
+
+vi.mock("@/lib/supabase/auth", () => ({
+  signInWithGoogle: vi.fn(async () => null),
+  signOut: vi.fn(async () => null),
+  isSafeRedirectPath: (next: string | null) =>
+    typeof next === "string" && next.startsWith("/") && !next.startsWith("//"),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+  }),
+  useSearchParams: () => new URLSearchParams(""),
+}));
+
 describe("Homepage", () => {
   it("shows the three how-it-works steps with their sentences", () => {
     render(<Home />);
@@ -68,15 +93,13 @@ describe("Homepage", () => {
     ).toBeInTheDocument();
   });
 
-  it("offers no login or signup anywhere", () => {
+  it("offers a sign-in entry in the header and no sign-up surface", () => {
     render(<Home />);
+    // The platform header adds the single auth entry point (AUTH-10).
     expect(
-      screen.queryByRole("button", { name: /log ?in/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /sign ?up/i }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText(/login|signup/i)).not.toBeInTheDocument();
+      screen.getAllByRole("button", { name: "Sign in" }).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(/login|sign ?up/i)).not.toBeInTheDocument();
   });
 
   it("renders exactly one h1 in the whole document", () => {
