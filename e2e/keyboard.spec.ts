@@ -34,7 +34,11 @@ test("keyboard-only core flow works", async ({ page }) => {
   // Run via keyboard — with a valid prediction the trial actually runs.
   await page.getByRole("button", { name: "Run trial" }).focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByText(/state summary:/i)).toBeVisible();
+  // The hosted-model path resolves in ~2.5s+; keep the same generous timeout
+  // multi-trial.spec's waitForResults uses so a live model can't flake this.
+  await expect(page.getByText(/state summary:/i)).toBeVisible({
+    timeout: 30_000,
+  });
 });
 
 test("safety disclaimer is visible inside the lab", async ({ page }) => {
@@ -55,7 +59,9 @@ test("replay dialog closes with the Escape key", async ({ page }) => {
   await page.getByRole("radio", { name: /gets slightly faster/i }).click();
   await page.getByRole("button", { name: "Submit prediction" }).click();
   await page.getByRole("button", { name: "Run trial" }).click();
-  await expect(page.getByText(/state summary:/i)).toBeVisible();
+  await expect(page.getByText(/state summary:/i)).toBeVisible({
+    timeout: 30_000,
+  });
 
   await page.getByRole("button", { name: "Adaptation Replay" }).click();
   await expect(

@@ -33,6 +33,9 @@ const qualityData: {
   console: Record<string, ConsoleMessage[]>;
   perf: Record<string, unknown>;
   screenshots: string[];
+  adaptationBadge?: string;
+  aiFallbackBadge?: string;
+  researchPageStatus?: number;
 } = { console: {}, perf: {}, screenshots: [] };
 
 test.afterAll(() => {
