@@ -54,7 +54,7 @@ export async function signOut(): Promise<Error | null> {
   // Best-effort cookie clear; a failure still leaves the client signed out
   // and the server gate will catch the stale cookie on the next request.
   try {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/session", { method: "DELETE" });
   } catch {
     // ignore
   }

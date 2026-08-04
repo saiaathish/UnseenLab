@@ -113,6 +113,16 @@ export async function verifySessionUser(): Promise<SessionUser | null> {
 }
 
 /**
+ * Canonical "require authenticated user" helper for protected data routes.
+ * Returns the verified session user, or null when unconfigured / no valid
+ * cookie — callers must treat null as 401. Never accepts client-supplied
+ * ownership.
+ */
+export async function requireSessionUser(): Promise<SessionUser | null> {
+  return verifySessionUser();
+}
+
+/**
  * Exchanges a fresh ID token for a session cookie value. Returns null when
  * unconfigured or the token is invalid.
  */
