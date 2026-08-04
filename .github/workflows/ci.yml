@@ -91,14 +91,15 @@ jobs:
           echo "OK: no sk- style API keys found."
       - name: Scan for service role / OAuth client secret references
         run: |
-          # .env.example and *.md are excluded: they legitimately warn against
-          # committing these names (e.g. .env.example:21, docs/supabase-setup.md:53)
-          # and contain no secret values. Code/config references are still flagged.
-          if git grep -n -i -E 'service_role|SUPABASE_SERVICE_ROLE|GOOGLE_CLIENT_SECRET' -- . ':(exclude).github' ':(exclude).env.example' ':(exclude)*.md'; then
-            echo "::error::Forbidden secret reference found in tracked files."
+          # Flag ASSIGNMENTS of these names (a real leak: NAME=value or
+          # "name":"value"), not bare name reads — the e2e seed script must
+          # legitimately read process.env.SUPABASE_SERVICE_ROLE_KEY, and
+          # .env.example/*.md legitimately warn against committing the names.
+          if git grep -n -i -E '(service_role|SUPABASE_SERVICE_ROLE|GOOGLE_CLIENT_SECRET)[^A-Za-z0-9_]*[:=]' -- . ':(exclude).github' ':(exclude)*.md'; then
+            echo "::error::Forbidden secret assignment found in tracked files."
             exit 1
           fi
-          echo "OK: no forbidden secret references found."
+          echo "OK: no forbidden secret assignments found."
       - name: Fail if a .env file other than .env.example is tracked
         run: |
           if git ls-files '.env*' | grep -v 'example'; then

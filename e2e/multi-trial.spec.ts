@@ -144,11 +144,16 @@ test("sends at most one adaptation request per trial and shows progress while wa
   await runButton.click();
 
   // While the interpretation is in flight the run control is disabled and the
-  // live status explains what is happening.
+  // live status explains what is happening. The status is only observably
+  // visible when the hosted model path is enabled: with the deterministic
+  // offline rules the interpretation resolves in milliseconds, so the text
+  // never paints. The request-count assertion below holds in both modes.
   await expect(runButton).toBeDisabled();
-  await expect(
-    page.getByText(/interpreting your evidence/i),
-  ).toBeVisible({ timeout: 10_000 });
+  if (process.env.NEXT_PUBLIC_LLM_ENABLED === "1") {
+    await expect(
+      page.getByText(/interpreting your evidence/i),
+    ).toBeVisible({ timeout: 10_000 });
+  }
 
   await waitForResults(page);
   expect(adaptRequests).toBeLessThanOrEqual(1);
