@@ -2,8 +2,7 @@
 
 The platform layer is implemented and covered by unit/component tests with
 mocked clients, but it has **not** been smoke-tested against a real Firebase
-project or MongoDB — no credentials exist in this environment
-(`NOT_RUN_EXTERNAL_CREDENTIALS`). This document is the exact checklist to
+project or MongoDB. This document is the exact checklist to
 finish that gate. The app degrades gracefully to guest-only mode until then
 (no Firebase/Mongo env vars → the lab works fully locally, nothing signs in).
 
@@ -172,7 +171,10 @@ popup round trip is skipped. The suite self-skips without
 
 ## 8. Known state
 
-- Real OAuth smoke: `NOT_RUN_EXTERNAL_CREDENTIALS` (honest, not faked).
+- Real OAuth smoke: RUN 2026-08-04 — popup opens to the Google account
+  chooser from localhost; session cookie minted (868 B) and verified;
+  cross-device cookie flow covered by `scripts/backend-integration.mjs`
+  (15/15 vs live Firebase + Atlas).
 - The cross-device e2e cookie is a single `unseenlab.session` cookie; the
   script measures its byte size at mint time and warns if it approaches the
   browser's 4096-byte per-cookie limit (a Firebase session cookie is ~1–1.5

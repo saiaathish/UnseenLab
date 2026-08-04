@@ -131,6 +131,7 @@ export function DashboardSkeleton() {
   return (
     <div
       data-testid="dashboard-skeleton"
+      role="status"
       className="mx-auto w-full max-w-3xl space-y-10 px-4 pt-28 pb-20 sm:px-6"
       aria-label="Loading your dashboard"
     >

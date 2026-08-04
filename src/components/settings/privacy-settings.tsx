@@ -133,6 +133,7 @@ export function PrivacySettings() {
               variant="outline"
               onClick={handleExport}
               disabled={exporting}
+              aria-busy={exporting}
             >
               {exporting ? "Exporting…" : "Export saved learning data"}
             </Button>
@@ -215,6 +216,7 @@ export function PrivacySettings() {
               variant="destructive"
               onClick={handleDelete}
               disabled={deleting}
+              aria-busy={deleting}
             >
               {deleting ? "Deleting…" : "Delete my data"}
             </Button>

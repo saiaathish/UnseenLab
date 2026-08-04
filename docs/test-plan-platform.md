@@ -1,3 +1,9 @@
+> **SUPERSEDED — historical record.** This document describes the Supabase +
+> Postgres RLS platform layer, which was replaced by Firebase Auth + MongoDB
+> (see `docs/firebase-mongodb-setup.md`, `docs/backend-verification.md`,
+> `docs/security.md`). Kept for audit history; its claims do not describe the
+> current runtime.
+
 # Test Plan — Personalized Auth & Onboarding Platform
 
 Branch: `feature/personalized-auth-onboarding-platform`

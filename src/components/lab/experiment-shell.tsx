@@ -61,6 +61,8 @@ import {
   isSessionImported,
 } from "@/sync/guest-session-import";
 import { CloudSyncStatus } from "@/components/sync/cloud-sync-status";
+import { Badge } from "@/components/ui/badge";
+import { Spinner } from "@/components/ui/spinner";
 import { GuestImportDialog } from "@/components/sync/guest-import-dialog";
 import { SessionResumeDialog } from "@/components/sync/session-resume-dialog";
 import { PredictionPanel } from "./prediction-panel";
@@ -72,6 +74,8 @@ import { CounterfactualPanel } from "./counterfactual-panel";
 import { AdaptationReplay } from "./adaptation-replay";
 import { AccessibilityControls } from "./accessibility-controls";
 import { ResearchMode } from "./research-mode";
+import { ResearchStrip } from "./research-strip";
+import { useResearchRecorder } from "@/research/research-recorder";
 
 const adaptationProvider = createAdaptationProvider();
 
@@ -136,6 +140,17 @@ export function ExperimentShell({
   const [notice, setNotice] = useState<string | null>(null);
   const reflectSectionRef = useRef<HTMLElement | null>(null);
   const [importRequested, setImportRequested] = useState(false);
+
+  // Research capture strip: `enabled` pins the ?research=1 URL flag once at
+  // mount (zero overhead otherwise); `active` additionally requires consent.
+  const {
+    record: recordResearchEvent,
+    abandon: recordAbandonment,
+    active: researchActive,
+  } = useResearchRecorder();
+  const abandonmentPointRef = useRef<"predict" | "experiment" | "understand">(
+    "predict",
+  );
 
   // Optional account layer: the lab stays fully usable signed out.
   const { user, loading: sessionLoading } = useSession();
@@ -260,6 +275,21 @@ export function ExperimentShell({
   const nextTrialNumber = (lastTrial ? session.evidence.trials.length : 0) + 1;
   const currentStep = pendingPrediction ? 2 : lastTrial ? 3 : 1;
 
+  // Research capture: keep the abandonment point truthful to the live step.
+  useEffect(() => {
+    abandonmentPointRef.current =
+      currentStep === 1
+        ? "predict"
+        : currentStep === 2
+          ? "experiment"
+          : "understand";
+  });
+  useEffect(() => {
+    return () => {
+      recordAbandonment(abandonmentPointRef.current);
+    };
+  }, [recordAbandonment]);
+
   const updatePreferences = useCallback(
     (updates: Partial<LearnerPreferences>) => {
       localPrefsChanged.current = true;
@@ -319,6 +349,7 @@ export function ExperimentShell({
       structuredAnswer: PredictionAnswerChoice | null,
       confidence: number,
     ) => {
+      const trialId = pendingPrediction?.trialId ?? crypto.randomUUID();
       setSession((previous) => {
         const pending = previous.workflow.pendingPrediction;
         return {
@@ -326,18 +357,21 @@ export function ExperimentShell({
           workflow: {
             pendingPrediction: pending
               ? { ...pending, answer, structuredAnswer, confidence }
-              : {
-                  trialId: crypto.randomUUID(),
-                  answer,
-                  structuredAnswer,
-                  confidence,
-                },
+              : { trialId, answer, structuredAnswer, confidence },
           },
         };
       });
       setNotice(null);
+      recordResearchEvent({
+        type: "prediction_submitted",
+        trialId,
+        answer,
+        structuredAnswer,
+        confidence,
+        at: new Date().toISOString(),
+      });
     },
-    [],
+    [pendingPrediction, recordResearchEvent],
   );
 
   const handleRun = useCallback(async () => {
@@ -374,6 +408,13 @@ export function ExperimentShell({
       id: pendingPrediction.trialId,
       changedVariables,
     };
+    recordResearchEvent({
+      type: "trial_completed",
+      trialId: trial.id,
+      changedVariables: trial.changedVariables,
+      stopReason: result.stopReason,
+      at: new Date().toISOString(),
+    });
 
     let nextEvidence: SessionEvidence = addPrediction(
       session.evidence,
@@ -400,10 +441,22 @@ export function ExperimentShell({
       proposals = await adaptationProvider.propose(input);
       for (const proposal of proposals) {
         nextEvidence = addAdaptationProposal(nextEvidence, proposal);
+        recordResearchEvent({
+          type: "adaptation_offered",
+          proposalId: proposal.id,
+          proposalType: proposal.type,
+          source: proposal.source,
+          at: new Date().toISOString(),
+        });
       }
     } catch {
       proposals = [];
       adaptationFailed = true;
+      recordResearchEvent({
+        type: "error",
+        message: "adaptation provider failed",
+        at: new Date().toISOString(),
+      });
     }
 
     setSession((previous) => ({
@@ -430,6 +483,7 @@ export function ExperimentShell({
     lastTrial,
     pendingPrediction,
     preferences,
+    recordResearchEvent,
     runPhase,
     session.evidence,
   ]);
@@ -475,12 +529,19 @@ export function ExperimentShell({
         ...previous,
         evidence: updateAdaptationProposal(previous.evidence, decided),
       }));
+      recordResearchEvent({
+        type: "adaptation_decided",
+        proposalId: proposal.id,
+        proposalType: proposal.type,
+        decision,
+        at: new Date().toISOString(),
+      });
       setActiveProposals((previous) =>
         previous.filter((item) => item.id !== proposal.id),
       );
       setNotice(null);
     },
-    [preferences, updatePreferences],
+    [preferences, recordResearchEvent, updatePreferences],
   );
 
   const handleRepresentationChange = useCallback(
@@ -494,9 +555,14 @@ export function ExperimentShell({
             openedAt: new Date().toISOString(),
           }),
         }));
+        recordResearchEvent({
+          type: "representation_opened",
+          mode,
+          at: new Date().toISOString(),
+        });
       }
     },
-    [lastOpenedMode],
+    [lastOpenedMode, recordResearchEvent],
   );
 
   const handleCounterfactual = useCallback(
@@ -517,9 +583,15 @@ export function ExperimentShell({
           createdAt: new Date().toISOString(),
         }),
       }));
+      recordResearchEvent({
+        type: "counterfactual_run",
+        originalTrialId: lastTrial.id,
+        changedVariable: variable,
+        at: new Date().toISOString(),
+      });
       setNotice(null);
     },
-    [lastTrial],
+    [lastTrial, recordResearchEvent],
   );
 
   const handleClearSession = useCallback(async () => {
@@ -647,12 +719,15 @@ export function ExperimentShell({
                     <span className="text-xs text-muted">
                       Using your saved learning preferences
                     </span>
-                    <span
+                    {/* Saved-preference indicator: a compact badge of the
+                        active preference summary (real values only). */}
+                    <Badge
+                      variant="outline"
                       aria-label="Saved learning preferences"
-                      className="hidden text-xs text-muted md:inline"
+                      className="hidden whitespace-normal text-left md:inline-flex"
                     >
                       {preferenceSummary(profilePrefs).join(" · ")}
-                    </span>
+                    </Badge>
                     <button
                       type="button"
                       onClick={() => setShowSettings(true)}
@@ -827,8 +902,9 @@ export function ExperimentShell({
                 {runPhase !== "idle" && (
                   <p
                     role="status"
-                    className="rounded-lg bg-surface-raised px-3 py-2 text-sm text-foreground"
+                    className="flex items-center gap-2 rounded-lg bg-surface-raised px-3 py-2 text-sm text-foreground"
                   >
+                    <Spinner aria-hidden="true" className="size-4" />
                     {runPhase === "simulating"
                       ? "Running the simulation…"
                       : "Interpreting your evidence…"}
@@ -959,7 +1035,13 @@ export function ExperimentShell({
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => setShowReplay(true)}
+                    onClick={() => {
+                      setShowReplay(true);
+                      recordResearchEvent({
+                        type: "replay_opened",
+                        at: new Date().toISOString(),
+                      });
+                    }}
                     className="rounded-lg border border-border px-3 py-2 text-sm font-semibold hover:bg-surface-raised"
                   >
                     Adaptation Replay
@@ -993,6 +1075,8 @@ export function ExperimentShell({
           </div>
         )}
       </main>
+
+      {researchActive && <ResearchStrip />}
 
       {showResearch && lastTrial && !pendingPrediction && (
         <section

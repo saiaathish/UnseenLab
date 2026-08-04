@@ -6,6 +6,7 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { TEXT_SCALE_MAX, TEXT_SCALE_MIN } from "@/domain/learner";
 import { useSession } from "@/lib/firebase/use-session";
@@ -49,6 +50,9 @@ export const SUGGESTED_TOPICS = [
 const TEXT_SCALE_STEP = 0.05;
 const MAX_TOPICS = 12;
 const MAX_TOPIC_LENGTH = 40;
+
+/** Short names for the four steps, used by the aria-current step indicator. */
+const STEP_LABELS = ["Goal", "Explanations", "Experience", "Topics"] as const;
 
 const goalOptions: Array<{ value: LearningGoal; label: string }> = [
   { value: "understand_concept", label: "Understand a difficult concept." },
@@ -349,6 +353,35 @@ export function OnboardingWizard({
           style={{ width: `${(step / 4) * 100}%` }}
         />
       </div>
+      {/* Step-progress semantics: the active step is marked with aria-current.
+          Dots are decorative; the sr-only labels name each step. */}
+      <ol
+        aria-label="Onboarding steps"
+        className="mt-3 grid grid-cols-4 gap-2"
+      >
+        {STEP_LABELS.map((label, index) => {
+          const stepNumber = index + 1;
+          const active = stepNumber === step;
+          return (
+            <li
+              key={label}
+              aria-current={active ? "step" : undefined}
+              className="flex flex-col items-center gap-1.5"
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "h-2 w-2 rounded-full transition-colors",
+                  active ? "bg-primary" : "bg-muted/60",
+                )}
+              />
+              <span className="sr-only">
+                Step {stepNumber}: {label}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
 
       {step === 1 && (
         <section className="mt-6">
@@ -621,7 +654,9 @@ export function OnboardingWizard({
               variant="outline"
               onClick={() => completeWithPreferences({ ...draft, topicInterests: [] })}
               disabled={saving}
+              aria-busy={saving}
             >
+              {saving ? <Spinner aria-hidden="true" /> : null}
               Skip
             </Button>
           )}
@@ -634,7 +669,9 @@ export function OnboardingWizard({
               type="button"
               onClick={() => completeWithPreferences(draft)}
               disabled={saving}
+              aria-busy={saving}
             >
+              {saving ? <Spinner aria-hidden="true" /> : null}
               Start learning
             </Button>
           )}
@@ -653,7 +690,9 @@ export function OnboardingWizard({
             size="sm"
             onClick={() => completeWithPreferences(draft)}
             disabled={saving}
+            aria-busy={saving}
           >
+            {saving ? <Spinner aria-hidden="true" /> : null}
             Retry
           </Button>
         </div>

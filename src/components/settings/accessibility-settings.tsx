@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
@@ -244,9 +245,11 @@ export function AccessibilitySettings({
           </p>
 
           {saveError ? (
-            <p role="alert" className="text-sm text-danger">
-              We couldn&apos;t save that right now. Please try again.
-            </p>
+            <Alert>
+              <AlertDescription>
+                We couldn&apos;t save that right now. Please try again.
+              </AlertDescription>
+            </Alert>
           ) : null}
         </CardContent>
       </Card>

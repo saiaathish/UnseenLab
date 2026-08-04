@@ -1,3 +1,9 @@
+> **SUPERSEDED — historical record.** This document describes the Supabase +
+> Postgres RLS platform layer, which was replaced by Firebase Auth + MongoDB
+> (see `docs/firebase-mongodb-setup.md`, `docs/backend-verification.md`,
+> `docs/security.md`). Kept for audit history; its claims do not describe the
+> current runtime.
+
 # UnseenLab — Platform Demo Script
 
 Author: AGENT DEMO-01 (demo script author) · Target: **4–6 minutes** spoken, plus Q&A.

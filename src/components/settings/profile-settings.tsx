@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -155,6 +156,7 @@ export function ProfileSettings({
               variant="secondary"
               onClick={handleSave}
               disabled={saving}
+              aria-busy={saving}
             >
               {saving ? "Saving…" : "Save changes"}
             </Button>
@@ -166,9 +168,11 @@ export function ProfileSettings({
             </p>
           ) : null}
           {status === "error" ? (
-            <p role="alert" className="text-sm text-danger">
-              We couldn&apos;t save your profile. Try again.
-            </p>
+            <Alert>
+              <AlertDescription>
+                We couldn&apos;t save your profile. Try again.
+              </AlertDescription>
+            </Alert>
           ) : null}
         </CardContent>
       </Card>

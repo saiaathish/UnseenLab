@@ -1,3 +1,9 @@
+> **SUPERSEDED — historical record.** This document describes the Supabase +
+> Postgres RLS platform layer, which was replaced by Firebase Auth + MongoDB
+> (see `docs/firebase-mongodb-setup.md`, `docs/backend-verification.md`,
+> `docs/security.md`). Kept for audit history; its claims do not describe the
+> current runtime.
+
 # UnseenLab — Shared-Device Privacy Policy
 
 Status: Phase 1 (policy for the sign-out choice) — companion to `docs/platform-contracts.md` (§3 data model, §5 sync contract), `docs/platform-copy-spec.md` (§6.4 privacy and data, §7.2 import), and the implementation in `src/components/auth/sign-out-dialog.tsx`, `src/components/sync/guest-import-dialog.tsx`, `src/storage/session-storage.ts`, `src/sync/guest-session-import.ts`, `src/sync/cloud-session-repository.ts`, `supabase/migrations/20260803193000_platform_schema.sql`.

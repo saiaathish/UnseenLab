@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -233,9 +234,11 @@ export function LearningPreferencesSettings({
               Rerun onboarding
             </Link>
             {saveError ? (
-              <p role="alert" className="text-sm text-danger">
-                We couldn&apos;t save that right now. Please try again.
-              </p>
+              <Alert>
+                <AlertDescription>
+                  We couldn&apos;t save that right now. Please try again.
+                </AlertDescription>
+              </Alert>
             ) : null}
           </div>
         </CardContent>

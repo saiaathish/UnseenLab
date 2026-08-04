@@ -1,3 +1,9 @@
+> **SUPERSEDED — historical record.** This document describes the Supabase +
+> Postgres RLS platform layer, which was replaced by Firebase Auth + MongoDB
+> (see `docs/firebase-mongodb-setup.md`, `docs/backend-verification.md`,
+> `docs/security.md`). Kept for audit history; its claims do not describe the
+> current runtime.
+
 # PR Review Map — Personalized Auth & Onboarding Platform
 
 Purpose: make PR #5 reviewable. The PR is one 92-file / ~11.8k-line commit

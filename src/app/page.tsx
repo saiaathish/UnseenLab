@@ -34,7 +34,7 @@ export default function Home() {
         <section
           id="how-it-works"
           aria-labelledby="how-heading"
-          className="py-20"
+          className="scroll-mt-24 py-20"
         >
           <h2
             id="how-heading"
@@ -45,7 +45,12 @@ export default function Home() {
           <ol className="mt-8 grid gap-10 md:grid-cols-3">
             {steps.map((step) => (
               <li key={step.number}>
-                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-teal-400/40 text-sm font-semibold text-teal-300">
+                {/* The <ol> already announces the step numbers; the circle
+                    badge is a visual duplicate, so it stays aria-hidden. */}
+                <span
+                  aria-hidden="true"
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-teal-400/40 text-sm font-semibold text-teal-300"
+                >
                   {step.number}
                 </span>
                 <h3 className="mt-4 text-lg font-semibold">{step.title}</h3>
@@ -60,7 +65,7 @@ export default function Home() {
         <section
           id="available-lab"
           aria-labelledby="available-heading"
-          className="border-t border-white/10 py-20"
+          className="scroll-mt-24 border-t border-white/10 py-20"
         >
           <h2
             id="available-heading"
@@ -111,7 +116,7 @@ export default function Home() {
         <section
           id="accessibility"
           aria-labelledby="accessibility-heading"
-          className="border-t border-white/10 py-20"
+          className="scroll-mt-24 border-t border-white/10 py-20"
         >
           <h2
             id="accessibility-heading"
@@ -126,7 +131,15 @@ export default function Home() {
         </section>
 
         <footer className="border-t border-white/10 py-8 text-xs leading-5 text-gray-400">
-          {simulationDisclaimer}
+          <p>{simulationDisclaimer}</p>
+          <p className="mt-3">
+            <Link
+              href="/research"
+              className="text-gray-500 underline decoration-white/20 underline-offset-2 transition-colors hover:text-gray-300"
+            >
+              Product research session
+            </Link>
+          </p>
         </footer>
       </div>
     </main>

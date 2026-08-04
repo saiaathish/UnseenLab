@@ -332,7 +332,10 @@ export function TopicInputHero() {
             Sign in to save preferences and continue across devices.
           </Link>
 
-          <div aria-live="polite" className="w-full">
+          <div
+            aria-live="polite"
+            className={`w-full ${result ? "pb-6" : ""}`}
+          >
             {result && result.status === "supported" ? (
               <div className="mx-auto mt-6 max-w-xl rounded-2xl border border-white/15 bg-white/5 p-5 text-left backdrop-blur-md">
                 <h2
