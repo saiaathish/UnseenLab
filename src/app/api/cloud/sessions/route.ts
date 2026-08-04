@@ -131,6 +131,20 @@ export async function PUT(request: Request): Promise<NextResponse> {
 
   const now = new Date().toISOString();
   const sessions = db.collection<LearningSessionRow>(COLLECTIONS.learningSessions);
+  const setFields = {
+    id: parsed.data.id,
+    lab_slug: parsed.data.lab_slug,
+    status: parsed.data.status,
+    title: parsed.data.title.slice(0, MAX_TITLE_LENGTH),
+    schema_version: parsed.data.schema_version,
+    evidence: parsed.data.evidence,
+    workflow: parsed.data.workflow,
+    completed_at: parsed.data.completed_at,
+    user_id: user.uid,
+    last_client_mutation_id: mutation_id ?? null,
+    updated_at: now,
+  } as const;
+
   try {
     const existing = await sessions.findOne({
       id: parsed.data.id,
@@ -146,47 +160,79 @@ export async function PUT(request: Request): Promise<NextResponse> {
       return NextResponse.json({ data: { session: stripId(existing) } });
     }
 
-    // Optimistic concurrency: the row moved on since the client read it.
-    // A legacy row without a revision counts as revision 0 — the first
+    // Optimistic concurrency, applied ATOMICALLY: the revision is part of
+    // the match filter, so two concurrent writers with the same expected
+    // revision cannot both advance it (check-then-act lost update). A
+    // legacy row without a revision counts as revision 0 — the first
     // concurrency-aware write may proceed against it.
-    if (
-      existing &&
-      expected_revision !== undefined &&
-      (existing.revision ?? 0) !== expected_revision
-    ) {
+    if (expected_revision !== undefined) {
+      // Legacy rows predating the revision field must still match an
+      // expected revision of 0 (the client normalizes absent → 0).
+      const revisionMatch =
+        expected_revision === 0
+          ? { $or: [{ revision: 0 }, { revision: { $exists: false } }] }
+          : { revision: expected_revision };
+      const updated = await sessions.findOneAndUpdate(
+        {
+          id: parsed.data.id,
+          user_id: user.uid,
+          ...revisionMatch,
+        },
+        { $set: setFields, $inc: { revision: 1 } },
+        { returnDocument: "after" }
+      );
+      if (updated) {
+        return NextResponse.json({ data: { session: stripId(updated) } });
+      }
+      // The atomic filter matched nothing: either the row moved on, this
+      // very mutation already landed in a race, or no row exists yet.
+      const current = await sessions.findOne({
+        id: parsed.data.id,
+        user_id: user.uid,
+      });
+      if (current === null) {
+        // Nothing to conflict with — create at revision 1 (a first write
+        // with expected_revision 0 is the client's "no row yet" belief).
+        const created = await sessions.findOneAndUpdate(
+          { id: parsed.data.id, user_id: user.uid },
+          {
+            $set: { ...setFields, revision: 1 },
+            $setOnInsert: { created_at: now },
+          },
+          { upsert: true, returnDocument: "after" }
+        );
+        return NextResponse.json({
+          data: { session: created ? stripId(created) : null },
+        });
+      }
+      if (
+        current &&
+        mutation_id !== undefined &&
+        current.last_client_mutation_id === mutation_id
+      ) {
+        return NextResponse.json({ data: { session: stripId(current) } });
+      }
       return NextResponse.json(
-        { error: "conflict", data: { session: stripId(existing) } },
+        {
+          error: "conflict",
+          data: { session: current ? stripId(current) : null },
+        },
         { status: 409 }
       );
     }
 
-    await sessions.updateOne(
+    // No expected revision (legacy client or first write): create at
+    // revision 1, or advance an existing row without a concurrency check.
+    const updated = await sessions.findOneAndUpdate(
       { id: parsed.data.id, user_id: user.uid },
       {
-        $set: {
-          id: parsed.data.id,
-          lab_slug: parsed.data.lab_slug,
-          status: parsed.data.status,
-          title: parsed.data.title.slice(0, MAX_TITLE_LENGTH),
-          schema_version: parsed.data.schema_version,
-          evidence: parsed.data.evidence,
-          workflow: parsed.data.workflow,
-          completed_at: parsed.data.completed_at,
-          user_id: user.uid,
-          revision: (existing?.revision ?? 0) + 1,
-          last_client_mutation_id: mutation_id ?? null,
-          updated_at: now,
-        },
+        $set: { ...setFields, revision: (existing?.revision ?? 0) + 1 },
         $setOnInsert: { created_at: now },
       },
-      { upsert: true }
+      { upsert: true, returnDocument: "after" }
     );
-    const sessionDoc = await sessions.findOne({
-      id: parsed.data.id,
-      user_id: user.uid,
-    });
     return NextResponse.json({
-      data: { session: sessionDoc ? stripId(sessionDoc) : null },
+      data: { session: updated ? stripId(updated) : null },
     });
   } catch (error) {
     // A cross-user insert attempt against an existing session id hits the

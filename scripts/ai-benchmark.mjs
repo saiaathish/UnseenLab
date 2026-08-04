@@ -164,7 +164,6 @@ function decliningTrial(id, seed = 42, start = 10) {
 // ---------------------------------------------------------------------------
 // Fixtures (31, spanning the full misconception taxonomy; real ids only)
 // ---------------------------------------------------------------------------
-const ACCEPT_ALL_INTERVENTIONS = null; // no unacceptable restriction
 
 const FIXTURES = [
   {

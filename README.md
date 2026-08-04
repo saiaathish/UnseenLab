@@ -145,8 +145,12 @@ src/
                            structured LLM provider, llm-client, llm-schema,
                            misconception taxonomy
   storage/                 anonymous local session (Zod-validated)
-tests/                     unit + component tests (17 files)
-e2e/                       Playwright: smoke, keyboard, homepage, multi-trial (12 tests)
+tests/                       vitest unit/component suite (37 files)
+e2e/                       Playwright: 10 specs (guest + env-gated real-backend)
+docs/                      product spec, rubric strategy, judge Q&A,
+                           user research, safety model, architecture,
+                           Firebase/Mongo setup, security, benchmark,
+                           demo script, claim register, initial commit report
 docs/                      product spec, rubric strategy, judge Q&A,
                            user research, safety model, architecture,
                            initial commit report

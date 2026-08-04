@@ -61,6 +61,26 @@ validation. Also note it counts *failures only* — a distributed attack across
 many IPs is bounded by nothing here (rate limiting by IP is inherently
 evadable; the ID token itself is the real gate).
 
+## 3b. Hosted-model cost controls (`POST /api/adapt`)
+
+The adaptation bridge is intentionally unauthenticated (guest-first:
+signed-out learners use the hosted model too), so it is bounded instead of
+gated:
+
+- **Body-size cap**: requests over 256 KB are rejected (`413 too_large`)
+  before parsing.
+- **Schema bounds**: at most 50 predictions and 100 trials per request;
+  free-text `prompt`/`answer` fields capped at 4000 chars (route-local
+  bounds — the shared domain schemas stay permissive for localStorage
+  round-trips).
+- **Per-IP rate limit**: 100 calls per 5 minutes per source IP
+  (`429 rate_limited`); in-memory, per instance — same honest limitation
+  as §3.
+
+A hostile caller can therefore burn at most a bounded amount of paid model
+tokens, and oversized/schema-invalid bodies never reach the model. Tests:
+`tests/app/adapt-route-guard.test.ts`.
+
 ## 4. Open-redirect allowlist
 
 `src/lib/auth/redirect-safety.ts` (`isSafeRedirectPath`) gates every
