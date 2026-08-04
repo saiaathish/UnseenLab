@@ -19,6 +19,7 @@ import {
 const PREFERENCES_KEY = "unseenlab.preferences.v1";
 const EVIDENCE_KEY = "unseenlab.evidence.v1";
 const WORKFLOW_KEY = "unseenlab.workflow.v1";
+const SESSION_ID_KEY = "unseenlab.session-id.v1";
 
 /**
  * A prediction submitted but not yet attached to a run trial. Persisted so a
@@ -182,4 +183,61 @@ export function downloadSessionJson(session: LocalSession): void {
   anchor.download = "unseenlab-session.json";
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Stable session identifier used for cloud sync and guest import. One id per
+ * local learning session; a "Start over" rotates it so a fresh session never
+ * overwrites a previously imported one.
+ */
+export function getLocalSessionId(): string {
+  if (!storageAvailable()) return createSessionId();
+  try {
+    const existing = globalThis.localStorage.getItem(SESSION_ID_KEY);
+    if (existing && /^[0-9a-f-]{36}$/i.test(existing)) return existing;
+    const fresh = createSessionId();
+    globalThis.localStorage.setItem(SESSION_ID_KEY, fresh);
+    return fresh;
+  } catch {
+    return createSessionId();
+  }
+}
+
+export function rotateLocalSessionId(): string {
+  const fresh = createSessionId();
+  if (storageAvailable()) {
+    try {
+      globalThis.localStorage.setItem(SESSION_ID_KEY, fresh);
+    } catch {
+      // Ignore: the id remains valid for this visit.
+    }
+  }
+  return fresh;
+}
+
+/**
+ * Adopts an existing cloud session id (e.g. when resuming a saved session)
+ * so subsequent saves continue the same cloud row instead of forking a
+ * duplicate.
+ */
+export function setLocalSessionId(id: string): void {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return;
+  if (storageAvailable()) {
+    try {
+      globalThis.localStorage.setItem(SESSION_ID_KEY, id);
+    } catch {
+      // Ignore: the in-memory id is lost on reload, but saves are idempotent.
+    }
+  }
+}
+
+function createSessionId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }

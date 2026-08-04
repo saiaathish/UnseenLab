@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import type { KeyboardEvent } from "react";
 import type {
   SimulationStopReason,
@@ -15,6 +15,8 @@ interface Props {
   trial: TrialRecord | null;
   stopReason: SimulationStopReason | null;
   preferences: LearnerPreferences;
+  /** Saved explanation style (optional account layer) — changes plain-language copy only, never science. */
+  explanationStyle?: "visual_first" | "step_by_step" | "concise";
   onChange: (mode: RepresentationMode) => void;
 }
 
@@ -35,9 +37,24 @@ export function RepresentationTabs({
   trial,
   stopReason,
   preferences,
+  explanationStyle,
   onChange,
 }: Props) {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  /**
+   * Preferred views come first (stable order for the rest), so a saved
+   * preference visibly changes what the learner sees first.
+   */
+  const orderedModes = useMemo(() => {
+    const preferred = preferences.preferredRepresentations.filter((mode) =>
+      REPRESENTATION_MODES.includes(mode),
+    );
+    const rest = REPRESENTATION_MODES.filter(
+      (mode) => !preferred.includes(mode),
+    );
+    return [...preferred, ...rest];
+  }, [preferences.preferredRepresentations]);
 
   /**
    * WAI-ARIA tabs pattern: ArrowRight/ArrowLeft move selection (wrapping),
@@ -51,33 +68,28 @@ export function RepresentationTabs({
       (node) => node === document.activeElement,
     );
     const currentIndex =
-      focusedIndex >= 0
-        ? focusedIndex
-        : REPRESENTATION_MODES.indexOf(active);
+      focusedIndex >= 0 ? focusedIndex : orderedModes.indexOf(active);
     let nextIndex: number | null = null;
 
     switch (event.key) {
       case "ArrowRight":
-        nextIndex =
-          (currentIndex + 1) % REPRESENTATION_MODES.length;
+        nextIndex = (currentIndex + 1) % orderedModes.length;
         break;
       case "ArrowLeft":
-        nextIndex =
-          (currentIndex - 1 + REPRESENTATION_MODES.length) %
-          REPRESENTATION_MODES.length;
+        nextIndex = (currentIndex - 1 + orderedModes.length) % orderedModes.length;
         break;
       case "Home":
         nextIndex = 0;
         break;
       case "End":
-        nextIndex = REPRESENTATION_MODES.length - 1;
+        nextIndex = orderedModes.length - 1;
         break;
       default:
         return;
     }
 
     event.preventDefault();
-    onChange(REPRESENTATION_MODES[nextIndex]);
+    onChange(orderedModes[nextIndex]);
     tabRefs.current[nextIndex]?.focus();
   };
 
@@ -92,7 +104,7 @@ export function RepresentationTabs({
         onKeyDown={handleKeyDown}
         className="flex flex-wrap gap-1"
       >
-        {REPRESENTATION_MODES.map((mode, index) => (
+        {orderedModes.map((mode, index) => (
           <button
             key={mode}
             ref={(node) => {
@@ -132,7 +144,12 @@ export function RepresentationTabs({
         ) : active === "causal" ? (
           <CausalView trial={trial} />
         ) : active === "plain_language" ? (
-          <PlainLanguageView trial={trial} stopReason={stopReason} preferences={preferences} />
+          <PlainLanguageView
+            trial={trial}
+            stopReason={stopReason}
+            preferences={preferences}
+            explanationStyle={explanationStyle}
+          />
         ) : (
           <p className="text-sm text-muted">
             Switch to the Animation tab for the interactive animation (above
@@ -319,10 +336,12 @@ function PlainLanguageView({
   trial,
   stopReason,
   preferences,
+  explanationStyle,
 }: {
   trial: TrialRecord;
   stopReason: SimulationStopReason | null;
   preferences: LearnerPreferences;
+  explanationStyle?: "visual_first" | "step_by_step" | "concise";
 }) {
   const final = last(trial.snapshots);
   const p = trial.parameters;
@@ -339,15 +358,64 @@ function PlainLanguageView({
         ? "declining — it shrank"
         : "roughly steady";
   const lowDensity = preferences.informationDensity === "low";
+  const fullDensity = preferences.informationDensity === "full";
+
+  // The saved explanation style shapes the plain-language copy (never the
+  // science): step-by-step lists the causal chain, concise keeps one short
+  // paragraph, visual-first points to the animation. Defaults match the
+  // pre-account behavior.
+  if (explanationStyle === "step_by_step") {
+    return (
+      <div className="flex flex-col gap-2 text-sm leading-7">
+        <p>
+          With {p.startingNeutrons} starting neutrons and the absorber{" "}
+          {Math.round(p.absorberPosition * 100)}% inserted, the population was{" "}
+          {growthShape}. {outcome}
+        </p>
+        <ol className="list-decimal space-y-1 pl-5 text-muted">
+          <li>
+            Starting neutrons{" "}
+            {p.absorberPosition >= 0.5
+              ? "mostly meet the absorber"
+              : "mostly survive"}{" "}
+            — {final.freeNeutrons} were free at the end.
+          </li>
+          <li>
+            Each surviving neutron can cause a reaction: {final.reactionEvents}{" "}
+            happened, releasing {final.cumulativeEnergyUnits} abstract energy
+            units.
+          </li>
+          <li>
+            Reactions release more neutrons, so a growing population feeds
+            itself — which is why it can accelerate.
+          </li>
+        </ol>
+      </div>
+    );
+  }
+
+  const mechanism =
+    lowDensity
+      ? ""
+      : " Withdrawing the absorber lets more neutrons survive, so more of them can cause reactions — and each reaction releases more neutrons, which is why the population can accelerate.";
+  const extra =
+    fullDensity && explanationStyle !== "concise"
+      ? ` The ceiling stopped the count at ${MAX_POPULATION} free neutrons, so the exact timing after that is not shown.`
+      : "";
+  const visualNote =
+    explanationStyle === "visual_first"
+      ? " Watch the animation above and pause at the moment the count changes."
+      : "";
+
   return (
     <p className="text-sm leading-7">
       With {p.startingNeutrons} starting neutrons and the absorber{" "}
       {Math.round(p.absorberPosition * 100)}% inserted, the population was{" "}
       {growthShape}. {outcome} There were {final.reactionEvents} reactions and{" "}
-      {final.cumulativeEnergyUnits} abstract energy units.{" "}
-      {lowDensity
-        ? ""
-        : "Withdrawing the absorber lets more neutrons survive, so more of them can cause reactions — and each reaction releases more neutrons, which is why the population can accelerate."}
+      {final.cumulativeEnergyUnits} abstract energy units.
+      {mechanism}
+      {extra}
+      {visualNote}
     </p>
   );
 }

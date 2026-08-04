@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ExperimentDefinition,
   ExperimentParameters,
@@ -40,10 +40,29 @@ import { classifyConceptEvidence } from "@/adaptation/misconception-taxonomy";
 import {
   clearLocalSession,
   createLocalSession,
+  getLocalSessionId,
   loadLocalSession,
+  rotateLocalSessionId,
   saveLocalSession,
+  setLocalSessionId,
   type LocalSession,
 } from "@/storage/session-storage";
+import { useSession } from "@/lib/supabase/use-session";
+import { getBrowserClient } from "@/lib/supabase/browser-client";
+import {
+  profileToLearnerPreferences,
+  preferenceSummary,
+} from "@/personalization/profile-to-learner-preferences";
+import type { LearnerPreferencesRow } from "@/lib/supabase/types";
+import { CloudSessionRepository } from "@/sync/cloud-session-repository";
+import { useCloudSessionSync } from "@/sync/use-cloud-session-sync";
+import {
+  hasGuestEvidence,
+  isSessionImported,
+} from "@/sync/guest-session-import";
+import { CloudSyncStatus } from "@/components/sync/cloud-sync-status";
+import { GuestImportDialog } from "@/components/sync/guest-import-dialog";
+import { SessionResumeDialog } from "@/components/sync/session-resume-dialog";
 import { PredictionPanel } from "./prediction-panel";
 import { VariableControls } from "./variable-controls";
 import { SimulationCanvas } from "./simulation-canvas";
@@ -116,6 +135,19 @@ export function ExperimentShell({
   const [showResearch, setShowResearch] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const reflectSectionRef = useRef<HTMLElement | null>(null);
+  const [importRequested, setImportRequested] = useState(false);
+
+  // Optional account layer: the lab stays fully usable signed out.
+  const { user, loading: sessionLoading } = useSession();
+  const { status: syncStatus, flush: flushSync } = useCloudSessionSync(
+    session,
+    user,
+    experiment.title
+  );
+  const [profilePrefs, setProfilePrefs] =
+    useState<LearnerPreferencesRow | null>(null);
+  const cloudPrefsApplied = useRef(false);
+  const localPrefsChanged = useRef(false);
 
   const preferences = session.preferences;
   // The pending prediction lives inside the persisted workflow, so a reload
@@ -188,7 +220,13 @@ export function ExperimentShell({
     };
     apply();
     media?.addEventListener("change", apply);
-    return () => media?.removeEventListener("change", apply);
+    return () => {
+      media?.removeEventListener("change", apply);
+      // Leave the page as we found it: contrast and motion are per-page
+      // settings, so they must not leak into the dashboard or settings.
+      document.body.classList.remove("high-contrast");
+      document.documentElement.removeAttribute("data-reduced-motion");
+    };
   }, [preferences.highContrast, preferences.reducedMotion]);
 
   // Text size is applied to the root element so rem-based Tailwind classes
@@ -223,6 +261,7 @@ export function ExperimentShell({
 
   const updatePreferences = useCallback(
     (updates: Partial<LearnerPreferences>) => {
+      localPrefsChanged.current = true;
       setSession((previous) => ({
         ...previous,
         preferences: { ...previous.preferences, ...updates },
@@ -230,6 +269,42 @@ export function ExperimentShell({
     },
     [],
   );
+
+  // Cloud preferences are fetched once per visit and merged through the
+  // canonical mapper before the learner starts — unless they have already
+  // adjusted something locally, in which case the local session wins. The
+  // preferred representation also selects the initial lab view.
+  const applyCloudPreferences = useCallback(async () => {
+    const client = getBrowserClient();
+    if (!user || !client || cloudPrefsApplied.current) return;
+    cloudPrefsApplied.current = true;
+    try {
+      const { data } = await client
+        .from("learner_preferences")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (!data) return;
+      if (localPrefsChanged.current) return;
+      setProfilePrefs(data);
+      setSession((previous) => ({
+        ...previous,
+        preferences: profileToLearnerPreferences(data),
+      }));
+      // Preferred representation selects the initial lab view, but only
+      // before the learner has opened any representation themselves.
+      if (session.evidence.representationEvents.length === 0) {
+        setActiveRepresentation(data.preferred_representation);
+      }
+    } catch {
+      // Cloud unavailable: defaults stay; nothing crashes.
+    }
+  }, [user, session.evidence.representationEvents.length]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void applyCloudPreferences(), 0);
+    return () => window.clearTimeout(timer);
+  }, [applyCloudPreferences]);
 
   /**
    * Submitting a prediction always feeds the NEXT trial. On the first trial it
@@ -446,8 +521,26 @@ export function ExperimentShell({
     [lastTrial],
   );
 
-  const handleClearSession = useCallback(() => {
+  const handleClearSession = useCallback(async () => {
+    // "Start over" closes the previous session on the cloud (when signed in)
+    // and rotates the local session id so a fresh session can never overwrite
+    // an imported one. The pending debounced save is flushed FIRST so
+    // markComplete can never race an in-flight upsert back to "active".
+    const hadTrials = session.evidence.trials.length > 0;
+    if (hadTrials && user) {
+      await flushSync();
+      const client = getBrowserClient();
+      if (client) {
+        const repo = new CloudSessionRepository(client, user.id);
+        void repo.markComplete(getLocalSessionId()).catch(() => {
+          // Cloud unavailable: the local session remains the source of truth.
+        });
+      }
+    }
+    rotateLocalSessionId();
     clearLocalSession();
+    localPrefsChanged.current = false;
+    cloudPrefsApplied.current = false;
     const freshSession = loadLocalSession();
     setSession(freshSession);
     setCurrentParameters({ ...experiment.defaultParameters });
@@ -458,7 +551,50 @@ export function ExperimentShell({
     setCounterfactualOpen(false);
     setActiveRepresentation("animation");
     setNotice(null);
-  }, [experiment.defaultParameters]);
+    void applyCloudPreferences();
+  }, [
+    experiment.defaultParameters,
+    session.evidence.trials.length,
+    user,
+    flushSync,
+    applyCloudPreferences,
+  ]);
+
+  const handleResume = useCallback(
+    (restored: LocalSession, cloudId: string) => {
+      // Adopt the cloud row id so later saves continue the same row instead
+      // of forking a duplicate; keep saved preferences applied.
+      setLocalSessionId(cloudId);
+      const withPrefs = profilePrefs
+        ? { ...restored, preferences: profileToLearnerPreferences(profilePrefs) }
+        : restored;
+      setSession(withPrefs);
+      const latest = withPrefs.evidence.trials.at(-1) ?? null;
+      setLastTrial(latest);
+      setLastStopReason(deriveStopReason(latest));
+      setCurrentParameters({
+        ...(latest?.parameters ?? experiment.defaultParameters),
+      });
+      setActiveProposals(
+        latest
+          ? withPrefs.evidence.adaptationProposals.filter(
+              (proposal) =>
+                proposal.decision === "pending" &&
+                proposal.evidenceIds.includes(latest.id),
+            )
+          : [],
+      );
+      setCounterfactual(null);
+      setCounterfactualOpen(false);
+      setActiveRepresentation("animation");
+      setNotice(null);
+    },
+    [experiment.defaultParameters, profilePrefs],
+  );
+
+  const handleNewSession = useCallback(() => {
+    // The empty local session stays as-is; nothing is clobbered.
+  }, []);
 
   return (
     <>
@@ -500,6 +636,63 @@ export function ExperimentShell({
             {simulationDisclaimer}
           </p>
         </div>
+
+        {!sessionLoading && (
+          <div className="border-t border-border bg-background/70">
+            <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2 sm:px-6">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                {profilePrefs ? (
+                  <>
+                    <span className="text-xs text-muted">
+                      Using your saved learning preferences
+                    </span>
+                    <span
+                      aria-label="Saved learning preferences"
+                      className="hidden text-xs text-muted/90 md:inline"
+                    >
+                      {preferenceSummary(profilePrefs).join(" · ")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSettings(true)}
+                      className="text-xs font-semibold text-accent hover:underline"
+                    >
+                      Adjust for this session
+                    </button>
+                  </>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                {user &&
+                hasGuestEvidence(session) &&
+                !isSessionImported(getLocalSessionId()) ? (
+                  <button
+                    type="button"
+                    onClick={() => setImportRequested(true)}
+                    className="text-xs font-semibold text-accent hover:underline"
+                  >
+                    Save this session to your account
+                  </button>
+                ) : null}
+                {!user && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      window.dispatchEvent(new Event("unseenlab:open-auth"))
+                    }
+                    className="text-xs font-medium text-accent hover:underline"
+                  >
+                    Sign in to save progress across devices.
+                  </button>
+                )}
+                <CloudSyncStatus
+                  status={syncStatus}
+                  signedIn={Boolean(user)}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       {showSettings && (
@@ -512,6 +705,10 @@ export function ExperimentShell({
               preferences={preferences}
               onChange={updatePreferences}
             />
+            <p className="mt-3 text-xs text-muted">
+              Changes apply to this session and won&apos;t update your saved
+              preferences.
+            </p>
           </div>
         </section>
       )}
@@ -678,6 +875,7 @@ export function ExperimentShell({
                     trial={lastTrial}
                     stopReason={lastStopReason}
                     preferences={preferences}
+                    explanationStyle={profilePrefs?.explanation_style}
                     onChange={handleRepresentationChange}
                   />
                 </div>
@@ -818,6 +1016,26 @@ export function ExperimentShell({
           onClose={() => setShowReplay(false)}
         />
       )}
+
+      {user &&
+        !sessionLoading &&
+        session.evidence.trials.length === 0 &&
+        !pendingPrediction && (
+          <Suspense fallback={null}>
+            <SessionResumeDialog
+              user={user}
+              onResume={handleResume}
+              onNewSession={handleNewSession}
+            />
+          </Suspense>
+        )}
+      <GuestImportDialog
+        user={user}
+        session={session}
+        title={experiment.title}
+        requestOpen={importRequested}
+        onRequestHandled={() => setImportRequested(false)}
+      />
     </>
   );
 }

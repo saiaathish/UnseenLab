@@ -11,7 +11,6 @@ import {
 } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { MiniNavbar } from "@/components/ui/mini-navbar";
 import { routeTopic, type TopicRoute } from "@/lib/topic-routing";
 
 const HeroWaveBackground = dynamic(
@@ -257,8 +256,6 @@ export function TopicInputHero() {
       </div>
 
       <div className="relative z-10 flex flex-1 flex-col">
-        <MiniNavbar />
-
         <div className="flex flex-1 flex-col items-center justify-center px-4 py-16 text-center">
           <h1 className="max-w-3xl text-3xl font-semibold tracking-tight sm:text-5xl">
             What topic do you need help with?
@@ -324,6 +321,16 @@ export function TopicInputHero() {
               </button>
             ))}
           </div>
+
+          {/* HOME-04 (copy spec §2.1a): muted account-value line, quieter than
+              the primary action. Opens the auth dialog via /?auth=open, which
+              AppHeader's SignInDialog picks up. */}
+          <Link
+            href="/?auth=open"
+            className="mt-4 inline-block rounded text-sm text-gray-400/80 transition-colors hover:text-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60"
+          >
+            Sign in to save preferences and continue across devices.
+          </Link>
 
           <div aria-live="polite" className="w-full">
             {result && result.status === "supported" ? (

@@ -6,7 +6,8 @@ import { test, expect } from "@playwright/test";
  * - unsupported-topic recovery loop (Edit my topic preserves input)
  * - reduced-motion rendering (static gradient, no WebGL canvas)
  * - mobile layout: no horizontal overflow, menu + anchor navigation
- * - no login/signup controls anywhere on the homepage
+ * - the single auth entry point (header Sign in -> dialog) and the guest
+ *   path staying auth-free
  */
 
 test("keyboard-only: supported topic reaches the lab", async ({ page }) => {
@@ -131,9 +132,44 @@ test.describe("mobile viewport", () => {
   });
 });
 
-test("homepage has no login or signup controls", async ({ page }) => {
+test("homepage auth entry opens the dialog; guest path stays auth-free", async ({
+  page,
+}) => {
   await page.goto("/");
-  await expect(page.getByRole("link", { name: /log ?in/i })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: /sign ?up/i })).toHaveCount(0);
-  await expect(page.getByText(/login|signup/i)).toHaveCount(0);
+
+  // No login/signup *pages or links* — the only auth surface is the dialog
+  // trigger in the header (AUTH-10) and the HOME-04 account-value line.
+  await expect(
+    page.getByRole("link", { name: /log ?in|sign ?up/i }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // The header "Sign in" opens the single auth dialog with mandated copy.
+  await page.getByRole("button", { name: "Sign in" }).first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Sign in to UnseenLab" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Continue with Google" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Try the lab now. Sign in whenever you want to save progress across devices.",
+    ),
+  ).toBeVisible();
+
+  // Guest dismissal keeps the topic flow working with no auth wall.
+  // NOTE: depends on the "Try without an account" close handler in
+  // sign-in-dialog.tsx (currently calls an undefined `setOpen` — owned by the
+  // platform agent; see agent-20 findings).
+  await page.getByRole("button", { name: "Try without an account" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page
+    .getByLabel("Describe the topic you need help with")
+    .fill("nuclear chain reaction");
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("link", { name: "Start this lab" }).first(),
+  ).toBeVisible();
 });
