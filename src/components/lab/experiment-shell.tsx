@@ -648,14 +648,14 @@ export function ExperimentShell({
                     </span>
                     <span
                       aria-label="Saved learning preferences"
-                      className="hidden text-xs text-muted/90 md:inline"
+                      className="hidden text-xs text-muted md:inline"
                     >
                       {preferenceSummary(profilePrefs).join(" · ")}
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowSettings(true)}
-                      className="text-xs font-semibold text-accent hover:underline"
+                      className="min-h-6 text-xs font-semibold text-accent hover:underline"
                     >
                       Adjust for this session
                     </button>
@@ -669,7 +669,7 @@ export function ExperimentShell({
                   <button
                     type="button"
                     onClick={() => setImportRequested(true)}
-                    className="text-xs font-semibold text-accent hover:underline"
+                    className="min-h-6 text-xs font-semibold text-accent hover:underline"
                   >
                     Save this session to your account
                   </button>
@@ -680,7 +680,7 @@ export function ExperimentShell({
                     onClick={() =>
                       window.dispatchEvent(new Event("unseenlab:open-auth"))
                     }
-                    className="text-xs font-medium text-accent hover:underline"
+                    className="min-h-6 text-xs font-medium text-accent hover:underline"
                   >
                     Sign in to save progress across devices.
                   </button>
@@ -716,7 +716,7 @@ export function ExperimentShell({
       {notice && (
         <div
           role="alert"
-          className="border-b border-warn/30 bg-warn/10 px-4 py-3 text-center text-sm text-warn"
+          className="border-b border-warn/30 bg-warn/10 px-4 py-3 text-center text-sm text-foreground"
         >
           {notice}
         </div>

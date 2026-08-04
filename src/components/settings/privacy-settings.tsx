@@ -15,8 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { getBrowserClient } from "@/lib/supabase/browser-client";
 import { useSession } from "@/lib/supabase/use-session";
-import { signOut } from "@/lib/supabase/auth";
 import { clearLocalSession, rotateLocalSessionId } from "@/storage/session-storage";
+import { SignOutDialog } from "@/components/auth/sign-out-dialog";
 import type { SettingsUserInfo } from "./settings-tabs";
 
 /**
@@ -36,6 +36,7 @@ export function PrivacySettings({ user }: { user: SettingsUserInfo }) {
   const [deleting, setDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
 
   const handleExport = async () => {
     const supabase = getBrowserClient();
@@ -99,12 +100,6 @@ export function PrivacySettings({ user }: { user: SettingsUserInfo }) {
       // Ignore: storage unavailable means nothing to clear.
     }
     setClearDialogOpen(false);
-  };
-
-  const handleSignOut = async () => {
-    await signOut();
-    router.push("/");
-    router.refresh();
   };
 
   return (
@@ -186,7 +181,11 @@ export function PrivacySettings({ user }: { user: SettingsUserInfo }) {
               this device.
             </p>
           </div>
-          <Button type="button" variant="outline" onClick={handleSignOut}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setSignOutDialogOpen(true)}
+          >
             Sign out
           </Button>
         </CardContent>
@@ -244,6 +243,11 @@ export function PrivacySettings({ user }: { user: SettingsUserInfo }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SignOutDialog
+        open={signOutDialogOpen}
+        onOpenChange={setSignOutDialogOpen}
+      />
     </section>
   );
 }

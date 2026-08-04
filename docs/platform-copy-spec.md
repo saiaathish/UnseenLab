@@ -285,6 +285,10 @@ Four tabs, exact labels: `Profile`, `Learning preferences`, `Accessibility`, `Pr
 | SET-49 | `Clear data on this device?` | Confirmation dialog heading | |
 | SET-50 | `This removes locally stored lab work and preferences from this device only. Data saved to your account is not affected.` | Confirmation dialog body | Scoped promise — device only, cloud untouched. |
 | SET-51 | `Cancel` / `Clear data` | Dialog actions | |
+| SET-52 | `Sign out of UnseenLab?` | Sign-out dialog heading | Shared-device privacy: every sign-out asks what happens to device-local data. |
+| SET-53 | `Your learning data on this device is kept private to this browser. Choose what happens to it when you sign out.` | Sign-out dialog body | Calm, honest; never claims cloud data is affected (it is not). |
+| SET-54 | `Sign out and keep my data on this device` (primary) / `Sign out and clear data on this device` (secondary, destructive) | Sign-out dialog actions | Keep = preserves local guest evidence (signed-out-first promise), clears only the Supabase session. Clear = additionally clears local evidence, rotates the session id, removes the onboarding draft. Both redirect to `/`. |
+| SET-55 | `Cancel` | Sign-out dialog dismiss | Esc/backdrop/X cancel without signing out. |
 
 ---
 

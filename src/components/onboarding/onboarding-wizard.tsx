@@ -567,7 +567,7 @@ export function OnboardingWizard({
                       type="button"
                       aria-label={`Remove ${topic}`}
                       onClick={() => removeTopic(topic)}
-                      className="rounded-full p-0.5 text-muted-foreground transition-colors hover:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50"
+                      className="min-h-6 min-w-6 rounded-full p-0.5 text-muted-foreground transition-colors hover:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50"
                     >
                       <X aria-hidden="true" className="h-3.5 w-3.5" />
                     </button>

@@ -363,13 +363,27 @@ describe("Settings — Privacy and data tab", () => {
     });
   });
 
-  it("signs out without confirmation and navigates home", async () => {
+  it("signs out through the choice dialog and navigates home", async () => {
+    localStorage.setItem("unseenlab.evidence.v1", JSON.stringify({ trials: [] }));
+
     renderSettings();
     await openTab("Privacy and data");
 
     await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
+    expect(
+      await screen.findByRole("heading", { name: "Sign out of UnseenLab?" }),
+    ).toBeInTheDocument();
+
+    // Primary action keeps local device data and signs out.
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Sign out and keep my data on this device",
+      }),
+    );
+
     await waitFor(() => expect(signOutMock).toHaveBeenCalledTimes(1));
+    expect(localStorage.getItem("unseenlab.evidence.v1")).not.toBeNull();
     expect(routerPushMock).toHaveBeenCalledWith("/");
     expect(routerRefreshMock).toHaveBeenCalled();
   });
