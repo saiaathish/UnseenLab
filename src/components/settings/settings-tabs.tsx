@@ -10,7 +10,7 @@ import {
 import type {
   LearnerPreferencesRow,
   ProfileRow,
-} from "@/lib/supabase/types";
+} from "@/lib/mongo/types";
 import { AccessibilitySettings } from "./accessibility-settings";
 import { LearningPreferencesSettings } from "./learning-preferences-settings";
 import { PrivacySettings } from "./privacy-settings";
@@ -88,18 +88,16 @@ export function SettingsTabs({
             <LearningPreferencesSettings
               preferences={preferences}
               onPreferencesChange={setPreferences}
-              user={user}
             />
           </TabsContent>
           <TabsContent value="accessibility" className="mt-6">
             <AccessibilitySettings
               preferences={preferences}
               onPreferencesChange={setPreferences}
-              user={user}
             />
           </TabsContent>
           <TabsContent value="privacy" className="mt-6">
-            <PrivacySettings user={user} />
+            <PrivacySettings />
           </TabsContent>
         </Tabs>
       </div>

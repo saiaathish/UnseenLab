@@ -83,9 +83,9 @@ npm install
 npm run dev        # http://localhost:3000
 ```
 
-Requires Node 20+ (built against Node 22). **Guest-first by design**: the lab is fully usable with no account, no Supabase project, and no hosted model — everything works locally and offline (deterministic rules, localStorage evidence, JSON export).
+Requires Node 20+ (built against Node 22). **Guest-first by design**: the lab is fully usable with no account, no Firebase project, no MongoDB, and no hosted model — everything works locally and offline (deterministic rules, localStorage evidence, JSON export).
 
-The optional platform layer (Supabase + Google OAuth) adds: saved preferences, cloud-saved sessions, cross-device resume, a personalized dashboard, and account settings. Without Supabase env vars the app degrades gracefully to guest-only mode (no crash, no auth wall). The core app has no telemetry; the only logging in the product is the optional server bridge's safe telemetry (model, fallback reason, elapsed milliseconds) when the hosted path is enabled. See `docs/supabase-setup.md` for the exact external configuration checklist.
+The optional platform layer (Firebase Auth + MongoDB) adds: Google sign-in, saved preferences, cloud-saved sessions, cross-device resume, a personalized dashboard, and account settings. Without the Firebase/Mongo env vars the app degrades gracefully to guest-only mode (no crash, no auth wall). The core app has no telemetry; the only logging in the product is the optional server bridge's safe telemetry (model, fallback reason, elapsed milliseconds) when the hosted path is enabled. See `docs/firebase-mongodb-setup.md` for the exact external configuration checklist.
 
 ### Optional: enable the hosted model
 
@@ -119,8 +119,8 @@ npm run test:e2e    # Playwright against a production build on port 3100 (requir
 npm run build       # production build
 ```
 
-- **302 unit/component tests across 29 files** passing (measured on the latest run): simulation invariants, adaptation rules (deterministic + LLM), session persistence, multi-trial flow, reduced motion, replay truthfulness, plus the platform layer — redirect-safety (open-redirect vectors), preference mapping, onboarding wizard (4 steps, persistence, keyboard), dashboard/settings, cloud-session conflict policy, guest-import idempotency, auth callback routing, route protection.
-- **25 Playwright e2e tests across 6 specs**: demo smoke, keyboard-only core flow, homepage topic routing + auth entry, the repeatable multi-trial loop, auth dialog behavior, and route protection (signed-out visitors to /dashboard|/onboarding|/settings land on `/?auth=open` with the dialog; the lab stays public).
+- **407 unit/component tests across 37 files** passing (measured on the latest run): simulation invariants, adaptation rules (deterministic + LLM + retry/circuit-breaker reliability), session persistence, multi-trial flow, reduced motion, replay truthfulness, plus the platform layer — redirect-safety (open-redirect vectors), preference mapping, onboarding wizard, dashboard/settings, cloud-session conflict policy + optimistic concurrency (revision/409/idempotent replay), guest-import idempotency, auth callback routing, session-route security (origin check, rate limit), research-mode consent/recorder/export.
+- **50 Playwright e2e tests across 10 specs** (mode-dependent pass/skip counts; latest runs: guest build 40 passed/10 env-gated, credentialed build 39 passed/11 env-gated, 0 failed): demo smoke, keyboard-only core flow (LLM-aware waits), homepage topic routing + auth entry, the repeatable multi-trial loop, auth dialog behavior (guest-build gated), route protection, an accessibility matrix (keyboard/focus, reduced motion, text scale, 320px, contrast), a console/perf/fallback quality pack, and two env-gated real-backend specs — cross-device resume and two-user browser isolation (4/4 vs live Firebase + Atlas).
 
 ## Architecture
 
@@ -128,10 +128,15 @@ npm run build       # production build
 src/
   app/                     Next.js App Router (landing + lab page)
     api/adapt/route.ts     server bridge: typed payload -> hosted model -> validated answer
+    api/auth/              session-cookie mint (POST /api/auth/session) + logout
+    api/account/           profile + preferences (GET/PATCH/PUT/DELETE)
+    api/cloud/sessions/    cloud session upsert/list/delete/complete
   components/lab/          experiment shell, prediction, variables, canvas,
                            representation tabs, adaptation card,
                            counterfactual, replay, accessibility, research mode
   components/ui/           homepage: topic-input hero, wave background, mini navbar
+  lib/firebase/            Firebase browser config + admin session-cookie verify/mint
+  lib/mongo/               server-only MongoDB client + row types
   lib/topic-routing.ts     homepage topic -> supported/unsupported lab routing
   domain/                  typed schemas: experiments, learner, evidence,
                            adaptation contract (Zod-validated)
@@ -140,8 +145,12 @@ src/
                            structured LLM provider, llm-client, llm-schema,
                            misconception taxonomy
   storage/                 anonymous local session (Zod-validated)
-tests/                     unit + component tests (17 files)
-e2e/                       Playwright: smoke, keyboard, homepage, multi-trial (12 tests)
+tests/                       vitest unit/component suite (37 files)
+e2e/                       Playwright: 10 specs (guest + env-gated real-backend)
+docs/                      product spec, rubric strategy, judge Q&A,
+                           user research, safety model, architecture,
+                           Firebase/Mongo setup, security, benchmark,
+                           demo script, claim register, initial commit report
 docs/                      product spec, rubric strategy, judge Q&A,
                            user research, safety model, architecture,
                            initial commit report
@@ -154,7 +163,7 @@ See `docs/architecture.md` for the component diagram and data flow.
 - One lab (Nuclear Chain Reaction) is functional; two are registered as planned.
 - The structured LLM provider is implemented but optional: it activates only with `NEXT_PUBLIC_LLM_ENABLED=1` (build time) plus a server-side `LLM_API_KEY`; without them everything runs on the deterministic offline rules.
 - Free-text research answers are held in component state only (not persisted) in this commit.
-- Cloud features (Google sign-in, cross-device sync) require a Supabase project and Google OAuth credentials; they are fully implemented and tested with mocks, but the real OAuth smoke test is `NOT_RUN_EXTERNAL_CREDENTIALS` until credentials are configured (see `docs/supabase-setup.md`).
+- Cloud features (Google sign-in, cross-device sync) require a Firebase project (Google sign-in enabled) and a MongoDB Atlas cluster (or local MongoDB); they are fully implemented and tested with mocked clients, but the real OAuth smoke test is `NOT_RUN_EXTERNAL_CREDENTIALS` until credentials are configured (see `docs/firebase-mongodb-setup.md`).
 - On a shared device, local guest evidence is device-scoped (not per-account) by design — sign-in never deletes it.
 - `npm audit` reports 3 high findings in `sharp` (transitive via Next.js image optimization; the app does not use `next/image`). Fixing requires `next@16.3.0`, intentionally deferred from this branch.
 - **User research is honest but incomplete: the initial design participant was interviewed and his confirmed preferences shaped the product, but no structured product-test session has been performed yet.** The testing kit (`docs/user-testing-kit.md`) and the templates in `docs/user-research.md` are ready and empty — a real participant session is still required, and nothing in this repo claims a result that session has not produced. There is no "validated" or "statistically significant" claim anywhere.

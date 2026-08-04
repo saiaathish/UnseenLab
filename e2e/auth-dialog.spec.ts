@@ -1,10 +1,12 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Auth dialog behavior, browser level (guest build — no Supabase config):
+ * Auth dialog behavior, browser level.
  * - opens from the header with the mandated copy (AUTH-01..07)
  * - Escape closes and restores focus to the trigger
  * - "Continue with Google" degrades gracefully when sign-in is unavailable
+ *   (guest build only — gated on NEXT_PUBLIC_FIREBASE_API_KEY, mirroring the
+ *   cross-device spec: run with the same env the build was baked with)
  * - "Try without an account" closes the dialog
  * - 320px viewport: no horizontal overflow
  * - reduced motion: dialog remains usable, focus trap intact
@@ -51,9 +53,20 @@ test("closes on Escape and restores focus to the trigger", async ({ page }) => {
   await expect(trigger).toBeFocused();
 });
 
+const GUEST_BUILD = !process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+
 test("Continue with Google degrades gracefully when sign-in is unavailable", async ({
   page,
 }) => {
+  // Guest build only: with real Firebase config baked in, sign-in IS
+  // available and the button opens the Google popup instead of failing
+  // calmly. (Same env-gating style as the cross-device spec: run with the
+  // same env the build was baked with.)
+  test.skip(
+    !GUEST_BUILD,
+    "Firebase is configured — sign-in is available; guest-build only."
+  );
+
   await page.goto("/");
   await page.getByRole("button", { name: "Sign in" }).first().click();
   await page.getByRole("button", { name: "Continue with Google" }).click();

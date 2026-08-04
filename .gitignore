@@ -48,6 +48,12 @@ next-env.d.ts
 /.playwright-mcp/
 /gui-test-screenshots/
 
+# QA evidence pack (screenshots + recorded metrics)
+/validation-pack/screenshots/
+
 # supabase local dev (CLI-generated state; the CLI also writes supabase/.gitignore)
 /.supabase/
 /supabase/.temp/
+
+# ai benchmark results
+benchmark-results-*

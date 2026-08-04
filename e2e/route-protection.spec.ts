@@ -2,8 +2,8 @@ import { test, expect } from "@playwright/test";
 
 /**
  * Route protection (signed-out), browser level.
- * Runs real: with no Supabase config baked into the build, the proxy
- * (src/proxy.ts) short-circuits on `isSupabaseConfigured()` and redirects —
+ * Runs real: with no Firebase config baked into the build, the proxy
+ * (src/proxy.ts) short-circuits on `isFirebaseConfigured()` and redirects —
  * no session, no interception required. The lab is never guarded.
  */
 

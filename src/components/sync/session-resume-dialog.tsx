@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { getBrowserClient } from "@/lib/supabase/browser-client";
+import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { CloudSessionRepository, type SessionSnapshot } from "@/sync/cloud-session-repository";
 import { profileToLearnerPreferences } from "@/personalization/profile-to-learner-preferences";
 import { saveLocalSession, type LocalSession } from "@/storage/session-storage";
@@ -49,12 +49,11 @@ export function SessionResumeDialog({
     }
 
     fetching.current = true;
-    const client = getBrowserClient();
-    if (!client) {
+    if (!isFirebaseConfigured()) {
       fetching.current = false;
       return;
     }
-    const repo = new CloudSessionRepository(client, user.id);
+    const repo = new CloudSessionRepository(user.id);
 
     void (async () => {
       try {

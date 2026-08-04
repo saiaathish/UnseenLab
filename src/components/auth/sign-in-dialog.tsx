@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { signInWithGoogle } from "@/lib/supabase/auth";
-import { useSession } from "@/lib/supabase/use-session";
-import { isSafeRedirectPath } from "@/lib/supabase/auth";
+import { Spinner } from "@/components/ui/spinner";
+import { signInWithGoogle } from "@/lib/firebase/auth";
+import { useSession } from "@/lib/firebase/use-session";
+import { isSafeRedirectPath } from "@/lib/auth/redirect-safety";
 
 /**
  * Single auth surface for the whole app (copy spec §2.1). Controlled by the
@@ -24,6 +26,7 @@ export function SignInDialog({
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading } = useSession();
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [errorKey, setErrorKey] = useState<null | "popup" | "offline" | "generic">(null);
@@ -58,22 +61,30 @@ export function SignInDialog({
   const handleGoogle = async () => {
     setSubmitting(true);
     setErrorKey(null);
-    const origin = window.location.origin;
-    const safeNext = isSafeRedirectPath(next) ? `?next=${encodeURIComponent(next)}` : "";
-    const redirectTo = `${origin}/auth/callback${safeNext}`;
-    const error = await signInWithGoogle(redirectTo);
+    // The popup flow mints the httpOnly session cookie server-side; the
+    // caller then routes through /auth/callback so onboarding and the safe
+    // `next` destination are handled in exactly one place.
+    const error = await signInWithGoogle();
     if (error) {
       setErrorKey("generic");
       setSubmitting(false);
+      return;
     }
-    // Success: the browser navigates to Google; keep the dialog open until then.
+    const origin = window.location.origin;
+    const safeNext = isSafeRedirectPath(next) ? `?next=${encodeURIComponent(next)}` : "";
+    window.location.assign(`${origin}/auth/callback${safeNext}`);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        initialFocus={titleRef}
+      >
         <DialogHeader>
-          <DialogTitle className="text-lg">Sign in to UnseenLab</DialogTitle>
+          <DialogTitle ref={titleRef} className="text-lg">
+            Sign in to UnseenLab
+          </DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
@@ -85,8 +96,16 @@ export function SignInDialog({
             className="w-full"
             onClick={handleGoogle}
             disabled={submitting}
+            aria-busy={submitting}
           >
-            {submitting ? "Opening Google…" : "Continue with Google"}
+            {submitting ? (
+              <>
+                <Spinner aria-hidden="true" />
+                Opening Google…
+              </>
+            ) : (
+              "Continue with Google"
+            )}
           </Button>
 
           <div className="flex items-center gap-3" aria-hidden="true">
@@ -105,11 +124,13 @@ export function SignInDialog({
           </div>
 
           {effectiveErrorKey && (
-            <p role="alert" className="text-sm text-danger">
-              {effectiveErrorKey === "generic"
-                ? "We couldn't sign you in with Google. Please try again."
-                : "Sign-in needs an internet connection. You can keep using the lab without an account."}
-            </p>
+            <Alert>
+              <AlertDescription>
+                {effectiveErrorKey === "generic"
+                  ? "We couldn't sign you in with Google. Please try again."
+                  : "Sign-in needs an internet connection. You can keep using the lab without an account."}
+              </AlertDescription>
+            </Alert>
           )}
 
           <p className="text-xs text-muted-foreground">

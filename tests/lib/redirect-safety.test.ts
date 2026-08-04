@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSafeRedirectPath } from "@/lib/supabase/auth";
+import { isSafeRedirectPath } from "@/lib/auth/redirect-safety";
 
 describe("isSafeRedirectPath", () => {
   it("accepts plain same-origin paths", () => {

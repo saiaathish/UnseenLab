@@ -10,7 +10,7 @@ import {
   PACE_LABELS,
   REPRESENTATION_LABELS,
 } from "@/personalization/profile-to-learner-preferences";
-import type { LearnerPreferencesRow } from "@/lib/supabase/types";
+import type { LearnerPreferencesRow } from "@/lib/mongo/types";
 
 /**
  * Your learning preferences (copy spec §5.4). Summary rows show only real

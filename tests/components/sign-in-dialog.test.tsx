@@ -1,14 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { useState } from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // Controllable search params so `?auth=open` / `?auth=error` states can be
 // exercised (test-plan §2: next/navigation is mocked, never faked in e2e).
-const { mockSearchParams, mockSignInWithGoogle } = vi.hoisted(() => ({
-  mockSearchParams: vi.fn(),
-  mockSignInWithGoogle: vi.fn(),
-}));
+const { mockSearchParams, mockSignInWithGoogle, mockLocationAssign } =
+  vi.hoisted(() => ({
+    mockSearchParams: vi.fn(),
+    mockSignInWithGoogle: vi.fn(),
+    mockLocationAssign: vi.fn(),
+  }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -22,17 +24,24 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => mockSearchParams(),
 }));
 
-vi.mock("@/lib/supabase/use-session", () => ({
-  useSession: () => ({ user: null, loading: false, client: null }),
+vi.mock("@/lib/firebase/use-session", () => ({
+  useSession: () => ({ user: null, loading: false }),
 }));
 
-// Keep the real isSafeRedirectPath allowlist; stub only the OAuth call.
-vi.mock("@/lib/supabase/auth", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/supabase/auth")>();
-  return {
-    ...actual,
-    signInWithGoogle: mockSignInWithGoogle,
-  };
+// The popup + cookie-minting call is stubbed; `isSafeRedirectPath` is the
+// real module (pure allowlist) and `window.location.assign` carries the
+// post-sign-in navigation.
+vi.mock("@/lib/firebase/auth", () => ({
+  signInWithGoogle: mockSignInWithGoogle,
+}));
+
+// jsdom does not implement location.assign; capture the navigation instead.
+Object.defineProperty(window, "location", {
+  value: {
+    origin: "http://localhost:3000",
+    assign: mockLocationAssign,
+  },
+  writable: true,
 });
 
 import { SignInDialog } from "@/components/auth/sign-in-dialog";
@@ -65,6 +74,7 @@ describe("SignInDialog", () => {
     mockSearchParams.mockReturnValue(new URLSearchParams(""));
     mockSignInWithGoogle.mockReset();
     mockSignInWithGoogle.mockResolvedValue(null);
+    mockLocationAssign.mockReset();
   });
 
   it("renders the AUTH-01..07 copy verbatim", () => {
@@ -99,7 +109,7 @@ describe("SignInDialog", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("calls signInWithGoogle with a callback redirect", async () => {
+  it("calls signInWithGoogle with no arguments and navigates to the callback", async () => {
     const user = userEvent.setup();
     render(<SignInDialog open={true} onOpenChange={vi.fn()} />);
 
@@ -108,9 +118,11 @@ describe("SignInDialog", () => {
     );
 
     expect(mockSignInWithGoogle).toHaveBeenCalledTimes(1);
-    const redirectTo = mockSignInWithGoogle.mock.calls[0][0] as string;
-    expect(new URL(redirectTo).pathname).toBe("/auth/callback");
-    expect(redirectTo.endsWith("/auth/callback")).toBe(true);
+    expect(mockSignInWithGoogle).toHaveBeenCalledWith();
+
+    await waitFor(() => expect(mockLocationAssign).toHaveBeenCalledTimes(1));
+    const url = new URL(mockLocationAssign.mock.calls[0][0] as string);
+    expect(url.origin + url.pathname).toBe("http://localhost:3000/auth/callback");
   });
 
   it("appends a safe next param to the callback redirect", async () => {
@@ -124,8 +136,8 @@ describe("SignInDialog", () => {
       screen.getByRole("button", { name: "Continue with Google" }),
     );
 
-    const redirectTo = mockSignInWithGoogle.mock.calls[0][0] as string;
-    const url = new URL(redirectTo);
+    await waitFor(() => expect(mockLocationAssign).toHaveBeenCalledTimes(1));
+    const url = new URL(mockLocationAssign.mock.calls[0][0] as string);
     expect(url.pathname).toBe("/auth/callback");
     expect(url.searchParams.get("next")).toBe("/dashboard");
   });
@@ -141,8 +153,8 @@ describe("SignInDialog", () => {
       screen.getByRole("button", { name: "Continue with Google" }),
     );
 
-    const redirectTo = mockSignInWithGoogle.mock.calls[0][0] as string;
-    const url = new URL(redirectTo);
+    await waitFor(() => expect(mockLocationAssign).toHaveBeenCalledTimes(1));
+    const url = new URL(mockLocationAssign.mock.calls[0][0] as string);
     expect(url.pathname).toBe("/auth/callback");
     expect(url.search).toBe("");
   });
@@ -169,7 +181,7 @@ describe("SignInDialog", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the inline error copy when the OAuth call fails", async () => {
+  it("shows the inline error copy when the OAuth call fails and does not navigate", async () => {
     mockSignInWithGoogle.mockResolvedValue(
       new Error("Authentication is not configured yet."),
     );
@@ -186,5 +198,6 @@ describe("SignInDialog", () => {
     ).toHaveTextContent("We couldn't sign you in with Google. Please try again.");
     // The dialog stays open; the learner can retry or dismiss.
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(mockLocationAssign).not.toHaveBeenCalled();
   });
 });

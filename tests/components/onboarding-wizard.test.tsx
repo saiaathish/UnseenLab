@@ -5,7 +5,8 @@ import {
   ONBOARDING_DRAFT_KEY,
   OnboardingWizard,
 } from "@/components/onboarding/onboarding-wizard";
-import type { LearnerPreferencesRow } from "@/lib/supabase/types";
+import type { AppUser } from "@/lib/firebase/use-session";
+import type { LearnerPreferencesRow } from "@/lib/mongo/types";
 import {
   CURRENT_ONBOARDING_VERSION,
   emptyOnboardingDraft,
@@ -13,43 +14,91 @@ import {
 } from "@/personalization/onboarding-schema";
 import { draftToPreferencesRow } from "@/personalization/profile-to-learner-preferences";
 
-const TEST_USER = { id: "user-platform-a", email: "ada@example.com" };
+const TEST_USER: AppUser = {
+  id: "user-platform-a",
+  email: "ada@example.com",
+  displayName: null,
+  avatarUrl: null,
+  provider: null,
+};
 
 // Session is mocked for full control (including the graceful degradation case
-// where the browser client is null while a user is present). The real
+// where Firebase is unconfigured while a user is present). The real
 // useSession is exercised in tests/app/onboarding-page.test.tsx.
 const sessionState = vi.hoisted(() => ({
-  user: null as null | typeof TEST_USER,
+  user: null as AppUser | null,
   loading: false,
-  client: null as unknown,
 }));
 
-vi.mock("@/lib/supabase/use-session", () => ({
+const mocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  fetch: vi.fn(),
+  isFirebaseConfigured: vi.fn(() => true),
+  prefsOk: true,
+  profileOk: true,
+}));
+
+vi.mock("@/lib/firebase/use-session", () => ({
   useSession: () => ({
     user: sessionState.user,
     loading: sessionState.loading,
-    client: sessionState.client,
   }),
 }));
-
-const mocks = vi.hoisted(() => {
-  const upsert = vi.fn<() => { error: Error | null }>(() => ({ error: null }));
-  const update = vi.fn(() => ({ eq: updateEq }));
-  const updateEq = vi.fn<() => { error: Error | null }>(() => ({ error: null }));
-  const push = vi.fn();
-  const client = {
-    from: (table: string) => {
-      if (table === "learner_preferences") return { upsert };
-      if (table === "profiles") return { update };
-      throw new Error(`unexpected table: ${table}`);
-    },
-  };
-  return { upsert, update, updateEq, push, client };
-});
-
+vi.mock("@/lib/firebase/config", () => ({
+  isFirebaseConfigured: mocks.isFirebaseConfigured,
+}));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push }),
 }));
+
+function jsonResponse(data: unknown, ok = true): Response {
+  return { ok, json: async () => data } as unknown as Response;
+}
+
+/** Snake_case account-route fetch mock; ok flags are per-test switches. */
+function installFetchMock() {
+  mocks.fetch.mockImplementation(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "PUT" && url === "/api/account/preferences") {
+        return jsonResponse({ data: { preferences: null } }, mocks.prefsOk);
+      }
+      if (method === "PATCH" && url === "/api/account/profile") {
+        return jsonResponse({ data: { profile: null } }, mocks.profileOk);
+      }
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    },
+  );
+}
+
+function preferencesPayload(): Record<string, unknown> {
+  const call = mocks.fetch.mock.calls.find(([input, init]) => {
+    return (
+      String(input) === "/api/account/preferences" &&
+      (init?.method ?? "GET").toUpperCase() === "PUT"
+    );
+  });
+  const [, init] = call ?? [];
+  return JSON.parse((init as RequestInit).body as string) as Record<
+    string,
+    unknown
+  >;
+}
+
+function profilePayload(): Record<string, unknown> {
+  const call = mocks.fetch.mock.calls.find(([input, init]) => {
+    return (
+      String(input) === "/api/account/profile" &&
+      (init?.method ?? "GET").toUpperCase() === "PATCH"
+    );
+  });
+  const [, init] = call ?? [];
+  return JSON.parse((init as RequestInit).body as string) as Record<
+    string,
+    unknown
+  >;
+}
 
 const STEP_QUESTIONS = [
   "What would you like help doing?",
@@ -110,10 +159,15 @@ function learnerPreferencesFixture(
 describe("OnboardingWizard", () => {
   beforeEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
     vi.clearAllMocks();
+    vi.stubGlobal("fetch", mocks.fetch);
+    mocks.prefsOk = true;
+    mocks.profileOk = true;
+    mocks.isFirebaseConfigured.mockReturnValue(true);
+    installFetchMock();
     sessionState.user = TEST_USER;
     sessionState.loading = false;
-    sessionState.client = mocks.client;
   });
 
   it("shows a skeleton while the session is loading", () => {
@@ -270,11 +324,12 @@ describe("OnboardingWizard", () => {
     expect(screen.getByText("Topics: None yet")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Start learning" }));
 
-    await waitFor(() => expect(mocks.upsert).toHaveBeenCalled());
-    expect(mocks.upsert).toHaveBeenCalledWith({
-      ...draftToPreferencesRow(emptyOnboardingDraft()),
-      user_id: TEST_USER.id,
-    });
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalled());
+    expect(preferencesPayload()).toEqual(
+      draftToPreferencesRow(emptyOnboardingDraft())
+    );
+    // The server derives ownership from the session cookie.
+    expect(preferencesPayload()).not.toHaveProperty("user_id");
     expect(mocks.push).toHaveBeenCalledWith("/dashboard");
     expect(localStorage.getItem(ONBOARDING_DRAFT_KEY)).toBeNull();
   });
@@ -324,18 +379,16 @@ describe("OnboardingWizard", () => {
       highContrast: true,
       topicInterests: ["Nuclear chain reactions"],
     };
-    await waitFor(() => expect(mocks.upsert).toHaveBeenCalled());
-    expect(mocks.upsert).toHaveBeenCalledWith({
-      ...draftToPreferencesRow(expectedDraft),
-      user_id: TEST_USER.id,
-    });
-    expect(mocks.update).toHaveBeenCalledWith(
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalled());
+    expect(preferencesPayload()).toEqual(draftToPreferencesRow(expectedDraft));
+    expect(preferencesPayload()).not.toHaveProperty("user_id");
+    expect(profilePayload()).toEqual(
       expect.objectContaining({
         onboarding_version: CURRENT_ONBOARDING_VERSION,
         onboarding_completed_at: expect.any(String),
       })
     );
-    expect(mocks.updateEq).toHaveBeenCalledWith("user_id", TEST_USER.id);
+    expect(profilePayload()).not.toHaveProperty("user_id");
     expect(mocks.push).toHaveBeenCalledWith("/dashboard");
     expect(localStorage.getItem(ONBOARDING_DRAFT_KEY)).toBeNull();
   });
@@ -358,8 +411,8 @@ describe("OnboardingWizard", () => {
 
     await user.click(screen.getByRole("button", { name: "Skip" }));
 
-    await waitFor(() => expect(mocks.upsert).toHaveBeenCalled());
-    expect(mocks.upsert).toHaveBeenCalledWith(
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalled());
+    expect(preferencesPayload()).toEqual(
       expect.objectContaining({
         learning_goal: "explore_experiments",
         topic_interests: [],
@@ -375,14 +428,18 @@ describe("OnboardingWizard", () => {
 
     await user.click(screen.getByRole("button", { name: "Skip for now" }));
 
-    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
-    expect(mocks.update).toHaveBeenCalledWith(
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalled());
+    expect(profilePayload()).toEqual(
       expect.objectContaining({
         onboarding_version: CURRENT_ONBOARDING_VERSION,
         onboarding_completed_at: expect.any(String),
       })
     );
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(profilePayload()).not.toHaveProperty("user_id");
+    expect(mocks.fetch).not.toHaveBeenCalledWith(
+      "/api/account/preferences",
+      expect.anything()
+    );
     expect(mocks.push).toHaveBeenCalledWith("/dashboard");
     expect(localStorage.getItem(ONBOARDING_DRAFT_KEY)).toBeNull();
   });
@@ -393,7 +450,7 @@ describe("OnboardingWizard", () => {
     await screen.findByRole("heading", { name: STEP_QUESTIONS[0] });
     await goThroughSteps(user, 1, 4);
 
-    mocks.upsert.mockReturnValueOnce({ error: new Error("db down") });
+    mocks.prefsOk = false;
     await user.click(screen.getByRole("button", { name: "Start learning" }));
 
     await waitFor(() =>
@@ -406,13 +463,14 @@ describe("OnboardingWizard", () => {
     // Draft retained — nothing is lost.
     expect(localStorage.getItem(ONBOARDING_DRAFT_KEY)).not.toBeNull();
 
+    mocks.prefsOk = true;
     await user.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/dashboard"));
     expect(localStorage.getItem(ONBOARDING_DRAFT_KEY)).toBeNull();
   });
 
-  it("completes locally with a calm notice when the browser client is unavailable", async () => {
-    sessionState.client = null;
+  it("completes locally with a calm notice when the account layer is unavailable", async () => {
+    mocks.isFirebaseConfigured.mockReturnValue(false);
     const user = userEvent.setup();
     render(<OnboardingWizard />);
     await screen.findByRole("heading", { name: STEP_QUESTIONS[0] });
@@ -423,7 +481,7 @@ describe("OnboardingWizard", () => {
     expect(
       screen.getByText(/couldn't save to your account right now/i)
     ).toHaveAttribute("role", "status");
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.push).toHaveBeenCalledWith("/dashboard");
     expect(localStorage.getItem(ONBOARDING_DRAFT_KEY)).toBeNull();
   });
@@ -478,8 +536,8 @@ describe("OnboardingWizard", () => {
     await goThroughSteps(user, 1, 4);
     await user.click(screen.getByRole("button", { name: "Start learning" }));
 
-    await waitFor(() => expect(mocks.upsert).toHaveBeenCalled());
-    expect(mocks.upsert).toHaveBeenCalledWith(
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalled());
+    expect(preferencesPayload()).toEqual(
       expect.objectContaining({
         learning_goal: "explore_experiments",
         topic_interests: ["Nuclear chain reactions"],
@@ -592,8 +650,8 @@ describe("OnboardingWizard", () => {
     await tabTo(user, "button", "Start learning");
     await user.keyboard("{Enter}");
 
-    await waitFor(() => expect(mocks.upsert).toHaveBeenCalled());
-    expect(mocks.upsert).toHaveBeenCalledWith(
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalled());
+    expect(preferencesPayload()).toEqual(
       expect.objectContaining({
         learning_goal: "prepare_for_class",
         explanation_style: "concise",

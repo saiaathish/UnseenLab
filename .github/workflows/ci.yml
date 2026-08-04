@@ -48,6 +48,10 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+      # Scans the .next output above for leaked credentials (client bundles
+      # must never contain secret material); exits non-zero on any leak.
+      - name: Bundle secret scan
+        run: node scripts/bundle-secret-scan.mjs
 
   e2e:
     name: End-to-end tests (Playwright)
@@ -89,13 +93,15 @@ jobs:
             exit 1
           fi
           echo "OK: no sk- style API keys found."
-      - name: Scan for service role / OAuth client secret references
+      - name: Scan for Firebase service account / Mongo URI / OAuth client secret assignments
         run: |
           # Flag ASSIGNMENTS of these names (a real leak: NAME=value or
-          # "name":"value"), not bare name reads — the e2e seed script must
-          # legitimately read process.env.SUPABASE_SERVICE_ROLE_KEY, and
-          # .env.example/*.md legitimately warn against committing the names.
-          if git grep -n -i -E '(service_role|SUPABASE_SERVICE_ROLE|GOOGLE_CLIENT_SECRET)[^A-Za-z0-9_]*[:=]' -- . ':(exclude).github' ':(exclude)*.md'; then
+          # "name":"value"), not bare name reads — scripts/e2e-seed-auth.mjs
+          # must legitimately read process.env.FIREBASE_SERVICE_ACCOUNT and
+          # process.env.MONGODB_URI at runtime (reading env is fine; this
+          # scan forbids tracked-file ASSIGNMENTS), and .env.example/*.md
+          # legitimately warn against committing the names.
+          if git grep -n -i -E '(FIREBASE_SERVICE_ACCOUNT|FIREBASE_PRIVATE_KEY|GOOGLE_CLIENT_SECRET|MONGODB_URI)[^A-Za-z0-9_]*[:=]' -- . ':(exclude).github' ':(exclude)*.md'; then
             echo "::error::Forbidden secret assignment found in tracked files."
             exit 1
           fi
@@ -108,3 +114,15 @@ jobs:
             exit 1
           fi
           echo "OK: only .env.example is tracked."
+      - name: Fail if Supabase is referenced in source code
+        run: |
+          # Supabase was replaced by Firebase Auth + MongoDB; docs/ may
+          # describe the migration, but tracked src/ and package.json must
+          # contain no CODE references (imports, env vars, API usage).
+          # Comment-only mentions (historical migration notes in docblocks)
+          # are tolerated and filtered out below.
+          if git grep -n -i 'supabase' -- src package.json | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|/\*)'; then
+            echo "::error::Supabase referenced in source code (src/ or package.json)."
+            exit 1
+          fi
+          echo "OK: no Supabase code references in src/ or package.json."

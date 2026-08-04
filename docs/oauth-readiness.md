@@ -1,3 +1,9 @@
+> **SUPERSEDED — historical record.** This document describes the Supabase +
+> Postgres RLS platform layer, which was replaced by Firebase Auth + MongoDB
+> (see `docs/firebase-mongodb-setup.md`, `docs/backend-verification.md`,
+> `docs/security.md`). Kept for audit history; its claims do not describe the
+> current runtime.
+
 # OAuth Readiness Audit (AGENT OATH-01)
 
 Audit date: 2026-08-03. Scope: prove the app is ready to work the moment real

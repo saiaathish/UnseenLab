@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { SignInDialog } from "@/components/auth/sign-in-dialog";
 import { UserMenu } from "@/components/auth/user-menu";
-import { useSession } from "@/lib/supabase/use-session";
+import { useSession } from "@/lib/firebase/use-session";
 
 const MOBILE_PANEL_ID = "app-header-mobile-panel";
 

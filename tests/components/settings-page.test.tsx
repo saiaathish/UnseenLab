@@ -1,19 +1,21 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   SettingsTabs,
   type SettingsUserInfo,
 } from "@/components/settings/settings-tabs";
+import type { AppUser } from "@/lib/firebase/use-session";
 import type {
   LearnerPreferencesRow,
   ProfileRow,
-} from "@/lib/supabase/types";
+} from "@/lib/mongo/types";
 
 /**
  * Settings tests (copy spec §6). Profile save, debounced preference save,
  * accessibility applied immediately, export download, confirmed deletions,
- * and sign-out navigation — all against a mocked browser client.
+ * and sign-out navigation — all against the account API routes, with the
+ * Firebase session and global fetch mocked.
  */
 
 const {
@@ -21,32 +23,40 @@ const {
   toastSuccessMock,
   routerPushMock,
   routerRefreshMock,
-  getBrowserClientMock,
+  fetchMock,
+  isFirebaseConfiguredMock,
+  sessionState,
 } = vi.hoisted(() => ({
   signOutMock: vi.fn(async () => null),
   toastSuccessMock: vi.fn(),
   routerPushMock: vi.fn(),
   routerRefreshMock: vi.fn(),
-  getBrowserClientMock: vi.fn(),
+  fetchMock: vi.fn(),
+  isFirebaseConfiguredMock: vi.fn(() => true),
+  sessionState: { user: null as AppUser | null, loading: false },
 }));
 
-vi.mock("@/lib/supabase/browser-client", () => ({
-  getBrowserClient: getBrowserClientMock,
+vi.mock("@/lib/firebase/use-session", () => ({
+  useSession: () => ({
+    user: sessionState.user,
+    loading: sessionState.loading,
+  }),
 }));
-vi.mock("@/lib/supabase/auth", () => ({ signOut: signOutMock }));
+vi.mock("@/lib/firebase/config", () => ({
+  isFirebaseConfigured: isFirebaseConfiguredMock,
+}));
+vi.mock("@/lib/firebase/auth", () => ({ signOut: signOutMock }));
 vi.mock("sonner", () => ({ toast: { success: toastSuccessMock } }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: routerPushMock, refresh: routerRefreshMock }),
 }));
 
-const SESSION_USER = {
+const SESSION_USER: AppUser = {
   id: "user-platform-a",
   email: "ada@example.com",
-  user_metadata: {
-    full_name: "Ada Lovelace",
-    avatar_url: "https://example.com/ada.jpg",
-  },
-  app_metadata: { provider: "google" },
+  displayName: "Ada Lovelace",
+  avatarUrl: "https://example.com/ada.jpg",
+  provider: "google",
 };
 
 const USER_INFO: SettingsUserInfo = {
@@ -93,82 +103,96 @@ function preferencesFixture(
   };
 }
 
-function createSettingsClient() {
-  const upsert = vi.fn(async (payload: Record<string, unknown>) => ({
-    error: null,
-    payload,
-  }));
-  const updateProfile = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }));
-  const deleteSessions = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }));
-  const deletePreferences = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }));
-  const selectSessions = vi.fn(() => ({
-    order: vi.fn(async () => ({
-      data: [
-        {
-          id: "session-1",
-          user_id: "user-platform-a",
-          lab_slug: "nuclear-chain-reaction",
-          status: "complete",
-          title: "Chain reaction basics",
-          schema_version: 1,
-          evidence: {},
-          workflow: {},
-          created_at: "2026-08-03T09:30:00.000Z",
-          updated_at: "2026-08-03T11:00:00.000Z",
-          completed_at: "2026-08-03T11:00:00.000Z",
-        },
-      ],
-      error: null,
-    })),
-  }));
-  const selectPreferences = vi.fn(() => ({
-    maybeSingle: vi.fn(async () => ({
-      data: preferencesFixture(),
-      error: null,
-    })),
-  }));
-
-  const client = {
-    auth: {
-      getUser: vi.fn(async () => ({ data: { user: SESSION_USER }, error: null })),
-      onAuthStateChange: vi.fn(() => ({
-        data: { subscription: { unsubscribe: vi.fn() } },
-      })),
-    },
-    from: vi.fn((table: string) => {
-      if (table === "profiles") {
-        return { update: updateProfile };
-      }
-      if (table === "learner_preferences") {
-        return { upsert, select: selectPreferences, delete: deletePreferences };
-      }
-      if (table === "learning_sessions") {
-        return { select: selectSessions, delete: deleteSessions };
-      }
-      throw new Error(`Unexpected table ${table}`);
-    }),
-  };
-
-  return {
-    client,
-    upsert,
-    updateProfile,
-    deleteSessions,
-    deletePreferences,
-    selectSessions,
-  };
+function jsonResponse(data: unknown, ok = true): Response {
+  return { ok, json: async () => data } as unknown as Response;
 }
 
-function renderSettings(client = createSettingsClient()) {
-  getBrowserClientMock.mockReturnValue(client.client);
-  const utils = render(
+interface ApiRoute {
+  method: string;
+  url: string;
+  response: Response;
+}
+
+/** Installs a per-URL/method fetch implementation (snake_case wire format). */
+function mockApi(routes: ApiRoute[]) {
+  fetchMock.mockImplementation(
+    (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      const route = routes.find(
+        (r) => r.method === method && url.startsWith(r.url),
+      );
+      if (!route) {
+        return Promise.reject(new Error(`Unhandled fetch: ${method} ${url}`));
+      }
+      return Promise.resolve(route.response);
+    },
+  );
+}
+
+function defaultRoutes(): ApiRoute[] {
+  return [
+    {
+      method: "GET",
+      url: "/api/account",
+      response: jsonResponse({
+        data: {
+          profile: profileFixture(),
+          preferences: preferencesFixture(),
+        },
+      }),
+    },
+    {
+      method: "GET",
+      url: "/api/cloud/sessions",
+      response: jsonResponse({
+        data: { sessions: [] },
+      }),
+    },
+    {
+      method: "PATCH",
+      url: "/api/account/profile",
+      response: jsonResponse({ data: { profile: profileFixture() } }),
+    },
+    {
+      method: "PUT",
+      url: "/api/account/preferences",
+      response: jsonResponse({
+        data: { preferences: preferencesFixture() },
+      }),
+    },
+    {
+      method: "DELETE",
+      url: "/api/account",
+      response: jsonResponse({ ok: true }),
+    },
+  ];
+}
+
+function findFetchCall(method: string, url: string) {
+  return fetchMock.mock.calls.find(([input, init]) => {
+    const callUrl = typeof input === "string" ? input : String(input);
+    return (init?.method ?? "GET").toUpperCase() === method &&
+      callUrl.startsWith(url);
+  });
+}
+
+function bodyOf(call: unknown[] | undefined): Record<string, unknown> {
+  const [, init] = call ?? [];
+  return JSON.parse((init as RequestInit).body as string) as Record<
+    string,
+    unknown
+  >;
+}
+
+function renderSettings() {
+  return render(
     <SettingsTabs
       initialProfile={profileFixture()}
       initialPreferences={preferencesFixture()}
       user={USER_INFO}
     />,
   );
-  return { ...utils, ...client };
 }
 
 async function openTab(name: string) {
@@ -176,6 +200,15 @@ async function openTab(name: string) {
 }
 
 describe("Settings — Profile tab", () => {
+  beforeEach(() => {
+    sessionState.user = SESSION_USER;
+    sessionState.loading = false;
+    isFirebaseConfiguredMock.mockReturnValue(true);
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", fetchMock);
+    mockApi(defaultRoutes());
+  });
+
   it("renders profile info, provider note, and rerun onboarding", async () => {
     renderSettings();
     expect(
@@ -190,8 +223,8 @@ describe("Settings — Profile tab", () => {
     );
   });
 
-  it("saves an edited display name to the profile row", async () => {
-    const { updateProfile } = renderSettings();
+  it("saves an edited display name via PATCH /api/account/profile", async () => {
+    renderSettings();
     const input = screen.getByLabelText("Display name");
     await userEvent.clear(input);
     await userEvent.type(input, "Ada X");
@@ -199,17 +232,64 @@ describe("Settings — Profile tab", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
-      expect(updateProfile).toHaveBeenCalledWith({ display_name: "Ada X" });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/account/profile",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ display_name: "Ada X" }),
+        }),
+      );
     });
     expect(
       await screen.findByText("Saved."),
     ).toBeInTheDocument();
   });
+
+  it("shows the error state when saving fails", async () => {
+    mockApi([
+      {
+        method: "PATCH",
+        url: "/api/account/profile",
+        response: jsonResponse({ error: "boom" }, false),
+      },
+    ]);
+    renderSettings();
+    const input = screen.getByLabelText("Display name");
+    await userEvent.clear(input);
+    await userEvent.type(input, "Ada X");
+
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(
+      await screen.findByText("We couldn't save your profile. Try again."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the error state when the account layer is unconfigured", async () => {
+    isFirebaseConfiguredMock.mockReturnValue(false);
+    renderSettings();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(
+      await screen.findByText("We couldn't save your profile. Try again."),
+    ).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("Settings — Learning preferences tab", () => {
-  it("saves a changed preference after the debounce", async () => {
-    const { upsert } = renderSettings();
+  beforeEach(() => {
+    sessionState.user = SESSION_USER;
+    sessionState.loading = false;
+    isFirebaseConfiguredMock.mockReturnValue(true);
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", fetchMock);
+    mockApi(defaultRoutes());
+  });
+
+  it("saves a changed preference after the debounce via PUT /api/account/preferences", async () => {
+    renderSettings();
     await openTab("Learning preferences");
 
     expect(
@@ -221,10 +301,14 @@ describe("Settings — Learning preferences tab", () => {
       "prepare_for_class",
     );
 
-    await waitFor(() => expect(upsert).toHaveBeenCalledTimes(1));
-    const payload = upsert.mock.calls[0][0];
-    expect(payload.user_id).toBe("user-platform-a");
+    await waitFor(() => {
+      const call = findFetchCall("PUT", "/api/account/preferences");
+      expect(call).toBeDefined();
+    });
+    const payload = bodyOf(findFetchCall("PUT", "/api/account/preferences"));
     expect(payload.learning_goal).toBe("prepare_for_class");
+    // The server derives ownership from the session cookie.
+    expect(payload).not.toHaveProperty("user_id");
   });
 
   it("links to onboarding rerun for the four-question flow", async () => {
@@ -235,9 +319,36 @@ describe("Settings — Learning preferences tab", () => {
       "/onboarding?rerun=1",
     );
   });
+
+  it("shows the save error when unconfigured", async () => {
+    isFirebaseConfiguredMock.mockReturnValue(false);
+    renderSettings();
+    await openTab("Learning preferences");
+
+    await userEvent.selectOptions(
+      screen.getByLabelText("Learning goal"),
+      "prepare_for_class",
+    );
+
+    expect(
+      await screen.findByText(
+        "We couldn't save that right now. Please try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("Settings — Accessibility tab", () => {
+  beforeEach(() => {
+    sessionState.user = SESSION_USER;
+    sessionState.loading = false;
+    isFirebaseConfiguredMock.mockReturnValue(true);
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", fetchMock);
+    mockApi(defaultRoutes());
+  });
+
   it("applies body classes and root styles immediately on change", async () => {
     renderSettings();
     await openTab("Accessibility");
@@ -260,41 +371,65 @@ describe("Settings — Accessibility tab", () => {
     expect(document.documentElement.style.fontSize).toBe("130%");
   });
 
-  it("persists accessibility changes to learner_preferences after the debounce", async () => {
-    const { upsert } = renderSettings();
+  it("persists accessibility changes after the debounce, without user_id", async () => {
+    renderSettings();
     await openTab("Accessibility");
 
     await userEvent.click(screen.getByRole("switch", { name: "High contrast" }));
 
-    await waitFor(() => expect(upsert).toHaveBeenCalledTimes(1));
-    expect(upsert.mock.calls[0][0].high_contrast).toBe(true);
+    await waitFor(() => {
+      const call = findFetchCall("PUT", "/api/account/preferences");
+      expect(call).toBeDefined();
+    });
+    const payload = bodyOf(findFetchCall("PUT", "/api/account/preferences"));
+    expect(payload.high_contrast).toBe(true);
+    expect(payload).not.toHaveProperty("user_id");
   });
 });
 
 describe("Settings — Privacy and data tab", () => {
+  beforeEach(() => {
+    sessionState.user = SESSION_USER;
+    sessionState.loading = false;
+    isFirebaseConfiguredMock.mockReturnValue(true);
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", fetchMock);
+    mockApi(defaultRoutes());
+  });
+
   it("exports the saved learning data as a client-side JSON download", async () => {
     const createObjectURL = vi.fn(() => "blob:mock");
     const revokeObjectURL = vi.fn();
-    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    try {
+      renderSettings();
+      await openTab("Privacy and data");
 
-    const { selectSessions } = renderSettings();
-    await openTab("Privacy and data");
+      await userEvent.click(
+        screen.getByRole("button", { name: "Export saved learning data" }),
+      );
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Export saved learning data" }),
-    );
-
-    await waitFor(() => expect(selectSessions).toHaveBeenCalled());
-    expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(toastSuccessMock).toHaveBeenCalledWith(
-      "Your learning data is ready to download.",
-    );
-
-    vi.unstubAllGlobals();
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledWith("/api/account");
+        expect(fetchMock).toHaveBeenCalledWith(
+          "/api/cloud/sessions?limit=1000",
+        );
+      });
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        "Your learning data is ready to download.",
+      );
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
   });
 
   it("requires confirmation before deleting saved learning data", async () => {
-    const { deleteSessions, deletePreferences } = renderSettings();
+    renderSettings();
     await openTab("Privacy and data");
 
     await userEvent.click(
@@ -317,23 +452,44 @@ describe("Settings — Privacy and data tab", () => {
     await waitFor(() =>
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
     );
-    expect(deleteSessions).not.toHaveBeenCalled();
-    expect(deletePreferences).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
 
-    // Confirm path: both tables are deleted, then a toast and refresh.
+    // Confirm path: DELETE /api/account, then a toast and refresh.
     await userEvent.click(
       screen.getByRole("button", { name: "Delete my saved learning data" }),
     );
     await screen.findByRole("alertdialog");
     await userEvent.click(screen.getByRole("button", { name: "Delete my data" }));
 
-    await waitFor(() => expect(deleteSessions).toHaveBeenCalledTimes(1));
-    expect(deleteSessions).toHaveBeenCalledWith();
-    expect(deletePreferences).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/account",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
     expect(toastSuccessMock).toHaveBeenCalledWith(
       "Your saved learning data was deleted.",
     );
     expect(routerRefreshMock).toHaveBeenCalled();
+  });
+
+  it("no-ops silently when unconfigured", async () => {
+    isFirebaseConfiguredMock.mockReturnValue(false);
+    renderSettings();
+    await openTab("Privacy and data");
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Export saved learning data" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Delete my saved learning data" }),
+    );
+    await screen.findByRole("alertdialog");
+    await userEvent.click(screen.getByRole("button", { name: "Delete my data" }));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+    expect(routerRefreshMock).not.toHaveBeenCalled();
   });
 
   it("requires confirmation before clearing local device data", async () => {

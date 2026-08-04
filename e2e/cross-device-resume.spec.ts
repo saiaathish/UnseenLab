@@ -8,48 +8,61 @@ import {
 } from "@playwright/test";
 
 /**
- * Cross-device session resume — real backend e2e against a LOCAL Supabase
- * stack (postgres + GoTrue on http://localhost:54321, anon + service keys).
+ * Cross-device session resume — real backend e2e against a REAL Firebase
+ * project (Auth with Google sign-in enabled) and a REAL MongoDB
+ * (Atlas or local): guest trial → sign-in → consent import → id-for-id cloud
+ * resume on device B → dashboard row counts → learner isolation.
  *
  * ---------------------------------------------------------------
  * HOW TO RUN (the npm script belongs to package.json, owned by another
  * agent; this is the exact equivalent until it lands there):
  *
- *   # 1. The app build must be made WITH the Supabase env baked in:
- *   NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321 \
- *   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<local anon key> \
+ *   # 1. The app build must be made WITH the Firebase NEXT_PUBLIC_* envs
+ *   #    baked in (same as the old Supabase build requirement):
+ *   NEXT_PUBLIC_FIREBASE_API_KEY=<web api key> \
+ *   NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=<project>.firebaseapp.com \
+ *   NEXT_PUBLIC_FIREBASE_PROJECT_ID=<project id> \
+ *   NEXT_PUBLIC_FIREBASE_APP_ID=<web app id> \
  *   npm run build
  *
- *   # 2. Run the spec with the local stack up and the service key exported:
- *   SUPABASE_SERVICE_ROLE_KEY=<local service key> \
+ *   # 2. Run the spec with the server-only creds exported (the values are
+ *   #    secret, so this file shows only the names — the CI secrets scan
+ *   #    forbids tracked-file NAME=value lines):
+ *   export FIREBASE_SERVICE_ACCOUNT   # service-account JSON on one line
+ *   export MONGODB_URI                # Atlas or local connection string
+ *   export NEXT_PUBLIC_FIREBASE_API_KEY
  *   CROSS_DEVICE_E2E=1 \
  *   npx playwright test e2e/cross-device-resume.spec.ts
  *
  *   # optional overrides:
  *   E2E_BASE_URL=http://localhost:3100   (default)
- *   SUPABASE_URL=http://localhost:54321  (default; forwarded to the seed)
+ *   MONGODB_DB=unseenlab                 (default; forwarded to the seed)
  *
  *   npm-script equivalent for package.json (NOT added by this agent):
  *   "test:e2e:cross": "CROSS_DEVICE_E2E=1 playwright test e2e/cross-device-resume.spec.ts"
  *
  * When CROSS_DEVICE_E2E is not set, every test here is skipped so the suite
- * stays green in CI without the local stack (same contract as
- * NOT_RUN_EXTERNAL_CREDENTIALS, but now backed by a REAL local backend).
+ * stays green in CI without external credentials (same contract as
+ * NOT_RUN_EXTERNAL_CREDENTIALS, but now backed by a REAL remote backend).
  * ---------------------------------------------------------------
  *
  * Honesty notes:
- * - The session cookie injected into each browser context is a REAL session
- *   minted by the real local GoTrue via the password grant
- *   (scripts/e2e-seed-auth.mjs). Only the Google OAuth round trip is skipped;
- *   the app authenticates against the real backend exactly as after OAuth.
+ * - The cookie injected into each browser context is a REAL Firebase session
+ *   cookie minted by firebase-admin without a browser: custom token →
+ *   Identity Toolkit signInWithCustomToken → createSessionCookie (14-day
+ *   expiry), via scripts/e2e-seed-auth.mjs. Only the Google popup round trip
+ *   is skipped; the app authenticates against the real backend exactly as
+ *   after sign-in (server gates verify the same unseenlab.session cookie).
  * - No network is intercepted and no API is stubbed: dashboard rows, resume
- *   snapshots and sync saves all hit the real stack through the app's own
- *   code paths.
+ *   snapshots and sync saves all hit the real backend through the app's own
+ *   code paths (session cookie → /api/cloud/sessions → MongoDB).
+ * - The seed also wipes both learners' sessions/preferences (clean slate),
+ *   so row counts are deterministic across runs.
  * - Where the product deliberately cannot do what a naive cross-device flow
  *   demands, the step is SKIPPED with the contract reason and the closest
  *   REAL behavior is asserted instead (see the last test).
  *
- * Contract references: docs/platform-contracts.md §5 (sync), §3 (RLS);
+ * Contract references: docs/platform-contracts.md (sync + ownership);
  * docs/platform-copy-spec.md §5 (dashboard), §7 (sync/import);
  * docs/test-plan-platform.md (honesty rules).
  */
@@ -58,11 +71,12 @@ const ENABLED = process.env.CROSS_DEVICE_E2E === "1";
 
 test.skip(
   !ENABLED,
-  "CROSS_DEVICE_E2E=1 is not set — this spec needs the local Supabase stack " +
-    "(postgres + GoTrue on http://localhost:54321), a build baked with " +
-    "NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, and " +
-    "SUPABASE_SERVICE_ROLE_KEY for seeding. Skipping keeps the suite green " +
-    "without the stack.",
+  "CROSS_DEVICE_E2E=1 is not set — this spec needs a real Firebase project " +
+    "+ MongoDB (FIREBASE_SERVICE_ACCOUNT, MONGODB_URI, " +
+    "NEXT_PUBLIC_FIREBASE_API_KEY for seeding), a build baked with the " +
+    "NEXT_PUBLIC_FIREBASE_* envs, and the Mongo collections/indexes created " +
+    "via scripts/mongo-setup.mjs. Skipping keeps the suite green without " +
+    "external credentials.",
 );
 
 test.describe.configure({ mode: "serial" });
@@ -71,27 +85,18 @@ const BASE_URL = (
   process.env.E2E_BASE_URL ?? "http://localhost:3100"
 ).replace(/\/+$/, "");
 const SEED_SCRIPT = path.join(__dirname, "..", "scripts", "e2e-seed-auth.mjs");
-const SUPABASE_API = new URL(
-  process.env.SUPABASE_URL ?? process.env.E2E_SUPABASE_URL ?? "http://localhost:54321",
-);
 
 const EVIDENCE_KEY = "unseenlab.evidence.v1";
 const SESSION_ID_KEY = "unseenlab.session-id.v1";
 
-interface CookieChunk {
-  name: string;
-  value: string;
-}
-
 interface MintedSession {
   email: string;
-  userId: string | null;
+  userId: string;
   cookieName: string;
   cookieValue: string;
-  chunks: CookieChunk[];
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number | null;
+  /** UTF-8 byte length of cookieValue — asserted below the 4096-byte cap. */
+  cookieBytes: number;
+  expiresAt: number;
 }
 
 /** Evidence ids captured on device A after the guest trial. */
@@ -111,12 +116,13 @@ let deviceBContext: BrowserContext;
 let deviceCContext: BrowserContext;
 let deviceBPage: Page;
 
+/**
+ * Runs the seed script with the parent's env (FIREBASE_SERVICE_ACCOUNT,
+ * MONGODB_URI, NEXT_PUBLIC_FIREBASE_API_KEY, MONGODB_DB must be exported by
+ * the runner). stdout is the JSON payload; stderr passes through.
+ */
 function runSeed(args: string[]): string {
   return execFileSync(process.execPath, [SEED_SCRIPT, ...args], {
-    env: {
-      ...process.env,
-      SUPABASE_URL: SUPABASE_API.href.replace(/\/+$/, ""),
-    },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
   });
@@ -132,14 +138,14 @@ async function signInContext(
   context: BrowserContext,
   session: MintedSession,
 ): Promise<void> {
-  await context.addCookies(
-    session.chunks.map((chunk) => ({
-      name: chunk.name,
-      value: chunk.value,
+  await context.addCookies([
+    {
+      name: session.cookieName,
+      value: session.cookieValue,
       // Playwright accepts `url` alone (path is implied); url+path is invalid.
       url: BASE_URL,
-    })),
-  );
+    },
+  ]);
 }
 
 async function runFirstTrial(page: Page): Promise<void> {
@@ -169,15 +175,18 @@ function readLocalEvidence(
 test.beforeAll(() => {
   // Never touch the network when the suite is env-gated off.
   if (!ENABLED) return;
-  console.log(
-    `[cross-device] seeding auth users via ${SEED_SCRIPT} against ${SUPABASE_API.href}`,
-  );
+  console.log(`[cross-device] seeding auth users via ${SEED_SCRIPT}`);
   runSeed(["create"]);
   learnerA = mintSession("learner_a@test.local");
   learnerB = mintSession("learner_b@test.local");
-  if (!learnerA.cookieName) {
-    throw new Error("seed script returned no cookieName — see stderr above");
+  if (!learnerA.cookieName || !learnerA.cookieValue) {
+    throw new Error("seed script returned no session cookie — see stderr above");
   }
+  // Single-cookie contract: the app reads ONE `unseenlab.session` cookie and
+  // there is no chunk-recombine path, so the cookie must fit under the
+  // browser's 4096-byte per-cookie limit or this suite cannot run honestly.
+  expect(learnerA.cookieBytes).toBeLessThan(4096);
+  expect(learnerB.cookieBytes).toBeLessThan(4096);
 });
 
 test.afterAll(async () => {
@@ -218,8 +227,9 @@ test("device A: guest trial, then sign-in imports the session to the account", a
     trialCount: local.trials.length,
   };
 
-  // Sign in: the minted session cookie is a real GoTrue session, so this is
-  // the post-OAuth state with the Google round trip skipped.
+  // Sign in: the injected cookie is a REAL Firebase session cookie verified
+  // server-side by firebase-admin, so this is the post-OAuth state with the
+  // Google popup round trip skipped.
   await signInContext(deviceAContext, learnerA);
   await page.reload();
 
@@ -320,12 +330,13 @@ test("device B runs trial 2; device A's DASHBOARD shows the updated session (2 t
     pageB.getByRole("heading", { name: /watch what happened/i }),
   ).toBeVisible({ timeout: 30_000 });
 
-  // Wait for the debounced cloud upsert of the 2-trial copy (real network).
+  // Wait for the debounced cloud upsert of the 2-trial copy (real network):
+  // the sync repository writes via PUT /api/cloud/sessions.
   await pageB.waitForResponse(
     (response) =>
       response.ok() &&
-      response.url().includes("/rest/v1/learning_sessions") &&
-      ["POST", "PATCH", "PUT"].includes(response.request().method()),
+      response.url().includes("/api/cloud/sessions") &&
+      ["PUT"].includes(response.request().method()),
     { timeout: 20_000 },
   );
 
@@ -335,7 +346,7 @@ test("device B runs trial 2; device A's DASHBOARD shows the updated session (2 t
   // Device A never received the newer copy in its LAB (see the SKIP below);
   // what the product actually does — and what the sync contract promises —
   // is that device A's DASHBOARD, server-rendered straight from the
-  // learning_sessions table, shows the updated cloud row.
+  // learning_sessions collection (MongoDB), shows the updated cloud row.
   const pageA = deviceAContext.pages()[0];
   await pageA.bringToFront();
   await pageA.goto("/dashboard");
@@ -376,7 +387,8 @@ test("isolation: learner_b's dashboard shows zero learner_a sessions", async ({
     page.getByRole("heading", { level: 1, name: /learner_b/i }),
   ).toBeVisible({ timeout: 20_000 });
 
-  // RLS-verified empty state (copy §5.5 EMP-01 / §5.2 DASH-15): learner_b can
+  // Ownership-verified empty state (copy §5.5 EMP-01 / §5.2 DASH-15): the
+  // API derives user_id from the verified session cookie, so learner_b can
   // see the dashboard scaffolding but never learner_a's rows. Exact match:
   // the empty-state line "Nothing in progress right now." also contains the
   // words "in progress".
