@@ -13,6 +13,7 @@ import {
 } from "@/domain/learner";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 import { interpret, type InterpretResult } from "../intent/route";
+import { normalizeQuery } from "../intent/normalize";
 import type { IntentSpec } from "../intent/types";
 import { buildEngineSpec } from "./engine-builder";
 import { buildConceptualSpec, buildTimelineSpec } from "./template-builder";
@@ -86,13 +87,17 @@ function toResult(intentResult: InterpretResult, query: string, prefs: LearnerPr
  * - spec: a complete DemoSpecV1 (verified engine, conceptual template, or
  *   explanatory timeline).
  *
- * Deterministic for identical (query, prefs) except provenance.generatedAt,
- * which is the wall-clock time of generation by contract.
+ * The query is normalized ONCE here so the emitted spec's userQuery always
+ * respects the 500-char input cap (a raw over-long query must never produce a
+ * self-invalidating spec). Deterministic for identical (query, prefs) except
+ * provenance.generatedAt, which is the wall-clock time of generation by
+ * contract.
  */
 export function generateOfflineDemo(
   query: string,
   prefs: LearnerPreferences = createDefaultPreferences(),
 ): OfflineDemoResult {
-  const intentResult = interpret(query, prefs);
-  return toResult(intentResult, query, prefs);
+  const normalized = normalizeQuery(query);
+  const intentResult = interpret(normalized, prefs);
+  return toResult(intentResult, normalized, prefs);
 }
