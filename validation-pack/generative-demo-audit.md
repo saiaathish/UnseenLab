@@ -244,3 +244,33 @@ interpret("Explain Turing patterns")                                // { status:
 
 **Overall: B+.** The security boundary is sound where it is actually enforced; the two P1s (trust
 escalation, long-query breakage) are the priority fixes before release.
+
+---
+
+## 2. Post-audit fixes (ED integration pass, same day)
+
+All findings above were triaged by the Executive Director and fixed on the branch;
+the hostile suite was updated in lockstep (gap-asserting tests flipped to
+fix-asserting tests) and re-run green. `git log` on the branch records the fix
+commits.
+
+| Sev | Finding | Fix | Evidence |
+| --- | --- | --- | --- |
+| P1 | Trust escalation + model-graded correctIndex | `science-policy.ts` rejects `model_generated_spec` specs carrying `correctIndex` (`science_policy:model_graded_prediction`); `pipeline.ts` adds `specMatchesIntent` (trust-level ceiling + engine-family check, `trust_mismatch` fallback); `demo-store.ts` `predictionTruth` refuses to grade non-curated specs | redteam/prompt-injection.test.ts (2 new tests), store-honesty.test.ts, pipeline.test.ts MODEL_SPEC fixture now truth-free |
+| P1 | Long-query self-invalidating specs (schema-valid 94.0%) | `userQuery` schema cap aligned to 500 (intent cap); offline generator normalizes the query once | demo-spec-schema.ts `MAX_QUERY_CHARS`; benchmark schema-valid 100.0% |
+| P2 | `unknown_key` reason codes echoed attacker key names | `safeReasonSlug` (lowercase, `[a-z0-9_.-]`, 24-cap) + `safePath` | sanitize.ts; arbitrary-execution.test.ts (slug assertion, no-fragment assertion) |
+| P2 | Code-marker scan case/whitespace-sensitive; event handlers/`<script>`/`srcdoc`/innerHTML unscanned | `isExecutableCodeString` rewritten (case/whitespace-insensitive, word-boundary safe, 8 patterns) | demo-spec-schema.ts; arbitrary-execution.test.ts (6 rejected vectors + benign negatives) |
+| P2 | Router lexicographic tie-break misroutes ("capacitor charge", "pendulum on the moon") | specificity tie-break: longest matched phrase wins | router.ts `longestPhrase`; benchmark route accuracy 100.0% |
+| P2/INFO | Harmful-filter phrase gaps | extended phrase list (controlled substances, interlocks, explosive precursors) | normalize.ts; benchmark u3/u4 now `unsafe` (gold updated) |
+| INFO | "Turing patterns" (plural) unrouted | keyword added to `ENGINE_CATALOG.reaction_diffusion` | demo-spec.ts; router coverage |
+
+### Final measured state (post-fix)
+
+- Hostile suite: **189/189** red-team + benchmark tests green.
+- Full repo unit/component suite: **1058/1058** (62 files) — baseline was 413/413.
+- Benchmark: route 100.0% · trust 100.0% · schema-valid 100.0% · accessible
+  coverage 100.0% · unsafe rejection 100.0% · offline p50 0.04 ms.
+- Lint + typecheck + production build: clean.
+- Still UNVERIFIED (browser/live gates, not unit-testable): real WebGL
+  rasterization FPS, live Firebase session auth, live MongoDB, live hosted-model
+  latency, real screen-reader behavior, multi-instance rate limiting.

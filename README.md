@@ -56,6 +56,33 @@ Future labs (High-Voltage Circuit Failure, Exothermic Thermal Runaway) are regis
   - Every proposal is tagged with a source — `"llm"` or `"rules"` — shown in the UI as "AI interpretation" vs "Offline rules", so the learner can always tell AI interpretation apart from the simulation result.
 - **Simulation (scientific core)** — seeded, deterministic, unit-tested against invariants. No LLM-generated calculations, no arbitrary code execution, no hardcoded results. The AI layer can never alter equations, parameters, or outcomes. See `docs/safety-model.md`.
 
+## Generative demonstration engine (flag-gated)
+
+Behind `NEXT_PUBLIC_GENERATIVE_DEMOS_ENABLED=1` (default `0` — the current
+product is unchanged), the homepage adds an ask-to-demo workflow: a learner
+asks for any STEM concept, the AI emits a **bounded JSON specification**
+(`DemoSpecV1`), a validator sanitizes and classifies it, and deterministic
+renderers build the experience. The model is never asked to write code.
+
+- **Three visible trust levels**: Verified simulation (curated engines only),
+  Conceptual demonstration, Explanatory animation — never conflated.
+- **Prediction-first**: every demo requires a prediction before controls
+  unlock; curated predictions are graded by engine truth, model specs never.
+- **Approved 3D primitives** (direct Three.js) with three immersive showcase
+  families: orbital mechanics, electric fields, wave interference.
+- **Accessible equivalent for every demo** — 2D stage, diagram, table,
+  timeline or text sequence — so predict → manipulate → observe → compare →
+  adapt works without 3D.
+- **Offline router + generator** keep the whole learning flow working with no
+  model; the hosted pipeline (bounded prompt, strict JSON, retry, circuit
+  breaker, rate limit) falls back to it honestly with a source badge.
+- Rollback is one line: set the flag back to `0`. The Nuclear Chain Reaction
+  lab remains reachable in both states.
+
+See `docs/generative-demonstrations.md`, `docs/demo-spec.md`,
+`docs/scientific-trust.md`, `docs/3d-renderer.md`, `docs/generation-pipeline.md`,
+`docs/demo-benchmark.md`, `docs/accessibility-equivalents.md`.
+
 ## Accessibility controls
 
 - Animation-first experience with play / pause / step forward / step backward / reset
@@ -119,7 +146,7 @@ npm run test:e2e    # Playwright against a production build on port 3100 (requir
 npm run build       # production build
 ```
 
-- **407 unit/component tests across 37 files** passing (measured on the latest run): simulation invariants, adaptation rules (deterministic + LLM + retry/circuit-breaker reliability), session persistence, multi-trial flow, reduced motion, replay truthfulness, plus the platform layer — redirect-safety (open-redirect vectors), preference mapping, onboarding wizard, dashboard/settings, cloud-session conflict policy + optimistic concurrency (revision/409/idempotent replay), guest-import idempotency, auth callback routing, session-route security (origin check, rate limit), research-mode consent/recorder/export.
+- **1058 unit/component tests across 62 files** passing (measured on the latest run): simulation invariants, adaptation rules (deterministic + LLM + retry/circuit-breaker reliability), session persistence, multi-trial flow, reduced motion, replay truthfulness, plus the platform layer — redirect-safety (open-redirect vectors), preference mapping, onboarding wizard, dashboard/settings, cloud-session conflict policy + optimistic concurrency (revision/409/idempotent replay), guest-import idempotency, auth callback routing, session-route security (origin check, rate limit), research-mode consent/recorder/export — plus the generative demonstration engine: DemoSpecV1 schema/sanitizer/science-policy (61), nine deterministic 2D engines with physics-verified numerics (24), intent + word-aware offline router + generator (190), 3D primitive renderer lifecycle (37), hosted generation pipeline + circuit breaker (31), Mongo persistence + owner isolation (38), 3D showcases with engine-asserted predictions (22), performance/a11y hardening (29), and a hostile red-team suite + 97-prompt benchmark (189).
 - **50 Playwright e2e tests across 10 specs** (mode-dependent pass/skip counts; latest runs: guest build 40 passed/10 env-gated, credentialed build 39 passed/11 env-gated, 0 failed): demo smoke, keyboard-only core flow (LLM-aware waits), homepage topic routing + auth entry, the repeatable multi-trial loop, auth dialog behavior (guest-build gated), route protection, an accessibility matrix (keyboard/focus, reduced motion, text scale, 320px, contrast), a console/perf/fallback quality pack, and two env-gated real-backend specs — cross-device resume and two-user browser isolation (4/4 vs live Firebase + Atlas).
 
 ## Architecture
