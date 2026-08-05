@@ -41,6 +41,15 @@ Note per probe: outcome, trust badge seen, whether prediction gated controls,
 whether the accessible equivalent was reachable, any confusion. Do NOT
 fabricate: record only what the participant actually did and said.
 
+Additional Phase-7 capture fields (generative session):
+- **Trust-badge interpretation**: in the participant's own words, what does
+  "Verified simulation / Conceptual demonstration / Explanatory animation"
+  mean to them? (Ask only if they comment on it; never coach.)
+- **Held-constant understanding**: after accepting one-variable mode, does
+  the participant explain why the other variables are held constant?
+- **Time to prediction**: elapsed wall-clock from task start to first
+  prediction submit.
+
 ## Session→revision rule (judge's Gate 5/6)
 
 After the session, implement EXACTLY ONE revision drawn from what the
