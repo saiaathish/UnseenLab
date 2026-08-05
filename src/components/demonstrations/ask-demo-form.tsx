@@ -94,6 +94,9 @@ export function AskDemoForm() {
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const previousPhaseRef = useRef<Phase>(phase);
+  // The phase panels swap the form away on advance; focus the panel so
+  // keyboard users land on the new content instead of <body>.
+  const phasePanelRef = useRef<HTMLDivElement | null>(null);
 
   // Returning to the ask form (e.g. "Start over") moves focus back to the
   // input so keyboard users don't lose their place.
@@ -104,6 +107,12 @@ export function AskDemoForm() {
       inputRef.current?.focus();
     }
   }, [phase]);
+
+  useEffect(() => {
+    if (phase.kind !== "idle") {
+      phasePanelRef.current?.focus();
+    }
+  }, [phase.kind]);
 
   const runOffline = (query: string) => {
     let result: OfflineDemoResult;
@@ -336,7 +345,7 @@ export function AskDemoForm() {
       ) : null}
 
       {phase.kind === "pending" ? (
-        <div className="mt-6">
+        <div ref={phasePanelRef} tabIndex={-1} className="mt-6">
           <p className="text-sm text-gray-400">
             Building a demonstration for{" "}
             <span className="font-medium text-white">“{phase.query}”</span>
@@ -351,7 +360,7 @@ export function AskDemoForm() {
       ) : null}
 
       {phase.kind === "clarify" ? (
-        <div className="mt-6">
+        <div ref={phasePanelRef} tabIndex={-1} className="mt-6">
           <ClarificationCard
             question={phase.question}
             onSubmit={(answer) => void submitQuery(`${phase.query} ${answer}`)}
@@ -361,7 +370,7 @@ export function AskDemoForm() {
       ) : null}
 
       {phase.kind === "spec" ? (
-        <div className="mt-6">
+        <div ref={phasePanelRef} tabIndex={-1} className="mt-6">
           <DemoSummaryCard
             spec={phase.spec}
             source={phase.source}
@@ -372,7 +381,7 @@ export function AskDemoForm() {
       ) : null}
 
       {phase.kind === "error" ? (
-        <div className="mt-6">
+        <div ref={phasePanelRef} tabIndex={-1} className="mt-6">
           <GenerationError
             kind={phase.errorKind}
             message={phase.message}

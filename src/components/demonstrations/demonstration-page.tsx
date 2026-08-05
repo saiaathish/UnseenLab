@@ -12,7 +12,7 @@ import {
 import { validateDemoSpec } from "@/demonstrations/validation";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 import type { Readout } from "@/demonstrations/renderers/lumina-2d/types";
-import { createDefaultPreferences } from "@/domain/learner";
+import { loadLocalSession } from "@/storage/session-storage";
 
 import { DemonstrationShell } from "./demonstration-shell";
 import {
@@ -154,11 +154,45 @@ function DemoExperienceReady({
   session: DemoSession;
   spec: DemoSpecV1;
 }) {
-  const reducedMotion = useReducedMotionPref();
-  const preferences = useMemo(
-    () => ({ ...createDefaultPreferences(), reducedMotion }),
-    [reducedMotion]
-  );
+  const osReducedMotion = useReducedMotionPref();
+  // Stored learner preferences (settings page): text scale, high contrast,
+  // motion and representation choices. Never inferred from a diagnosis.
+  const preferences = useMemo(() => loadLocalSession().preferences, []);
+  // Motion is reduced when the OS asks for it OR the learner chose it.
+  const reducedMotion = osReducedMotion || preferences.reducedMotion;
+
+  // Document-level preference effects, mirroring the lab shell: the global
+  // CSS reduced-motion kill-switch, the high-contrast token palette, and
+  // rem-based text scale on the root. All removed on unmount so settings
+  // never leak into other pages (they compose with browser zoom).
+  useEffect(() => {
+    const media =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-reduced-motion: reduce)")
+        : undefined;
+    const apply = () => {
+      document.body.classList.toggle("high-contrast", preferences.highContrast);
+      document.documentElement.setAttribute(
+        "data-reduced-motion",
+        String((media?.matches ?? false) || preferences.reducedMotion)
+      );
+    };
+    apply();
+    media?.addEventListener("change", apply);
+    return () => {
+      media?.removeEventListener("change", apply);
+      document.body.classList.remove("high-contrast");
+      document.documentElement.removeAttribute("data-reduced-motion");
+    };
+  }, [preferences.highContrast, preferences.reducedMotion]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.fontSize = `${preferences.textScale * 100}%`;
+    return () => {
+      root.style.fontSize = "";
+    };
+  }, [preferences.textScale]);
 
   const paramDefaults = useMemo(() => {
     const out: Record<string, number> = {};

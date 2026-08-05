@@ -307,7 +307,12 @@ function StageFallback({
       aria-label="Accessible representation"
       className="rounded-xl border border-border bg-surface p-4"
     >
-      <p className="rounded-lg bg-info/10 px-3 py-2 text-sm leading-6 text-info">
+      {/* role=status announces the canvas → fallback transition once, when
+          the fallback mounts. The text is also the visible note. */}
+      <p
+        role="status"
+        className="rounded-lg bg-info/10 px-3 py-2 text-sm leading-6 text-info"
+      >
         {note}
       </p>
       <div className="mt-4">

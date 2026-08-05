@@ -12,6 +12,7 @@
 
 import * as THREE from "three";
 import type { DemoSpecV1, PrimitiveKind, Vec3 } from "@/demonstrations/spec/demo-spec";
+import { FrameStatsSampler } from "@/demonstrations/performance/frame-stats";
 import { buildSceneGraph } from "./scene-graph";
 import {
   disposeMaterials,
@@ -211,7 +212,9 @@ export class PrimitiveSceneRenderer {
   private dragging = false;
   private lastPointer = { x: 0, y: 0 };
   private fpsAcc = 0;
-  private fpsFrames = 0;
+  /** Optional EMA frame-time sampler — only instantiated when onFps is set,
+   * so the default path carries zero instrumentation overhead. */
+  private frameStats: FrameStatsSampler | null = null;
 
   private orbit: OrbitState = {
     azimuth: 0,
@@ -239,6 +242,9 @@ export class PrimitiveSceneRenderer {
       mobile: options.mobile ?? false,
       ...options,
     };
+    // Optional instrumentation: the sampler is a single multiply-add per
+    // frame and is only created when the caller asked for FPS feedback.
+    this.frameStats = options.onFps ? new FrameStatsSampler() : null;
     canvasOwners.set(canvas, this);
 
     const gl = this.acquireContext();
@@ -879,12 +885,17 @@ export class PrimitiveSceneRenderer {
       this.renderer.render(this.scene, this.camera);
     }
 
+    // Optional frame-time instrumentation: EMA-smoothed FPS via
+    // FrameStatsSampler, emitted on the existing onFps callback every
+    // FPS_INTERVAL of accumulated frame time. No sampler, no work.
     this.fpsAcc += dt;
-    this.fpsFrames++;
-    if (this.fpsAcc >= FPS_INTERVAL && this.options.onFps) {
-      this.options.onFps(this.fpsFrames / this.fpsAcc);
-      this.fpsAcc = 0;
-      this.fpsFrames = 0;
+    const stats = this.frameStats;
+    if (stats) {
+      const sample = stats.sample(now);
+      if (this.fpsAcc >= FPS_INTERVAL && this.options.onFps) {
+        this.options.onFps(sample.fps);
+        this.fpsAcc = 0;
+      }
     }
   }
 

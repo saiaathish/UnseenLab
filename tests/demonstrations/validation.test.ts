@@ -419,7 +419,8 @@ describe("validateDemoSpec — schema rejections", () => {
       "void main() {}";
     const result = validateDemoSpec(toJson(spec));
     expect(result.status).toBe("rejected");
-    expect(result.reasons).toContain("unknown_key:fragmentShader");
+    // Reason codes slug keys to safe lowercase (never echo raw attacker text).
+    expect(result.reasons).toContain("unknown_key:fragmentshader");
 
     const spec2 = verifiedSimulationSpec();
     (spec2.renderer as unknown as Record<string, unknown>)["glsl"] =

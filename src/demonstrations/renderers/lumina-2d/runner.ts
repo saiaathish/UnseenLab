@@ -19,6 +19,27 @@ export interface SceneSpec {
 export const MAX_DT = 0.05; // seconds; avoid huge jumps on tab refocus
 export const READOUT_INTERVAL = 0.12; // seconds between readout emissions
 
+/** DPR caps — desktop 2, mobile viewports 1.5 (mirrors primitive-3d). */
+export const DPR_CAP = 2;
+export const DPR_CAP_MOBILE = 1.5;
+/** Viewport width (CSS px) below which the mobile DPR cap applies. */
+export const MOBILE_VIEWPORT_PX = 768;
+
+/**
+ * Pure DPR clamp — exported for direct unit testing. Mobile viewports (and
+ * anything below 1 dpr, e.g. headless environments) never exceed their cap,
+ * so the 2D canvas backing store stays within the fill-rate budget.
+ */
+export function computeDpr(devicePixelRatio: number, mobile: boolean): number {
+  const device = devicePixelRatio > 0 ? devicePixelRatio : 1;
+  return Math.min(device, mobile ? DPR_CAP_MOBILE : DPR_CAP);
+}
+
+/** Same viewport heuristic the shell uses to pick the mobile variant. */
+export function isMobileViewport(): boolean {
+  return typeof window !== "undefined" && window.innerWidth < MOBILE_VIEWPORT_PX;
+}
+
 /** Pure dt clamp — exported for direct unit testing. */
 export function clampDt(dt: number, max: number = MAX_DT): number {
   if (!Number.isFinite(dt)) return 0;
@@ -115,7 +136,10 @@ export class SimRunner {
   private resize() {
     const parent = this.canvas.parentElement;
     const rect = parent ? parent.getBoundingClientRect() : this.canvas.getBoundingClientRect();
-    const dpr = Math.min((typeof window !== "undefined" && window.devicePixelRatio) || 1, 2);
+    const dpr = computeDpr(
+      (typeof window !== "undefined" && window.devicePixelRatio) || 1,
+      isMobileViewport()
+    );
     const w = Math.max(1, Math.floor(rect.width));
     const h = Math.max(1, Math.floor(rect.height));
     if (this.canvas.width !== Math.floor(w * dpr)) this.canvas.width = Math.floor(w * dpr);

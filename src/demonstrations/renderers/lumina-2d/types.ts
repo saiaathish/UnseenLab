@@ -10,7 +10,7 @@ export interface SimContext {
   /** Logical (CSS px) canvas size. */
   width: number;
   height: number;
-  /** Device pixel ratio (capped at 2 by the runner). */
+  /** Device pixel ratio (capped at 2 by the runner; 1.5 on mobile viewports). */
   dpr: number;
   /** Total elapsed simulated time in seconds. */
   time: number;

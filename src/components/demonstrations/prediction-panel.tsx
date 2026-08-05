@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { PredictionSpec, TrustLevel } from "@/demonstrations/spec/demo-spec";
 import { TRUST_LABELS } from "@/demonstrations/spec/demo-spec";
@@ -57,6 +57,12 @@ export function DemonstrationPredictionPanel({
         aria-label="Prediction"
         className="rounded-xl border border-border bg-surface p-4"
       >
+        {/* Polite announcement of the gate transition; the text only changes
+            when a prediction is submitted, so the region never spams. Focus
+            itself moves to the first control (see demonstration-controls). */}
+        <p role="status" className="sr-only">
+          Prediction recorded — controls unlocked.
+        </p>
         <h2 className="text-sm font-semibold uppercase tracking-widest text-muted">
           Prediction locked in
         </h2>
@@ -158,8 +164,20 @@ function GradedResult({
   const correct = prediction.options[correctIndex];
   const chosenOption = prediction.options[chosen];
   const isCorrect = correctIndex === chosen;
+
+  // The Reveal button is replaced by this result; take focus so keyboard
+  // users stay on the outcome instead of being dropped to <body>.
+  const resultRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    resultRef.current?.focus();
+  }, []);
+
   return (
-    <div className="mt-3 rounded-lg border border-border bg-surface-raised p-3">
+    <div
+      ref={resultRef}
+      tabIndex={-1}
+      className="mt-3 rounded-lg border border-border bg-surface-raised p-3"
+    >
       <p
         role="status"
         className={cn(

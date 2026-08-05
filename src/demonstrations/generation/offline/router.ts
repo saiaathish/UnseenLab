@@ -32,6 +32,8 @@ export interface ScoreEntry {
   id: string;
   /** Higher is a better match. Zero means no keyword hit. */
   score: number;
+  /** Length in chars of the longest matched phrase (specificity tie-break). */
+  longestPhrase: number;
   /** The phrases (in original spelling) that matched. */
   matchedPhrases: string[];
 }
@@ -315,31 +317,43 @@ function compareCandidates(a: RouteCandidate, b: RouteCandidate): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-/** Tie-break for ScoreEntry (kind priority, then lexicographic id). */
+/**
+ * Tie-break for ScoreEntry: kind priority first, then how SPECIFIC the best
+ * matched phrase was (longer keyword = more precise), then id. Specificity
+ * fixes the ambiguous-token traps: "capacitor charge" must route to rc_circuit
+ * (keyword "capacitor" is more specific than "charge"), and "pendulum on the
+ * moon" must route to pendulum ("moon" is a weak orbit hint next to a precise
+ * pendulum keyword).
+ */
 function tieBreakEntries(a: ScoreEntry, b: ScoreEntry): number {
   const priority: Record<RouteKind, number> = { engine: 0, timeline: 1, template: 2 };
   if (priority[a.kind] !== priority[b.kind]) return priority[a.kind] - priority[b.kind];
+  if (a.longestPhrase !== b.longestPhrase) return b.longestPhrase - a.longestPhrase;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /**
  * Score every candidate against the query. Returns entries with score > 0,
- * sorted by score (desc), then priority (asc), then id (lexicographic).
+ * sorted by score (desc), then kind priority, then longest matched phrase,
+ * then id (deterministic order).
  */
 export function scoreCandidates(query: string): ScoreEntry[] {
   const tokens = tokenize(query);
   const entries: ScoreEntry[] = [];
   for (const candidate of CANDIDATES) {
     let score = 0;
+    let longestPhrase = 0;
     const matched: string[] = [];
     for (const phraseTokens of candidate.phrases) {
       if (containsPhrase(tokens, phraseTokens) && !isWeakSingleWord(phraseTokens)) {
         score += phraseTokens.length >= 2 ? 2 : 1;
-        matched.push(phraseTokens.join(" "));
+        const phrase = phraseTokens.join(" ");
+        longestPhrase = Math.max(longestPhrase, phrase.length);
+        matched.push(phrase);
       }
     }
     if (score > 0) {
-      entries.push({ kind: candidate.kind, id: candidate.id, score, matchedPhrases: matched });
+      entries.push({ kind: candidate.kind, id: candidate.id, score, longestPhrase, matchedPhrases: matched });
     }
   }
   entries.sort((a, b) => b.score - a.score || tieBreakEntries(a, b));
@@ -365,19 +379,32 @@ export function routeQuery(query: string): OfflineRouteResult {
 export function explainScore(query: string): string[] {
   const tokens = tokenize(query);
   const lines: string[] = [];
-  const ranked: Array<{ candidate: RouteCandidate; score: number; matched: string[] }> = [];
+  const ranked: Array<{
+    candidate: RouteCandidate;
+    score: number;
+    longest: number;
+    matched: string[];
+  }> = [];
   for (const candidate of CANDIDATES) {
     let score = 0;
+    let longest = 0;
     const matched: string[] = [];
     for (const phraseTokens of candidate.phrases) {
       if (containsPhrase(tokens, phraseTokens) && !isWeakSingleWord(phraseTokens)) {
         score += phraseTokens.length >= 2 ? 2 : 1;
-        matched.push(phraseTokens.join(" "));
+        const phrase = phraseTokens.join(" ");
+        longest = Math.max(longest, phrase.length);
+        matched.push(phrase);
       }
     }
-    ranked.push({ candidate, score, matched });
+    ranked.push({ candidate, score, longest, matched });
   }
-  ranked.sort((a, b) => b.score - a.score || compareCandidates(a.candidate, b.candidate));
+  ranked.sort(
+    (a, b) =>
+      b.score - a.score ||
+      b.longest - a.longest ||
+      compareCandidates(a.candidate, b.candidate)
+  );
   for (const { candidate, score, matched } of ranked) {
     const suffix = matched.length > 0 ? ` [${matched.join(", ")}]` : "";
     lines.push(`${candidate.kind}:${candidate.id} = ${score}${suffix}`);

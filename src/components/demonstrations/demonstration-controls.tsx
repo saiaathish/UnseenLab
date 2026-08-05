@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 import type { ControlSpec, DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
@@ -67,6 +69,28 @@ export function DemonstrationControls({
     onControlTouched(controlId);
   };
 
+  // Prediction-first handoff: when the gate unlocks (submitted), move focus
+  // to the first interactive control. The submit button in the prediction
+  // panel is replaced on submit, and the controls live earlier in the DOM —
+  // this is the "predict → manipulate" step, so keyboard users land directly
+  // on the next action instead of being dropped to <body>.
+  const controlsRef = useRef<HTMLElement | null>(null);
+  // The rows container holds ONLY the spec.controls rows (the one-variable
+  // mode switch sits outside it, together with its focusable hidden input).
+  const rowsRef = useRef<HTMLDivElement | null>(null);
+  const wasEnabledRef = useRef(enabled);
+  useEffect(() => {
+    if (enabled && !wasEnabledRef.current) {
+      // Predict → manipulate handoff: focus the first experiment control
+      // (slider / segment / play button), never the one-variable meta toggle.
+      const first =
+        rowsRef.current?.querySelector<HTMLElement>("input, button") ??
+        controlsRef.current?.querySelector<HTMLElement>("[role='switch']");
+      first?.focus();
+    }
+    wasEnabledRef.current = enabled;
+  }, [enabled]);
+
   if (spec.controls.length === 0) {
     return (
       <section
@@ -85,6 +109,7 @@ export function DemonstrationControls({
 
   return (
     <section
+      ref={controlsRef}
       aria-label="Controls"
       className="rounded-xl border border-border bg-surface p-4"
     >
@@ -115,7 +140,7 @@ export function DemonstrationControls({
         </div>
       )}
 
-      <div className="mt-4 flex flex-col gap-3">
+      <div ref={rowsRef} className="mt-4 flex flex-col gap-3">
         {spec.controls.map((control) => {
           const frozen =
             oneVariableMode &&

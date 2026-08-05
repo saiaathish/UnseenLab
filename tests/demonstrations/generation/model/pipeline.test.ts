@@ -51,6 +51,9 @@ const MODEL_SPEC: DemoSpecV1 = (() => {
   return {
     ...result.spec,
     provenance: { ...result.spec.provenance, source: "model_generated_spec" },
+    // A model-generated spec can never carry prediction truth: correctIndex
+    // is curated-engine-only (science policy rejects it otherwise).
+    prediction: { ...result.spec.prediction, correctIndex: undefined },
   };
 })();
 

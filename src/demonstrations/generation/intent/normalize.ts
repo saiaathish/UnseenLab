@@ -90,6 +90,21 @@ const HARMFUL_PHRASES: readonly string[] = [
   "unsafe lab",
   "hazardous experiment",
   "harmful chemical recipe",
+  // controlled substances (compound phrases only — "synthesis" alone stays
+  // benign: "protein synthesis" is a legitimate biology topic)
+  "controlled drug",
+  "controlled substance",
+  "synthesize a controlled drug",
+  "synthesize a controlled substance",
+  // bypassing safety systems (continued)
+  "safety interlocks",
+  "interlock bypass",
+  "defeat the interlocks",
+  "bypass interlocks",
+  // explosive precursors
+  "explosive precursor",
+  "synthesize an explosive",
+  "make an explosive device",
 ];
 
 /** True when the query matches the harmful-content filter. */

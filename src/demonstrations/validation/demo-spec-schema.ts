@@ -48,6 +48,13 @@ export const GLOBAL_NUM_MAX = 1_000_000_000;
 const MAX_ID_CHARS = 64;
 const MAX_TITLE_CHARS = 120;
 const MAX_OBJECTIVE_CHARS = 400;
+/**
+ * userQuery mirrors the intent-layer input cap (500 chars, see
+ * src/demonstrations/generation/intent/normalize.ts). It must never be
+ * smaller than that cap, or every long-but-legal query would produce a
+ * self-invalidating spec.
+ */
+const MAX_QUERY_CHARS = 500;
 const MAX_LIMITATION_CHARS = 240;
 const MAX_LABEL_CHARS = 120;
 const MAX_EVENT_TITLE_CHARS = 120;
@@ -383,10 +390,27 @@ export function isUnsafeUrlString(value: string): boolean {
   return false;
 }
 
-/** Model-authored executable code markers. Case-sensitive on purpose:
- * "evaluate(" is a legitimate word and is not the JS builtin. */
+/**
+ * Model-authored executable code markers. Matching is case- and
+ * whitespace-insensitive, with word boundaries so legitimate words
+ * ("evaluate(", "functionality") never false-positive. Also covers event
+ * handler attributes, inline scripts and innerHTML sinks — anything that
+ * would be executable if it ever reached a DOM sink.
+ */
 export function isExecutableCodeString(value: string): boolean {
-  return value.includes("eval(") || value.includes("new Function");
+  const compact = value.replace(/\s+/g, " ");
+  const patterns: RegExp[] = [
+    /\beval\s*\(/i,
+    /\bnew\s+Function\s*\(/i,
+    /\bonclick\s*=/i,
+    /\bonerror\s*=/i,
+    /\bonload\s*=/i,
+    /\bonmouseover\s*=/i,
+    /<script/i,
+    /\bsrcdoc\s*=/i,
+    /dangerouslySetInnerHTML/i,
+  ];
+  return patterns.some((re) => re.test(compact));
 }
 
 /** Returns the first string (in DFS order) matching the predicate, or null. */
@@ -503,7 +527,7 @@ const demoSpecBaseSchema = z
     schemaVersion: z.literal(1),
     id: idString,
     generationId: idString,
-    userQuery: z.string().min(1).max(MAX_OBJECTIVE_CHARS),
+    userQuery: z.string().min(1).max(MAX_QUERY_CHARS),
     normalizedConcept: z.string().min(1).max(MAX_EXPLANATION_CHARS),
     title: z.string().min(1).max(MAX_TITLE_CHARS),
     learningObjective: z.string().min(1).max(MAX_OBJECTIVE_CHARS),

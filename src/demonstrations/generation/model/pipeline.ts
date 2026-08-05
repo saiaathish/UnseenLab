@@ -46,6 +46,7 @@ import {
   ENGINE_CATALOG,
   type DemoSpecV1,
   type EngineCapability,
+  type TrustLevel,
   type VerifiedEngineId,
 } from "@/demonstrations/spec/demo-spec";
 import {
@@ -440,6 +441,39 @@ async function runModelRound(
   };
 }
 
+const TRUST_RANK: Record<TrustLevel, number> = {
+  explanatory_animation: 1,
+  conceptual_demonstration: 2,
+  verified_simulation: 3,
+};
+
+/**
+ * The model may never escalate a topic beyond the trust level the intent
+ * layer routed it to (mitosis must not become a "verified" orbits
+ * simulation), and verified topics must stay inside the routed engine
+ * candidates. Violations are rejected and fall back to the offline path —
+ * the intent's deterministic routing is the ceiling, not a suggestion.
+ */
+function specMatchesIntent(spec: DemoSpecV1, intent: IntentSpec): boolean {
+  if (
+    TRUST_RANK[spec.trust.level] > TRUST_RANK[intent.candidate_trust_level]
+  ) {
+    return false;
+  }
+  if (intent.candidate_trust_level === "verified_simulation") {
+    if (spec.trust.level !== "verified_simulation" || !spec.simulation) {
+      return false;
+    }
+    if (
+      intent.candidate_engine_ids.length > 0 &&
+      !intent.candidate_engine_ids.includes(spec.simulation.engineId)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function modelSpecData(
   round: Extract<ModelRoundResult, { kind: "spec" }>,
 ): GenerationData {
@@ -552,6 +586,10 @@ async function runGeneration(
   // c. First model attempt.
   const attempt1 = await runModelRound(systemPrompt, userMessage, config, startedAt);
   if (attempt1.kind === "spec") {
+    if (!specMatchesIntent(attempt1.spec, intent)) {
+      recordModelFailure();
+      return offlineSpec(query, prefs, "trust_mismatch");
+    }
     recordModelSuccess();
     return { data: modelSpecData(attempt1) };
   }
@@ -569,6 +607,10 @@ async function runGeneration(
     startedAt,
   );
   if (attempt2.kind === "spec") {
+    if (!specMatchesIntent(attempt2.spec, intent)) {
+      recordModelFailure();
+      return offlineSpec(query, prefs, "trust_mismatch");
+    }
     recordModelSuccess();
     return { data: modelSpecData(attempt2) };
   }

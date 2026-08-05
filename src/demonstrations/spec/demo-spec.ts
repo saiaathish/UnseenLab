@@ -488,8 +488,8 @@ export const ENGINE_CATALOG: Record<VerifiedEngineId, EngineCapability> = {
     domain: "chemistry",
     keywords: [
       "reaction diffusion", "reaction-diffusion", "turing pattern",
-      "gray scott", "pattern formation", "morphogenesis", "chemistry",
-      "stripes", "spots",
+      "turing patterns", "gray scott", "pattern formation", "morphogenesis",
+      "chemistry", "stripes", "spots",
     ],
     parameterKeys: ["feed", "kill", "diffusionU", "diffusionV"],
     readoutKeys: ["pattern"],

@@ -182,13 +182,18 @@ class DemoStore {
 /** Singleton; module scope is the store (client components only). */
 export const demoStore = new DemoStore();
 
-/** Truth of a curated prediction. Model specs are never graded (undefined). */
+/**
+ * Truth of a curated prediction. Only curated engine code may grade a
+ * prediction: model-generated specs are never graded (undefined), even if a
+ * malicious spec smuggled a correctIndex past validation.
+ */
 export function predictionTruth(spec: DemoSpecV1): {
   graded: boolean;
   correctIndex?: number;
 } {
   if (
     spec.trust.level === "verified_simulation" &&
+    spec.provenance.source !== "model_generated_spec" &&
     spec.prediction.correctIndex !== undefined
   ) {
     return { graded: true, correctIndex: spec.prediction.correctIndex };

@@ -286,15 +286,29 @@ function fieldName(path: PropertyKey[]): string {
   return last;
 }
 
+/**
+ * Reason codes must never echo attacker-controlled strings verbatim (a key
+ * name could smuggle newlines/HTML into log lines). Keep only safe slug
+ * characters and cap the length.
+ */
+function safeReasonSlug(value: string): string {
+  const slug = value.toLowerCase().replace(/[^a-z0-9_.-]/g, "").slice(0, 24);
+  return slug.length > 0 ? slug : "field";
+}
+
+function safePath(path: PropertyKey[]): string {
+  return path.map((p) => safeReasonSlug(String(p))).join(".") || "root";
+}
+
 function describeIssue(issue: z.ZodIssue): string[] {
   const path = issue.path;
   const field = fieldName(path);
-  const atPath = path.length > 0 ? path.join(".") : "root";
+  const atPath = safePath(path);
   switch (issue.code) {
     case "custom":
       return [issue.message];
     case "unrecognized_keys":
-      return issue.keys.map((key) => `unknown_key:${key}`);
+      return issue.keys.map((key) => `unknown_key:${safeReasonSlug(key)}`);
     case "invalid_value":
       // z.enum / z.literal failures surface as invalid_value in Zod 4.4.
       return [`invalid_enum:${path.length > 0 ? path.join(".") : "value"}`];

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 
 import { predictionTruth, type DemoSource, type TrialRecord } from "@/demonstrations/state/demo-store";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
@@ -233,8 +234,18 @@ function ReplayBanner({
     .join(", ");
   const liveByLabel = new Map(readouts.map((r) => [r.label, r.value]));
 
+  // The banner is inserted at the top of the page while the trigger lives in
+  // the trial log far below; take focus so keyboard users meet the banner
+  // (and its Dismiss action) instead of tabbing up blindly.
+  const bannerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    bannerRef.current?.focus();
+  }, []);
+
   return (
     <section
+      ref={bannerRef}
+      tabIndex={-1}
       aria-label={`Replay of trial entry ${trial.trial}`}
       className="mt-6 rounded-xl border border-accent/40 bg-accent-soft/40 p-4"
     >

@@ -82,6 +82,15 @@ export function sciencePolicy(spec: DemoSpecV1): SciencePolicyResult {
     reasons.push("unsafe_value:code");
   }
 
+  // --- prediction truth is curated-only: a model-generated spec can never
+  // assert a correctIndex. Only curated engine code may grade a prediction. ---
+  if (
+    spec.provenance.source === "model_generated_spec" &&
+    spec.prediction.correctIndex !== undefined
+  ) {
+    reasons.push("science_policy:model_graded_prediction");
+  }
+
   const level = spec.trust.level;
 
   // --- Level 1: verified simulation ---
