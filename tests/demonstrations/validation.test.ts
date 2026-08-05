@@ -592,12 +592,15 @@ describe("validateDemoSpec — count limits", () => {
     expect(result.spec!.limits.maxObjects).toBe(SPEC_LIMITS.maxObjects);
   });
 
-  it("rejects counts above the declared limits", () => {
+  it("raises declared limits that lie below actual counts", () => {
+    // Declared limits are a promise: under-declared budgets are raised to
+    // the real usage with a repair reason (zero budgets are valid).
     const spec = verifiedSimulationSpec();
     spec.limits.maxObjects = 1; // only 1 object allowed, we ship 2
     const result = validateDemoSpec(toJson(spec));
-    expect(result.status).toBe("rejected");
-    expect(result.reasons).toContain("count_exceeded:objects");
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:maxObjects");
+    expect(result.spec!.limits.maxObjects).toBeGreaterThanOrEqual(2);
   });
 
   it("repairs excessive particles by clamping to the desktop cap", () => {

@@ -186,7 +186,7 @@ const MUTATIONS: Mutation[] = [
       };
       s.limits.maxObjects = 1;
     },
-    expectedReasonPrefixes: ["count_exceeded"],
+    expectedReasonPrefixes: ["repaired:maxObjects"],
   },
   {
     name: "trust.engineId disagrees with simulation.engineId",

@@ -126,7 +126,7 @@ describe("RED-TEAM: count exhaustion", () => {
     expect(outcome.reasons).toContain("count_exceeded:group_depth");
   });
 
-  it("rejects declared limits that lie about actual counts", () => {
+  it("raises declared limits that lie about actual counts (repair, not reject)", () => {
     const spec = baseSpec();
     spec.scene3d = {
       objects: Array.from({ length: 10 }, (_, i) => ({ id: `n${i}`, kind: "sphere" as const })),
@@ -134,9 +134,13 @@ describe("RED-TEAM: count exhaustion", () => {
       animations: [],
     };
     spec.limits.maxObjects = 1; // declares 1, actually 10
+    // The showcase base spec's controls target the replaced scene3d's
+    // animations; clear them so only the limit mismatch is exercised.
+    spec.controls = [];
     const outcome = validateDemoSpec(spec);
-    expect(outcome.status).toBe("rejected");
-    expect(outcome.reasons).toContain("count_exceeded:objects");
+    expect(outcome.status).toBe("repaired");
+    expect(outcome.reasons).toContain("repaired:maxObjects");
+    expect(outcome.spec!.limits.maxObjects).toBeGreaterThanOrEqual(10);
   });
 });
 
