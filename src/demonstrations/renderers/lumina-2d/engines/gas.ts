@@ -57,7 +57,7 @@ export function createGas(): SimulationModule {
   let box = { x: 0, y: 0, w: 0, h: 0 };
   let particles: Particle[] = [];
   let rng: StatefulRng = makeStatefulRng(1);
-  let stir = { x: 0, y: 0, down: false };
+  const stir = { x: 0, y: 0, down: false };
 
   function layout() {
     const pad = Math.min(W, H) * 0.06;

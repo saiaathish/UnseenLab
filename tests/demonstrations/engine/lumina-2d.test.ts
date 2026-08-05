@@ -93,7 +93,7 @@ function fireFrame(now: number) {
 }
 
 class FakeResizeObserver {
-  constructor(_cb: () => void) {}
+  constructor() {}
   observe() {}
   unobserve() {}
   disconnect() {}

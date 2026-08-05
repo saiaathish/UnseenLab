@@ -116,7 +116,6 @@ class FakeCollection {
     let sortSpec: AnyRecord = {};
     let skipCount = 0;
     let limitCount = Infinity;
-    const self = this;
     return {
       sort(spec: AnyRecord) {
         sortSpec = spec;
@@ -130,8 +129,8 @@ class FakeCollection {
         limitCount = count;
         return this;
       },
-      async toArray(): Promise<AnyRecord[]> {
-        const docs = [...self.rows.values()].filter((row) => matches(row, filter));
+      toArray: async (): Promise<AnyRecord[]> => {
+        const docs = [...this.rows.values()].filter((row) => matches(row, filter));
         for (const [key, dir] of Object.entries(sortSpec)) {
           docs.sort((a, b) => {
             const av = a[key] as string;

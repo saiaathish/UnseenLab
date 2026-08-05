@@ -123,7 +123,8 @@ export function createPendulum(): SimulationModule {
         g.strokeStyle = "rgba(34,211,238,0.35)";
         g.beginPath();
         for (let i = 0; i < trail.length; i += 2) {
-          i === 0 ? g.moveTo(trail[i], trail[i + 1]) : g.lineTo(trail[i], trail[i + 1]);
+          if (i === 0) g.moveTo(trail[i], trail[i + 1]);
+          else g.lineTo(trail[i], trail[i + 1]);
         }
         g.stroke();
       }

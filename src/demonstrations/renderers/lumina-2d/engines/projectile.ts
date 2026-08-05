@@ -199,7 +199,8 @@ export function createProjectile(): SimulationModule {
         const t = (i / 40) * T;
         const px = sx(vx0 * t);
         const py = sy(vy0 * t - 0.5 * params.gravity * t * t);
-        i === 0 ? g.moveTo(px, py) : g.lineTo(px, py);
+        if (i === 0) g.moveTo(px, py);
+        else g.lineTo(px, py);
       }
       g.stroke();
       g.setLineDash([]);
@@ -210,7 +211,8 @@ export function createProjectile(): SimulationModule {
         g.lineWidth = 2.4;
         g.beginPath();
         for (let i = 0; i < path.length; i += 2) {
-          i === 0 ? g.moveTo(sx(path[i]), sy(path[i + 1])) : g.lineTo(sx(path[i]), sy(path[i + 1]));
+          if (i === 0) g.moveTo(sx(path[i]), sy(path[i + 1]));
+          else g.lineTo(sx(path[i]), sy(path[i + 1]));
         }
         g.stroke();
       }

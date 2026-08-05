@@ -162,7 +162,7 @@ export function createCircuit(): SimulationModule {
       const nDots = Math.max(4, Math.floor(perim / gap));
       const flow = (simTime * 60 * dir) % perim;
       for (let d = 0; d < nDots; d++) {
-        let s = (((flow % perim) + perim) % perim + d * gap) % perim;
+        const s = (((flow % perim) + perim) % perim + d * gap) % perim;
         const wTop = x1 - x0;
         const hR = y1 - y0;
         let px: number;
@@ -201,7 +201,8 @@ export function createCircuit(): SimulationModule {
           for (let i = 0; i < n; i++) {
             const px = x0 + (i / (SCOPE_MAX - 1)) * (x1 - x0);
             const py = oy + oh - (scope[i * 2] / params.voltage) * oh * 0.92 - oh * 0.04;
-            i === 0 ? g.moveTo(px, py) : g.lineTo(px, py);
+            if (i === 0) g.moveTo(px, py);
+            else g.lineTo(px, py);
           }
           g.stroke();
           g.strokeStyle = "#fbbf24";
@@ -209,7 +210,8 @@ export function createCircuit(): SimulationModule {
           for (let i = 0; i < n; i++) {
             const px = x0 + (i / (SCOPE_MAX - 1)) * (x1 - x0);
             const py = oy + oh * 0.5 - (scope[i * 2 + 1] / (Imax + 1e-12)) * oh * 0.42;
-            i === 0 ? g.moveTo(px, py) : g.lineTo(px, py);
+            if (i === 0) g.moveTo(px, py);
+            else g.lineTo(px, py);
           }
           g.stroke();
         }

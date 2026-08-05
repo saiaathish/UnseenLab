@@ -216,12 +216,12 @@ export class SimRunner {
   /** Swap the active scene module; disposes the previous one. Throws on an
    * unknown engine id (never silently swaps to a different engine). */
   setScene(spec: SceneSpec) {
-    const module = createModule(spec.engineId);
-    if (!module) {
+    const nextModule = createModule(spec.engineId);
+    if (!nextModule) {
       throw new Error(`SimRunner: unknown engine id "${spec.engineId}"`);
     }
     this.module?.dispose();
-    this.module = module;
+    this.module = nextModule;
     this.ctx.time = 0;
     this.readoutAcc = 0;
     this.module.init(this.ctx);

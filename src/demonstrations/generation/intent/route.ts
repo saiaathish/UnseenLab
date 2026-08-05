@@ -142,7 +142,7 @@ const TIMELINE_DOMAINS: Record<TimelineTopic, string> = {
   immune_response: "biology",
 };
 
-function buildIntentSpec(query: string, scores: ScoreEntry[], prefs: LearnerPreferences): IntentSpec {
+function buildIntentSpec(query: string, scores: ScoreEntry[]): IntentSpec {
   const best = scores[0];
   const engineIds = scores
     .filter((s) => s.kind === "engine")
@@ -254,7 +254,7 @@ export function interpret(
     return { status: "unsupported", reason: UNSUPPORTED_NOTICE };
   }
 
-  return buildIntentSpec(req.query, route.scores, req.prefs);
+  return buildIntentSpec(req.query, route.scores);
 }
 
 /** Convenience: the trust level promised by an intent. */
