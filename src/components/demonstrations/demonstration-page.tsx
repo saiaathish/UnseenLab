@@ -52,13 +52,25 @@ export function DemonstrationPage({ demoId }: { demoId: string }) {
 
   useEffect(() => {
     if (boot !== "loading") return;
-    // A successful load emits through the store, so the subscription below
-    // updates the session; only the failure path needs a state transition.
-    const loaded = demoStore.loadFromDevice(demoId);
-    if (!loaded) {
-      const timer = window.setTimeout(() => setBoot("missing"), 0);
-      return () => window.clearTimeout(timer);
-    }
+    let cancelled = false;
+    (async () => {
+      // A successful load emits through the store, so the subscription below
+      // updates the session; only the failure path needs a state transition.
+      const loaded = demoStore.loadFromDevice(demoId);
+      if (loaded) return;
+      // Second browser / fresh device: a signed-in learner's account copy is
+      // the fallback (GET /api/demonstrations/<id>, owner-scoped server-side).
+      // Guests have no account — the 401 restores nothing and the page falls
+      // through to "missing".
+      const restored = await demoStore.loadFromCloud(demoId);
+      if (cancelled) return;
+      if (!restored) {
+        window.setTimeout(() => setBoot("missing"), 0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [boot, demoId]);
 
   // Derived: a device load that succeeded never sets boot itself.

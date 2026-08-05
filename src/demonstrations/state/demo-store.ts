@@ -111,11 +111,14 @@ class DemoStore {
   saveToDevice(): boolean {
     if (!this.session) return false;
     try {
+      // Flag BEFORE serializing: the persisted blob must carry the saved
+      // state, or a reload would restore trials but honestly report "Not
+      // saved" (Gate 4 found this in a real browser).
+      this.markSavedToDevice();
       localStorage.setItem(
         `${STORAGE_PREFIX}${this.session.spec.id}`,
         JSON.stringify(this.session)
       );
-      this.markSavedToDevice();
       return true;
     } catch {
       return false;
@@ -176,6 +179,44 @@ class DemoStore {
     }
     if (res.status === 401) return { ok: false, error: "unauthorized" };
     return { ok: false, error: "save_failed" };
+  }
+
+  /**
+   * Restore a demonstration the signed-in learner saved to their account
+   * (second browser / fresh device resume). The stored row is owner-scoped
+   * server-side; a 401 or 404 restores nothing. The cloud row stores the
+   * validated spec and its source — the trial log stays device-local, so the
+   * restored session starts with an honest empty trial log and
+   * savedToCloud: true.
+   */
+  async loadFromCloud(demoId: string): Promise<DemoSession | null> {
+    try {
+      const res = await fetch(`/api/demonstrations/${encodeURIComponent(demoId)}`, {
+        headers: { "content-type": "application/json" },
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as {
+        data?: { demonstration?: { spec?: unknown; source?: string } | null };
+      };
+      const row = body?.data?.demonstration;
+      const spec = row?.spec as DemoSpecV1 | undefined;
+      if (!row || !spec?.schemaVersion) return null;
+      this.session = {
+        spec,
+        // The cloud row records the provenance source; map it to the UI's
+        // DemoSource (a model_generated_spec or curated spec is "model";
+        // anything else is the offline catalog).
+        source: row.source === "model_generated_spec" ? "model" : "offline",
+        generatedAt: spec.provenance.generatedAt,
+        savedToDevice: false,
+        savedToCloud: true,
+        trials: [],
+      };
+      this.emit();
+      return this.session;
+    } catch {
+      return null;
+    }
   }
 }
 
