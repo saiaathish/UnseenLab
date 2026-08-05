@@ -38,3 +38,11 @@ flagged experience (`NEXT_PUBLIC_GENERATIVE_DEMOS_ENABLED=1`) on the preview.
 Note per probe: outcome, trust badge seen, whether prediction gated controls,
 whether the accessible equivalent was reachable, any confusion. Do NOT
 fabricate: record only what the participant actually did and said.
+
+## Session→revision rule (judge's Gate 5/6)
+
+After the session, implement EXACTLY ONE revision drawn from what the
+participant actually did or said (record it first in
+`validation-pack/revision-log.md` with the verbatim quote). No
+pre-emptive changes before the session. The 3-minute generative demo
+script is at `docs/demo-script-generative.md`.
