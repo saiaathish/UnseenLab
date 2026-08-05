@@ -7,8 +7,11 @@ Demonstration Engine. Recorded at Phase 0 of
 ## Source
 
 - **Repository**: `/Users/saiaathishkarthik/Desktop/UnseenLab/dstl/stem-main`
-  (local copy, kept read-only during extraction; not published inside
-  UnseenLab — `dstl/` is git-ignored).
+  (local copy, kept read-only during extraction; not committed inside
+  UnseenLab — `git status` shows `dstl/` as **untracked**).
+  Correction (2026-08-04): `dstl/` is **not** git-ignored — the repo-root
+  `.gitignore` has no entry for it. Until `dstl/` is added to `.gitignore`
+  (or removed), it remains a dirty-untracked risk of accidental commit.
 - **Upstream context**: Lumina, a STEMist Hacks IV entry built by the UnseenLab
   user ("saiaathish") and one collaborator.
 
@@ -19,7 +22,7 @@ Demonstration Engine. Recorded at Phase 0 of
 | User's own contributions | Authorized for reuse by the user's explicit request |
 | Collaborator contributions | `UNCLEAR` — no written permission on file |
 | Repository license | **None found** (no LICENSE/COPYING in `dstl/stem-main` or headers) |
-| Third-party assets (fonts, images, screenshots) | Not inspected for clearance; **none reused** |
+| Third-party assets (fonts, images, screenshots) | Inspected (2026-08-04): Google Fonts Inter/JetBrains Mono/Sora are CDN-only (`index.html`, no local files); `public/lumina.svg`, `lumina-thumbnail.*`, and `devpost-gallery/*.jpg` carry no license or header. All carry a **REJECT-no-provenance** verdict; **none reused**. |
 
 Consequence (per the provenance gate): **no direct copying of Lumina source**.
 The engine *concepts* (SimModule contract shape, seeded PRNG, parameter-bound
