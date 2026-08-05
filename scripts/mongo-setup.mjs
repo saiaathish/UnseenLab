@@ -36,7 +36,12 @@ if (!uri || !uri.trim()) {
 
 const dbName = process.env.MONGODB_DB?.trim() || "unseenlab";
 
-const COLLECTIONS = ["profiles", "learner_preferences", "learning_sessions"];
+const COLLECTIONS = [
+  "profiles",
+  "learner_preferences",
+  "learning_sessions",
+  "generated_demonstrations",
+];
 
 /**
  * $jsonSchema validators, one per collection. "required" lists only the
@@ -116,6 +121,55 @@ const VALIDATORS = {
       },
     },
   },
+  generated_demonstrations: {
+    $jsonSchema: {
+      bsonType: "object",
+      additionalProperties: true,
+      required: [
+        "demonstrationId",
+        "firebaseUid",
+        "title",
+        "normalizedConcept",
+        "trustLevel",
+        "rendererKind",
+        "schemaVersion",
+        "spec",
+        "revision",
+        "source",
+        "createdAt",
+        "updatedAt",
+      ],
+      properties: {
+        demonstrationId: { bsonType: "string" },
+        firebaseUid: { bsonType: "string" },
+        title: { bsonType: "string" },
+        normalizedConcept: { bsonType: "string" },
+        trustLevel: {
+          enum: [
+            "verified_simulation",
+            "conceptual_demonstration",
+            "explanatory_animation",
+          ],
+        },
+        rendererKind: { enum: ["lumina_2d", "primitive_3d", "hybrid"] },
+        schemaVersion: { bsonType: "int", minimum: 1 },
+        spec: { bsonType: "object" },
+        revision: { bsonType: "int", minimum: 0 },
+        source: {
+          enum: [
+            "curated_engine",
+            "template_composition",
+            "model_generated_spec",
+          ],
+        },
+        createdAt: { bsonType: "string" },
+        updatedAt: { bsonType: "string" },
+        // OPTIONAL on purpose (mirrors learning_sessions): pre-existing docs
+        // written before idempotent replays landed may lack this field.
+        lastClientMutationId: { bsonType: ["string", "null"] },
+      },
+    },
+  },
 };
 
 const client = new MongoClient(uri.trim());
@@ -161,6 +215,16 @@ try {
   await sessions.createIndex({ user_id: 1 });
   await sessions.createIndex({ user_id: 1, lab_slug: 1, status: 1 });
   await sessions.createIndex({ user_id: 1, updated_at: -1 });
+
+  // Generated demonstrations: unique (firebaseUid, demonstrationId) is the
+  // upsert key, and the compound owner+updatedAt shape serves the dashboard
+  // list query (sorted { firebaseUid: 1, updatedAt: -1 }).
+  const demonstrations = db.collection("generated_demonstrations");
+  await demonstrations.createIndex(
+    { firebaseUid: 1, demonstrationId: 1 },
+    { unique: true }
+  );
+  await demonstrations.createIndex({ firebaseUid: 1, updatedAt: -1 });
 
   const indexes = await Promise.all(
     COLLECTIONS.map(async (name) => ({

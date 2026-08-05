@@ -13,6 +13,7 @@ export const COLLECTIONS = {
   profiles: "profiles",
   learnerPreferences: "learner_preferences",
   learningSessions: "learning_sessions",
+  generatedDemonstrations: "generated_demonstrations",
 } as const;
 
 const DB_NAME = process.env.MONGODB_DB?.trim() || "unseenlab";
