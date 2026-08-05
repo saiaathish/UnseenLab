@@ -185,22 +185,39 @@ generation id and seed.
 
 ## 4. What could NOT be verified — UNVERIFIED
 
+**Re-verified 2026-08-05 (hostile-judge remediation, deployed preview + live backends):**
+
+- ✅ **Live hosted model**: 41 gold prompts against the REAL deployed endpoint — 29/29
+  useful hosted (100%), 17 clean + 12 repaired, 0 fallbacks, 12/12 category golds,
+  p50 10.9 s / p95 17.7 s. Root cause of earlier 48.3%: thinking-disabled model emits
+  `scene3d`/`timeline` null + non-numeric `size`; validator now repairs them
+  (see `docs/demo-benchmark.md`).
+- ✅ **Live Firebase authentication**: session cookie minted via Firebase Admin SDK and
+  verified through the deployed `POST /api/auth/me` (learner_a identity confirmed 200).
+- ✅ **Live MongoDB + unique index + optimistic concurrency**: PUT 200 (revision 1),
+  idempotent replay (same `mutation_id` → same revision), two-user isolation
+  (learner_b GET → null; PUT creates learner_b's own row), GET-by-id owner-scoped —
+  run against the real Atlas cluster from the allowlisted path.
+- ✅ **localStorage persistence end-to-end**: real browser on the deployed preview —
+  guest save → reload → "Saved on this device" + trial log restored (after fixing the
+  serialization-order flag bug, commit d8b2db0).
+- ✅ **Account restore (second browser)**: `loadFromCloud` restored the demo with
+  "Saved to your account" from a fresh device against live backends.
+- ⚠️ **Preview account persistence**: blocked until the Atlas Network Access list adds
+  `0.0.0.0/0` (Vercel Hobby has no static egress; only the local IP is allowlisted).
+  Code paths verified live locally; env step documented in `docs/firebase-mongodb-setup.md`.
+
+Still UNVERIFIED:
+
 - **Browser-level WebGL rendering** (Three.js `renderer.ts`): jsdom has no WebGL; scene graphs were
   verified, actual GPU rasterization, context-loss handling and sprite label rendering are
   **UNVERIFIED**.
-- **Live Firebase authentication** (`verifySessionUser`): all route tests mock it; real session
-  cookie verification against Firebase is **UNVERIFIED**.
-- **Live MongoDB**: the repository is tested against an in-memory fake with honest driver semantics;
-  the real unique index `{ firebaseUid, demonstrationId }`, atomic `findOneAndUpdate` behavior and
-  replication are **UNVERIFIED**.
-- **Live hosted model**: every model-path test stubs `fetch`. Real provider behavior, token budgets,
-  the repair-retry loop against a live model, and **model latency** are **UNVERIFIED-offline**.
-- **localStorage persistence end-to-end** in a real browser (guest save/load across reloads):
-  unit-tested only at the store boundary — **UNVERIFIED** in-browser.
 - **Screen-reader behavior** of the demonstration shell (live regions, sprite labels): static code
   review only — **UNVERIFIED**.
 - **Multi-instance rate limiting** (`generate/route.ts`): per-instance map — global limits
   **UNVERIFIED** (see INFO-5).
+- **Participant session + 3-minute demo**: user-executed (protocol
+  `validation-pack/participant-test-extension.md`; script `docs/demo-script-generative.md`).
 
 ---
 
