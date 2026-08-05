@@ -24,47 +24,9 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(): Promise<NextResponse> {
   const circuit = generationCircuitState();
-  // TEMP diagnostic (Gate 4): report Mongo presence + reachability so the
-  // deployed 503 (DemonstrationsDbUnavailableError) can be attributed to a
-  // missing env var vs an Atlas network/allowlist failure. No secrets are
-  // echoed — presence booleans and error names only.
-  const hasMongoUri =
-    typeof process.env.MONGODB_URI === "string" &&
-    process.env.MONGODB_URI.trim().length > 0;
-  let mongo: {
-    hasUri: boolean;
-    configured: boolean;
-    reachable: boolean;
-    error?: string;
-    detail?: string;
-  } = { hasUri: hasMongoUri, configured: false, reachable: false };
-  if (hasMongoUri) {
-    // Connect directly (bypassing getPlatformDb's error swallowing) so the
-    // probe can name the failure: parse error vs server-selection timeout
-    // (allowlist/DNS) vs auth.
-    try {
-      const { MongoClient } = await import("mongodb");
-      const client = new MongoClient(process.env.MONGODB_URI!.trim(), {
-        serverSelectionTimeoutMS: 6_000,
-        connectTimeoutMS: 6_000,
-      });
-      try {
-        await client.connect();
-        mongo.configured = true;
-        await client.db("admin").command({ ping: 1 });
-        mongo.reachable = true;
-      } finally {
-        await client.close().catch(() => undefined);
-      }
-    } catch (error) {
-      mongo.error =
-        error instanceof Error ? error.name : "unknown";
-      mongo.detail = error instanceof Error ? error.message.slice(0, 220) : undefined;
-    }
-  }
   const apiKey = process.env.LLM_API_KEY;
   if (!apiKey) {
-    return NextResponse.json({ ok: false, provider: "offline", circuit, mongo });
+    return NextResponse.json({ ok: false, provider: "offline", circuit });
   }
 
   const baseUrl = process.env.LLM_API_BASE_URL ?? DEFAULT_LLM_CONFIG.baseUrl;
@@ -76,11 +38,11 @@ export async function GET(): Promise<NextResponse> {
       signal: controller.signal,
     });
     if (response.status === 429 || response.status >= 500) {
-      return NextResponse.json({ ok: false, provider: "unavailable", circuit, mongo });
+      return NextResponse.json({ ok: false, provider: "unavailable", circuit });
     }
-    return NextResponse.json({ ok: true, provider: "ok", circuit, mongo });
+    return NextResponse.json({ ok: true, provider: "ok", circuit });
   } catch {
-    return NextResponse.json({ ok: false, provider: "unavailable", circuit, mongo });
+    return NextResponse.json({ ok: false, provider: "unavailable", circuit });
   } finally {
     clearTimeout(timer);
   }
