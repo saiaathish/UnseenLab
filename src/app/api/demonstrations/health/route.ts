@@ -28,10 +28,15 @@ export async function GET(): Promise<NextResponse> {
   // deployed 503 (DemonstrationsDbUnavailableError) can be attributed to a
   // missing env var vs an Atlas network/allowlist failure. No secrets are
   // echoed — presence booleans and error names only.
-  let mongo: { configured: boolean; reachable: boolean; error?: string } = {
-    configured: false,
-    reachable: false,
-  };
+  const hasMongoUri =
+    typeof process.env.MONGODB_URI === "string" &&
+    process.env.MONGODB_URI.trim().length > 0;
+  let mongo: {
+    hasUri: boolean;
+    configured: boolean;
+    reachable: boolean;
+    error?: string;
+  } = { hasUri: hasMongoUri, configured: false, reachable: false };
   try {
     const { getPlatformDb } = await import("@/lib/mongo/client");
     const db = await getPlatformDb();
