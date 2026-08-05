@@ -24,9 +24,29 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(): Promise<NextResponse> {
   const circuit = generationCircuitState();
+  // TEMP diagnostic (Gate 4): report Mongo presence + reachability so the
+  // deployed 503 (DemonstrationsDbUnavailableError) can be attributed to a
+  // missing env var vs an Atlas network/allowlist failure. No secrets are
+  // echoed — presence booleans and error names only.
+  let mongo: { configured: boolean; reachable: boolean; error?: string } = {
+    configured: false,
+    reachable: false,
+  };
+  try {
+    const { getPlatformDb } = await import("@/lib/mongo/client");
+    const db = await getPlatformDb();
+    mongo.configured = db !== null;
+    if (db) {
+      await db.command({ ping: 1 });
+      mongo.reachable = true;
+    }
+  } catch (error) {
+    mongo.error =
+      error instanceof Error ? error.name : "unknown";
+  }
   const apiKey = process.env.LLM_API_KEY;
   if (!apiKey) {
-    return NextResponse.json({ ok: false, provider: "offline", circuit });
+    return NextResponse.json({ ok: false, provider: "offline", circuit, mongo });
   }
 
   const baseUrl = process.env.LLM_API_BASE_URL ?? DEFAULT_LLM_CONFIG.baseUrl;
@@ -38,11 +58,11 @@ export async function GET(): Promise<NextResponse> {
       signal: controller.signal,
     });
     if (response.status === 429 || response.status >= 500) {
-      return NextResponse.json({ ok: false, provider: "unavailable", circuit });
+      return NextResponse.json({ ok: false, provider: "unavailable", circuit, mongo });
     }
-    return NextResponse.json({ ok: true, provider: "ok", circuit });
+    return NextResponse.json({ ok: true, provider: "ok", circuit, mongo });
   } catch {
-    return NextResponse.json({ ok: false, provider: "unavailable", circuit });
+    return NextResponse.json({ ok: false, provider: "unavailable", circuit, mongo });
   } finally {
     clearTimeout(timer);
   }
