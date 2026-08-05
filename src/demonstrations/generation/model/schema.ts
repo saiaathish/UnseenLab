@@ -103,7 +103,9 @@ const engineParameterSchema = z
     step: positiveStep,
     // value is REPAIRED into [min, max] by the sanitizer — accept any finite.
     value: wideScalar,
-    unit: z.string().min(1).max(MAX_UNIT_CHARS).optional(),
+    // Empty units are repaired (dropped) by the sanitizer — accept any length
+    // here so the repair runs instead of a first-pass rejection.
+    unit: z.string().max(MAX_UNIT_CHARS).optional(),
   })
   .strict();
 
@@ -286,9 +288,9 @@ const limitsSchema = z
     // Deliberately wide: the repair-aware sanitizer clamps over-declared
     // budgets (maxObjects → 80, maxParticles → 1500) with repair reasons.
     // Rejecting here would burn a repair retry on values the sanitizer can
-    // fix.
-    maxObjects: z.number().finite().int().min(1).max(1_000_000),
-    maxParticles: z.number().finite().int().min(1).max(1_000_000),
+    // fix — models sometimes emit absurd budgets (1e6, 1e9).
+    maxObjects: z.number().finite().min(1).max(1_000_000_000),
+    maxParticles: z.number().finite().min(1).max(1_000_000_000),
     maxTimelineEvents: z
       .number()
       .finite()
