@@ -185,6 +185,10 @@ const MUTATIONS: Mutation[] = [
         animations: [],
       };
       s.limits.maxObjects = 1;
+      // Clear animation-targeting controls: the replaced scene3d would
+      // otherwise orphan them (invalid_control_target) and mask the
+      // limit-honesty behavior under test.
+      s.controls = [];
     },
     expectedReasonPrefixes: ["repaired:maxObjects"],
   },
