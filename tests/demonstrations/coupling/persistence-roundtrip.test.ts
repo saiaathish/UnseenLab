@@ -41,7 +41,11 @@ import {
   buildWaveInterferenceShowcase,
 } from "@/demonstrations/showcases";
 import { createModule } from "@/demonstrations/renderers/lumina-2d/registry";
-import type { SimulationModule } from "@/demonstrations/renderers/lumina-2d/types";
+import type {
+  EngineVisualState,
+  SimPointer,
+  SimulationModule,
+} from "@/demonstrations/renderers/lumina-2d/types";
 import { demoStore } from "@/demonstrations/state/demo-store";
 
 /** The showcase seed is fixed (20260804) so the engine is deterministic. */
@@ -64,11 +68,19 @@ const MANIPULATED: Record<string, Record<string, number>> = {
   waves: { frequency: 0.8, wavelength: 20, separation: 60 },
 };
 
-function makeModule(engineId: string): SimulationModule {
+function makeModule(
+  engineId: string,
+): SimulationModule & {
+  getVisualState(): EngineVisualState;
+  pointer(p: SimPointer): void;
+} {
   const m = createModule(engineId);
   if (!m) throw new Error(`engine ${engineId} not registered`);
   m.init({ width: 800, height: 600, dpr: 1, time: 0 });
-  return m;
+  return m as SimulationModule & {
+    getVisualState(): EngineVisualState;
+    pointer(p: SimPointer): void;
+  };
 }
 
 function visualState(m: SimulationModule) {
