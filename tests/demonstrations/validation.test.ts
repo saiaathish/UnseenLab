@@ -624,6 +624,17 @@ describe("validateDemoSpec — count limits", () => {
     const dust = result.spec!.scene3d!.objects.find((o) => o.id === "dust");
     expect(dust?.particleCount).toBe(MOBILE_MAX_PARTICLES);
   });
+
+  it("repairs an over-declared maxParticles budget to the desktop cap", () => {
+    const spec = verifiedSimulationSpec();
+    spec.limits.maxParticles = 2000;
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:maxParticles");
+    expect(result.spec!.limits.maxParticles).toBe(
+      SPEC_LIMITS.maxParticlesDesktop
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

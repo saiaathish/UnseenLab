@@ -72,6 +72,18 @@ function forbiddenProvenanceSpec(): DemoSpecV1 {
   };
 }
 
+/**
+ * A model output that smuggles correctIndex must be accepted with a repair
+ * label (the field is stripped — model specs are never graded), NOT rejected
+ * into a repair round-trip.
+ */
+function modelSpecWithCorrectIndex(): DemoSpecV1 {
+  return {
+    ...MODEL_SPEC,
+    prediction: { ...MODEL_SPEC.prediction, correctIndex: 0 },
+  };
+}
+
 function expectData(result: GenerateDemoResult): GenerationData {
   if (!("data" in result)) {
     throw new Error("expected a data envelope, got fallback");
@@ -151,6 +163,38 @@ describe("generateDemo — model path", () => {
     expect(data.spec.trust.level).toBe("verified_simulation");
     expect(data.spec.trust.engineId).toBe("orbits");
     expect(data.spec.provenance.source).toBe("model_generated_spec");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("strips a smuggled correctIndex with a repair label (ONE call, no retry)", async () => {
+    // Model specs are never graded: correctIndex is stripped at the first
+    // pass and the spec is accepted as repaired — not rejected into a
+    // second model call.
+    fetchMock.mockResolvedValue(
+      chatCompletion(JSON.stringify(modelSpecWithCorrectIndex()))
+    );
+
+    const result = await generateDemo(ORBITS_QUERY);
+    const data = expectSpecData(result);
+
+    expect(data.outcome).toBe("spec");
+    expect(data.source).toBe("model");
+    expect(data.reason).toContain("repaired:model_graded_prediction");
+    expect(data.spec.prediction.correctIndex).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("repairs an over-declared maxParticles budget instead of rejecting", async () => {
+    const spec = structuredClone(MODEL_SPEC);
+    spec.limits.maxParticles = 2000;
+    fetchMock.mockResolvedValue(chatCompletion(JSON.stringify(spec)));
+
+    const result = await generateDemo(ORBITS_QUERY);
+    const data = expectSpecData(result);
+
+    expect(data.outcome).toBe("spec");
+    expect(data.source).toBe("model");
+    expect(data.reason).toContain("repaired:maxParticles");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

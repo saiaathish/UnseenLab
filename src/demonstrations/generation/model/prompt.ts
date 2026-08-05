@@ -55,12 +55,12 @@ const SCHEMA_SECTION = [
   "- scene3d (optional): { objects: 0-80 objects { id: 1-64; kind: a primitive kind; label?; position? { x, y, z }; size?; color? 1-32 chars; trailPoints? integer; particleCount? integer; children? 1-80 object ids }; relationships: 0-100 { id; type: a relationship operator; from; to; label? }; animations: 0-100 { id; target; operator: an animation operator; speed?; delayMs?; axis? \"x\" | \"y\" | \"z\"; amplitude? } }.",
   "- timeline (optional): { events: 1-30 objects { title: 1-120 chars; description: 1-800 chars; startMs >= 0; durationMs >= 0 } }.",
   "- controls: 0-6 objects { id; type: a control type; label: 1-120 chars; target: { kind: \"parameter\", ref } | { kind: \"animation\", ref } | { kind: \"scene\", ref: \"speed\" | \"paused\" | \"reset\" | \"play_pause\" }; min?; max?; step? > 0; options? 1-8 strings; defaultValue? string or number }. A parameter target.ref MUST name a simulation parameter key; an animation target.ref MUST name a scene3d animation id.",
-  "- prediction: { prompt: 1-800 chars; options: 1-4 strings of 1-240 chars; correctIndex (optional): integer 0..3, strictly less than options.length; ONLY for verified_simulation }.",
+  "- prediction: { prompt: 1-800 chars; options: 1-4 strings of 1-240 chars }. NEVER include a correctIndex field — model-generated demonstrations are never graded; only curated engine code may assert prediction truth. Omitting it is mandatory.",
   "- observationPrompts: 0-6 objects { prompt: 1-800 chars }.",
   "- representations: 0-5 objects { id; kind: \"stage_2d\" | \"stage_3d\" | \"diagram\" | \"graph\" | \"table\" | \"timeline\" | \"text_sequence\" | \"causal_map\"; label: 1-120 chars }.",
   "- adaptationContext: { allowed: boolean; oneVariableMode: boolean }.",
   "- provenance: { source: MUST be \"model_generated_spec\"; templateIds: 0-10 strings; generatedAt: 1-64 chars (ISO timestamp); model (optional): 1-64 chars }.",
-  "- limits: { maxObjects: integer 1..80; maxParticles: integer 1..1500; maxTimelineEvents: integer 1..30; maxControls: integer 1..6 } — these DECLARE the caps your spec actually uses; real counts must never exceed them.",
+  "- limits: { maxObjects: integer 1..80; maxParticles: integer 1..1500; maxTimelineEvents: integer 1..30; maxControls: integer 1..6 } — these DECLARE the caps your spec actually uses; real counts must never exceed them (mobile is capped automatically at render).",
 ].join("\n");
 
 const SAFETY_SECTION = [
@@ -94,7 +94,8 @@ function trustRulesSection(engines: EngineCapability[]): string[] {
     return [
       "TRUST LEVEL — the learner's request routes to a verified engine, so your spec MUST be:",
       `- Level 1 "verified_simulation" using ONE engine from the VERIFIED ENGINES list.`,
-      `- trust.engineId and simulation.engineId must be the same engine; parameters and readouts only from that engine's catalog. correctIndex is allowed (it must point at the physically correct option).`,
+      `- trust.engineId and simulation.engineId must be the same engine; parameters and readouts only from that engine's catalog.`,
+      `- prediction NEVER includes correctIndex (only curated engine code grades predictions; your spec must omit it).`,
       "- Do NOT use Level 2 or Level 3.",
     ];
   }

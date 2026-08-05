@@ -198,10 +198,11 @@ describe("RED-TEAM: trust cannot be upgraded through the model path", () => {
     expect(result.data.spec.trust.level).toBe("explanatory_animation");
   });
 
-  it("FIXED (P1): a model spec carrying correctIndex is rejected by the science policy", async () => {
+  it("FIXED (P1): a model spec carrying correctIndex is stripped and never graded", async () => {
     // correctIndex is curated-engine-only; model specs are never graded.
-    // The science policy rejects it inside the model round, so the pipeline
-    // retries once and then falls back offline (schema_rejected).
+    // The first-pass gate strips it (repair label) so the model output is
+    // accepted as repaired without a wasted second call; the science policy
+    // remains the backstop for any direct path that bypasses the gate.
     const r = generateOfflineDemo("Show why planets stay in orbit.", prefs);
     if (r.status !== "spec" || !r.spec) throw new Error("no spec");
     const spec = JSON.parse(JSON.stringify(r.spec)) as {
@@ -210,18 +211,17 @@ describe("RED-TEAM: trust cannot be upgraded through the model path", () => {
     };
     spec.provenance.source = "model_generated_spec";
     spec.prediction.correctIndex = 0;
-    // Fresh Response per call: a Response body can only be read once, and the
-    // repair retry issues a second request.
-    fetchMock.mockImplementation(() =>
-      Promise.resolve(chatCompletion(JSON.stringify(spec))),
-    );
+    fetchMock.mockResolvedValue(chatCompletion(JSON.stringify(spec)));
 
     const result = await generateDemo("Show why planets stay in orbit.", prefs);
     if (!("data" in result) || result.data.outcome !== "spec") {
       throw new Error(`expected a spec envelope, got ${JSON.stringify(result)}`);
     }
-    expect(result.data.source).toBe("offline");
-    expect(result.data.reason).toBe("schema_rejected");
+    expect(result.data.source).toBe("model");
+    expect(result.data.reason).toContain("repaired:model_graded_prediction");
+    expect(result.data.spec.prediction.correctIndex).toBeUndefined();
+    // ONE model call: the strip is not a rejection, so no repair retry.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

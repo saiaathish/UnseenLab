@@ -170,6 +170,16 @@ function clampField(
   if (!Number.isFinite(value)) return null; // schema rejects; not repairable
   let min = FIELD_CLAMP_MIN[field];
   let max = FIELD_CLAMP_MAX[field];
+  if (field === "maxParticles") {
+    // Over-declared particle budgets clamp to the desktop cap (1500); mobile
+    // adaptation (500) happens at render time.
+    const clamped = clampNumber(value, 1, SPEC_LIMITS.maxParticlesDesktop);
+    if (clamped !== value) {
+      repairs.push("repaired:maxParticles");
+      return Math.round(clamped);
+    }
+    return null;
+  }
   if (field === "particleCount") {
     min = 0;
     max = Math.min(
@@ -370,12 +380,16 @@ export function sanitizeDemoSpec(raw: unknown): SanitizeOutcome {
     return { status: "rejected", reasons: ["unsafe_value:code"] };
   }
 
-  // Numeric repair pass.
+  // Numeric repair pass. An over-declared particle budget is clamped to the
+  // desktop cap (1500) — with a repair reason — and every particleCount clamps
+  // against that same enforced cap. Mobile adaptation (500) happens at render
+  // time, so the declared budget is a desktop promise. Meaning is preserved:
+  // the budget is a resource promise, not physics.
   const repairs: string[] = [];
   const declaredMaxParticles =
     typeof declaredLimits.maxParticles === "number" &&
     Number.isFinite(declaredLimits.maxParticles)
-      ? declaredLimits.maxParticles
+      ? Math.min(declaredLimits.maxParticles, SPEC_LIMITS.maxParticlesDesktop)
       : SPEC_LIMITS.maxParticlesDesktop;
   const repaired = repairTree(node, { declaredMaxParticles }, repairs);
 

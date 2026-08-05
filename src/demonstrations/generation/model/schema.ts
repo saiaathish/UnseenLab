@@ -215,13 +215,11 @@ const predictionSchema = z
       .array(z.string().min(1).max(MAX_OPTION_CHARS))
       .min(1)
       .max(SPEC_LIMITS.maxPredictionOptions),
-    correctIndex: z
-      .number()
-      .finite()
-      .int()
-      .min(0)
-      .max(SPEC_LIMITS.maxPredictionOptions - 1)
-      .optional(),
+    // NOTE: correctIndex is deliberately ABSENT here. Model-generated specs
+    // are never graded — the field is stripped in firstPassModelCheck before
+    // this schema runs, and if it ever survives to this point the strict
+    // object rejects it (unknown key). Only curated engine code may assert
+    // prediction truth.
   })
   .strict();
 
@@ -286,12 +284,10 @@ const rendererSchema = z
 const limitsSchema = z
   .object({
     maxObjects: z.number().finite().int().min(1).max(SPEC_LIMITS.maxObjects),
-    maxParticles: z
-      .number()
-      .finite()
-      .int()
-      .min(1)
-      .max(SPEC_LIMITS.maxParticlesDesktop),
+    // Deliberately wide: the repair-aware sanitizer clamps over-declared
+    // maxParticles to the mobile cap (500) with a repair reason. Rejecting
+    // here would burn a repair retry on a value the sanitizer can fix.
+    maxParticles: z.number().finite().int().min(1).max(1_000_000),
     maxTimelineEvents: z
       .number()
       .finite()
@@ -405,7 +401,7 @@ function describeIssue(issue: z.ZodIssue): string[] {
 // ---------------------------------------------------------------------------
 
 export type FirstPassResult =
-  | { ok: true; value: unknown }
+  | { ok: true; value: unknown; repairs?: string[] }
   | { ok: false; reasons: string[] };
 
 /**
@@ -433,6 +429,26 @@ export function firstPassModelCheck(raw: unknown): FirstPassResult {
     return { ok: false, reasons: ["unsafe_value:code"] };
   }
 
+  // Model-generated specs can never carry prediction truth. The model is
+  // instructed to omit correctIndex, but when it includes one anyway it is
+  // stripped here (recorded as a repair) rather than rejected — the value is
+  // meaningless for model specs and the science policy would reject it
+  // downstream regardless. The first-pass schema no longer declares the
+  // field, so a spec that survives to parsing without the strip is rejected
+  // as an unknown key.
+  let repairs: string[] = [];
+  const prediction = (raw as Record<string, unknown>)
+    .prediction as Record<string, unknown> | null | undefined;
+  if (
+    prediction !== null &&
+    prediction !== undefined &&
+    typeof prediction === "object" &&
+    "correctIndex" in prediction
+  ) {
+    delete prediction.correctIndex;
+    repairs = ["repaired:model_graded_prediction"];
+  }
+
   const result = modelOutputSchema.safeParse(raw);
   if (!result.success) {
     return {
@@ -440,5 +456,5 @@ export function firstPassModelCheck(raw: unknown): FirstPassResult {
       reasons: dedupe(result.error.issues.flatMap(describeIssue)),
     };
   }
-  return { ok: true, value: raw };
+  return { ok: true, value: raw, repairs };
 }

@@ -427,17 +427,23 @@ async function runModelRound(
     return { kind: "rejected", reasons: outcome.reasons };
   }
 
+  // First-pass repairs (e.g. stripped model correctIndex) are folded into the
+  // sanitizer's reasons so the source label and repair trail stay truthful.
+  const repairedReasons = [
+    ...new Set([...(gate.repairs ?? []), ...outcome.reasons]),
+  ];
+
   console.info("[generation] model_attempt", {
-    outcome: outcome.reasons.length > 0 ? "repaired" : "valid",
+    outcome: repairedReasons.length > 0 ? "repaired" : "valid",
     source: "model",
-    reason: outcome.reasons.length > 0 ? outcome.reasons.join(",") : undefined,
+    reason: repairedReasons.length > 0 ? repairedReasons.join(",") : undefined,
     model: config.model,
     elapsedMs: Date.now() - startedAt,
   });
   return {
     kind: "spec",
     spec: outcome.spec,
-    repairedReasons: outcome.reasons,
+    repairedReasons,
   };
 }
 
