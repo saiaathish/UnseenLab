@@ -581,12 +581,15 @@ describe("validateDemoSpec — count limits", () => {
     expect(result.reasons).toContain("count_exceeded:labels");
   });
 
-  it("rejects declared limits that exceed the hard caps", () => {
+  it("repairs declared limits that exceed the hard caps", () => {
+    // Declared budgets are resource promises, not physics: an over-declared
+    // maxObjects is clamped to the enforceable cap with a repair reason.
     const spec = verifiedSimulationSpec();
     spec.limits.maxObjects = 500;
     const result = validateDemoSpec(toJson(spec));
-    expect(result.status).toBe("rejected");
-    expect(result.reasons).toContain("range_exceeded:maxObjects");
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:maxObjects");
+    expect(result.spec!.limits.maxObjects).toBe(SPEC_LIMITS.maxObjects);
   });
 
   it("rejects counts above the declared limits", () => {

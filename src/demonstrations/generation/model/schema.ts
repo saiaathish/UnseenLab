@@ -283,10 +283,11 @@ const rendererSchema = z
 
 const limitsSchema = z
   .object({
-    maxObjects: z.number().finite().int().min(1).max(SPEC_LIMITS.maxObjects),
     // Deliberately wide: the repair-aware sanitizer clamps over-declared
-    // maxParticles to the mobile cap (500) with a repair reason. Rejecting
-    // here would burn a repair retry on a value the sanitizer can fix.
+    // budgets (maxObjects → 80, maxParticles → 1500) with repair reasons.
+    // Rejecting here would burn a repair retry on values the sanitizer can
+    // fix.
+    maxObjects: z.number().finite().int().min(1).max(1_000_000),
     maxParticles: z.number().finite().int().min(1).max(1_000_000),
     maxTimelineEvents: z
       .number()

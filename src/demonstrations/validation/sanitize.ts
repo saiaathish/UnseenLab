@@ -131,6 +131,11 @@ function repairTree(
     const value = record[key];
     let next: unknown = value;
 
+    if (key === "unit" && value === "") {
+      // Empty display unit on an engine parameter: display-only, drop it.
+      repairs.push("repaired:empty_unit");
+      continue;
+    }
     if (typeof value === "number" && isTuningBlock(record) && key === "value") {
       // Engine-parameter value: clamp into its own [min, max].
       const min = record.min as number;
@@ -176,6 +181,16 @@ function clampField(
     const clamped = clampNumber(value, 1, SPEC_LIMITS.maxParticlesDesktop);
     if (clamped !== value) {
       repairs.push("repaired:maxParticles");
+      return Math.round(clamped);
+    }
+    return null;
+  }
+  if (field === "maxObjects") {
+    // Over-declared object budgets clamp to the hard cap (80); the renderer
+    // enforces the same cap, so the promise is reduced to what is enforceable.
+    const clamped = clampNumber(value, 1, SPEC_LIMITS.maxObjects);
+    if (clamped !== value) {
+      repairs.push("repaired:maxObjects");
       return Math.round(clamped);
     }
     return null;
