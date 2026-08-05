@@ -288,9 +288,9 @@ const limitsSchema = z
     // Deliberately wide: the repair-aware sanitizer clamps over-declared
     // budgets (maxObjects → 80, maxParticles → 1500) with repair reasons.
     // Rejecting here would burn a repair retry on values the sanitizer can
-    // fix — models sometimes emit absurd budgets (1e6, 1e9).
-    maxObjects: z.number().finite().min(1).max(1_000_000_000),
-    maxParticles: z.number().finite().min(1).max(1_000_000_000),
+    // fix — models sometimes emit absurd budgets (1e6, 1e9, 1e12).
+    maxObjects: z.number().finite().min(1).max(Number.MAX_SAFE_INTEGER),
+    maxParticles: z.number().finite().min(1).max(Number.MAX_SAFE_INTEGER),
     maxTimelineEvents: z
       .number()
       .finite()
