@@ -256,6 +256,30 @@ describe("generateDemo — model path", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("retries once on empty content (reasoning consumed the budget), then falls back", async () => {
+    // A 200 with empty content means the model spent its whole token budget
+    // on reasoning; the pipeline retries once before falling back offline.
+    // Fresh Response per call: a Response body can only be read once.
+    const empty = () =>
+      JSON.stringify({ choices: [{ message: { content: "" } }] });
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(empty(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+    );
+
+    const result = await generateDemo(ORBITS_QUERY);
+    const data = expectSpecData(result);
+
+    expect(data.outcome).toBe("spec");
+    expect(data.source).toBe("offline");
+    expect(data.reason).toBe("empty_response");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("falls back offline with timeout when the provider hangs past the deadline (one transient retry)", async () => {
     vi.useFakeTimers();
     try {
@@ -268,9 +292,10 @@ describe("generateDemo — model path", () => {
       );
 
       const pending = generateDemo(ORBITS_QUERY);
-      await vi.advanceTimersByTimeAsync(16_000); // first attempt hard timeout
+      // Generation uses its own 90s-per-attempt timeout (reasoning models).
+      await vi.advanceTimersByTimeAsync(91_000); // first attempt hard timeout
       await vi.advanceTimersByTimeAsync(500); // jittered backoff
-      await vi.advanceTimersByTimeAsync(16_000); // second attempt hard timeout
+      await vi.advanceTimersByTimeAsync(91_000); // second attempt hard timeout
       const result = await pending;
       const data = expectSpecData(result);
 

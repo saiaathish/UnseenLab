@@ -97,9 +97,13 @@ export interface GenerationModelConfig {
   disableThinking?: boolean;
 }
 
+/** Generation-specific failure reasons: FallbackReason plus empty_response
+ * (a 200 whose content was consumed by reasoning). */
+type ModelRequestReason = FallbackReason | "empty_response";
+
 type ModelRequestResult =
   | { ok: true; content: string }
-  | { ok: false; reason: FallbackReason; status?: number };
+  | { ok: false; reason: ModelRequestReason; status?: number };
 
 /** HTTP statuses treated as transient provider-side failures. */
 const TRANSIENT_STATUS_CODES = new Set([429, 502, 503, 504]);
@@ -107,12 +111,30 @@ const TRANSIENT_STATUS_CODES = new Set([429, 502, 503, 504]);
 const MAX_ATTEMPTS = 2;
 /** Jittered backoff base: 300ms ± 50% => 150–450ms between attempts. */
 const RETRY_BACKOFF_BASE_MS = 300;
-/** Token budget: a full DemoSpecV1 is far larger than an adaptation answer. */
-const MAX_OUTPUT_TOKENS = 3000;
+/**
+ * Token budget: a full DemoSpecV1 is far larger than an adaptation answer,
+ * and reasoning models (deepseek-v4-flash) spend tokens on thinking before
+ * emitting the spec. 3000 tokens was consumed entirely by reasoning, yielding
+ * empty content; 12000 leaves room for the ~2-4k-token spec. Still bounded:
+ * a single generation can never exceed this budget.
+ */
+const MAX_OUTPUT_TOKENS = 12000;
+/**
+ * Generation timeout per attempt: reasoning + a full spec regularly takes
+ * 20-40s, far beyond the 15s adaptation timeout. Bounded at 90s per attempt
+ * (2 attempts max => ~180s worst case, then honest offline fallback).
+ */
+const GENERATION_TIMEOUT_MS = 90_000;
 
 function isTransientFailure(result: ModelRequestResult): boolean {
   if (result.ok) return false;
-  if (result.reason === "timeout" || result.reason === "network_error") {
+  if (
+    result.reason === "timeout" ||
+    result.reason === "network_error" ||
+    // A 200 with empty content means the model spent its whole budget on
+    // reasoning; a retry gives it a fresh chance within the same bound.
+    result.reason === "empty_response"
+  ) {
     return true;
   }
   if (result.reason === "provider_error") {
@@ -166,8 +188,10 @@ async function attemptModelOnce(
       choices?: Array<{ message?: { content?: string } }>;
     };
     const content = parsed.choices?.[0]?.message?.content ?? null;
-    if (content === null) {
-      return { ok: false, reason: "invalid_response" };
+    if (content === null || content.trim().length === 0) {
+      // A 200 with empty content: the reasoning model spent its whole token
+      // budget on thinking. Retryable once (isTransientFailure).
+      return { ok: false, reason: "empty_response" };
     }
     return { ok: true, content };
   } catch (error) {
@@ -365,7 +389,7 @@ function buildUserMessage(
 type ModelRoundResult =
   | { kind: "spec"; spec: DemoSpecV1; repairedReasons: string[] }
   | { kind: "rejected"; reasons: string[] }
-  | { kind: "transport_failure"; reason: FallbackReason };
+  | { kind: "transport_failure"; reason: ModelRequestReason };
 
 /** One full model round: request -> parse -> first pass -> full validation.
  * Logs one safe line for the attempt. */
@@ -578,7 +602,7 @@ async function runGeneration(
     apiKey,
     baseUrl: process.env.LLM_API_BASE_URL ?? DEFAULT_LLM_CONFIG.baseUrl,
     model,
-    timeoutMs: DEFAULT_LLM_CONFIG.timeoutMs,
+    timeoutMs: GENERATION_TIMEOUT_MS,
     disableThinking: process.env.LLM_DISABLE_THINKING === "1",
   };
   const normalized = normalizeQuery(query);
