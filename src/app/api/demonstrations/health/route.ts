@@ -37,17 +37,28 @@ export async function GET(): Promise<NextResponse> {
     reachable: boolean;
     error?: string;
   } = { hasUri: hasMongoUri, configured: false, reachable: false };
-  try {
-    const { getPlatformDb } = await import("@/lib/mongo/client");
-    const db = await getPlatformDb();
-    mongo.configured = db !== null;
-    if (db) {
-      await db.command({ ping: 1 });
-      mongo.reachable = true;
+  if (hasMongoUri) {
+    // Connect directly (bypassing getPlatformDb's error swallowing) so the
+    // probe can name the failure: parse error vs server-selection timeout
+    // (allowlist/DNS) vs auth.
+    try {
+      const { MongoClient } = await import("mongodb");
+      const client = new MongoClient(process.env.MONGODB_URI!.trim(), {
+        serverSelectionTimeoutMS: 6_000,
+        connectTimeoutMS: 6_000,
+      });
+      try {
+        await client.connect();
+        mongo.configured = true;
+        await client.db("admin").command({ ping: 1 });
+        mongo.reachable = true;
+      } finally {
+        await client.close().catch(() => undefined);
+      }
+    } catch (error) {
+      mongo.error =
+        error instanceof Error ? error.name : "unknown";
     }
-  } catch (error) {
-    mongo.error =
-      error instanceof Error ? error.name : "unknown";
   }
   const apiKey = process.env.LLM_API_KEY;
   if (!apiKey) {
