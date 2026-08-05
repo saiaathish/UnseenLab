@@ -344,12 +344,15 @@ const rendererSchema = z
 
 const limitsSchema = z
   .object({
-    maxObjects: z.number().finite().int().min(1).max(SPEC_LIMITS.maxObjects),
+    // maxObjects/maxParticles may be 0: a spec with no objects or no
+    // particles legitimately declares a zero budget (the model does this).
+    // The sanitizer raises declared limits to actual usage when inconsistent.
+    maxObjects: z.number().finite().int().min(0).max(SPEC_LIMITS.maxObjects),
     maxParticles: z
       .number()
       .finite()
       .int()
-      .min(1)
+      .min(0)
       .max(SPEC_LIMITS.maxParticlesDesktop),
     maxTimelineEvents: z
       .number()

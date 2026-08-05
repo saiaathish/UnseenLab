@@ -177,8 +177,9 @@ function clampField(
   let max = FIELD_CLAMP_MAX[field];
   if (field === "maxParticles") {
     // Over-declared particle budgets clamp to the desktop cap (1500); mobile
-    // adaptation (500) happens at render time.
-    const clamped = clampNumber(value, 1, SPEC_LIMITS.maxParticlesDesktop);
+    // adaptation (500) happens at render time. Zero is a valid budget ("no
+    // particles used").
+    const clamped = clampNumber(value, 0, SPEC_LIMITS.maxParticlesDesktop);
     if (clamped !== value) {
       repairs.push("repaired:maxParticles");
       return Math.round(clamped);
@@ -187,8 +188,8 @@ function clampField(
   }
   if (field === "maxObjects") {
     // Over-declared object budgets clamp to the hard cap (80); the renderer
-    // enforces the same cap, so the promise is reduced to what is enforceable.
-    const clamped = clampNumber(value, 1, SPEC_LIMITS.maxObjects);
+    // enforces the same cap. Zero is a valid budget ("no objects").
+    const clamped = clampNumber(value, 0, SPEC_LIMITS.maxObjects);
     if (clamped !== value) {
       repairs.push("repaired:maxObjects");
       return Math.round(clamped);
@@ -366,6 +367,47 @@ function describeIssue(issue: z.ZodIssue): string[] {
  * Full sanitization pipeline: parse -> size/depth/pollution/URL/code gates ->
  * numeric repair -> strict schema validation -> science policy.
  */
+export /**
+ * Declared limits are a promise about actual usage. When a spec declares a
+ * zero (or too-small) budget but actually uses particles/objects, the promise
+ * is raised to the real usage — bounded by the hard caps — with a repair
+ * reason. Meaning is preserved: a zero budget means "no particles used", and
+ * the raised budget matches what the spec ships.
+ */
+function raiseDeclaredLimits(node: unknown, repairs: string[]): void {
+  if (node === null || typeof node !== "object" || Array.isArray(node)) return;
+  const record = node as Record<string, unknown>;
+  const limits = record.limits as Record<string, unknown> | null | undefined;
+  const scene = record.scene3d as Record<string, unknown> | null | undefined;
+  if (limits === null || limits === undefined || typeof limits !== "object") {
+    return;
+  }
+  const objects = Array.isArray(scene?.objects) ? scene.objects : [];
+  let maxParticlesUsed = 0;
+  for (const obj of objects as Array<Record<string, unknown>>) {
+    const pc = obj.particleCount;
+    if (typeof pc === "number" && Number.isFinite(pc)) {
+      maxParticlesUsed = Math.max(maxParticlesUsed, pc);
+    }
+  }
+  const declaredObjects = limits.maxObjects;
+  if (typeof declaredObjects === "number" && objects.length > declaredObjects) {
+    limits.maxObjects = Math.min(objects.length, SPEC_LIMITS.maxObjects);
+    repairs.push("repaired:maxObjects");
+  }
+  const declaredParticles = limits.maxParticles;
+  if (
+    typeof declaredParticles === "number" &&
+    maxParticlesUsed > declaredParticles
+  ) {
+    limits.maxParticles = Math.min(
+      maxParticlesUsed,
+      SPEC_LIMITS.maxParticlesDesktop
+    );
+    repairs.push("repaired:maxParticles");
+  }
+}
+
 export function sanitizeDemoSpec(raw: unknown): SanitizeOutcome {
   const parsed = parseInput(raw);
   if (parsed.kind === "fallback") {
@@ -403,10 +445,15 @@ export function sanitizeDemoSpec(raw: unknown): SanitizeOutcome {
   const repairs: string[] = [];
   const declaredMaxParticles =
     typeof declaredLimits.maxParticles === "number" &&
-    Number.isFinite(declaredLimits.maxParticles)
+    Number.isFinite(declaredLimits.maxParticles) &&
+    declaredLimits.maxParticles > 0
       ? Math.min(declaredLimits.maxParticles, SPEC_LIMITS.maxParticlesDesktop)
       : SPEC_LIMITS.maxParticlesDesktop;
   const repaired = repairTree(node, { declaredMaxParticles }, repairs);
+  // Declared limits are a promise: when a spec declares a zero budget but
+  // actually uses particles/objects, the promise is raised to the real usage
+  // (bounded by the hard caps) with a repair reason.
+  raiseDeclaredLimits(repaired, repairs);
 
   const parsedSpec = demoSpecSchema.safeParse(repaired);
   if (!parsedSpec.success) {
