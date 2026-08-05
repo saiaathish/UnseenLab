@@ -136,10 +136,25 @@ function isUseful(row, gold) {
   }
   if (row.outcome !== "spec") return false;
   if (row.structural !== "ok") return false;
-  if (row.trust !== gold.trust) return false;
-  if (gold.kind === "engine") return row.engineId === gold.id;
-  if (gold.kind === "template") return row.templateId !== null;
-  if (gold.kind === "timeline") return row.templateId !== null && row.trust === "explanatory_animation";
+  if (gold.kind === "engine") {
+    // The trust boundary for verified topics: the model must stay verified and
+    // on the routed engine.
+    return row.trust === "verified_simulation" && row.engineId === gold.id;
+  }
+  // Non-verified golds (template/timeline): the trust boundary is NON-
+  // ESCALATION — the model may choose conceptual_demonstration OR
+  // explanatory_animation (a process topic is legitimately tiered down to a
+  // timeline narrative; the prompt instructs Level 3 for biological
+  // processes), but never verified_simulation.
+  //
+  // NOTE on templateIds: model-composed specs legitimately carry
+  // provenance.templateIds = [] — there is no template catalog in the model
+  // path (templates are offline-path bookkeeping). Requiring a non-empty
+  // templateIds would force the model to fake provenance, so timeline golds
+  // are scored on trust level + structural validity instead.
+  if (row.trust === "verified_simulation") return false;
+  if (gold.kind === "timeline") return row.trust === "explanatory_animation";
+  if (gold.kind === "template") return true;
   return false;
 }
 
