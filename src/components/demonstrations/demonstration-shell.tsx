@@ -6,7 +6,11 @@ import { useEffect, useRef } from "react";
 import { predictionTruth, type DemoSource, type TrialRecord } from "@/demonstrations/state/demo-store";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 import type { RepresentationMode } from "@/domain/learner";
-import type { Readout } from "@/demonstrations/renderers/lumina-2d/types";
+import type {
+  EngineVisualState,
+  Readout,
+} from "@/demonstrations/renderers/lumina-2d/types";
+import type { EngineMapping } from "@/demonstrations/renderers/primitive-3d/types";
 import { cn } from "@/lib/utils";
 
 import { TrustBadge } from "./trust-badge";
@@ -44,6 +48,12 @@ export interface DemonstrationShellProps {
   onSpeedChange: (value: number) => void;
   onReset: () => void;
   onControlTouched: (controlId: string) => void;
+
+  // canonical-state coupling (hybrid showcases): the page owns visualState,
+  // the hidden 2D engine stage emits it, the 3D stage consumes it.
+  onVisualState?: (state: EngineVisualState) => void;
+  visualState?: EngineVisualState | null;
+  engineMapping?: EngineMapping | null;
 
   // one-variable mode
   oneVariableMode: boolean;
@@ -139,6 +149,9 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
               reducedMotion: props.reducedMotion,
               readouts: props.readouts,
               onReadouts: props.onReadouts,
+              onVisualState: props.onVisualState,
+              visualState: props.visualState ?? null,
+              engineMapping: props.engineMapping ?? null,
             }}
           />
           <DemonstrationControls

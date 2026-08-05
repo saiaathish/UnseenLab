@@ -8,7 +8,15 @@
  * two charges, computed from the live positions.
  */
 
-import type { EngineMeta, Readout, SimulationModule, SimContext, SimPointer } from "../types";
+import type {
+  EngineFieldVector,
+  EngineMeta,
+  EngineVisualState,
+  Readout,
+  SimulationModule,
+  SimContext,
+  SimPointer,
+} from "../types";
 
 export const CHARGES_META: EngineMeta = {
   id: "charges",
@@ -23,6 +31,12 @@ export const CHARGES_META: EngineMeta = {
     fieldScale: { min: 0.05, max: 20 },
   },
 };
+
+/**
+ * Bounded field grid emitted by getVisualState. Odd so a cell sits exactly at
+ * the canvas centre (the dipole midpoint, where the field is exactly zero).
+ */
+export const CHARGES_FIELD_GRID = 15;
 
 interface Charge {
   x: number;
@@ -194,6 +208,37 @@ export function createCharges(): SimulationModule {
         { label: "Field strength", value: Math.hypot(ex, ey).toFixed(3), color: "#38bdf8" },
         { label: "Potential", value: potentialAt(mid.x, mid.y).toFixed(3) },
       ];
+    },
+
+    /**
+     * Canonical state for coupled 3D surfaces: centered canvas px charge
+     * positions (resolution-independent — the separation parameter defines
+     * them, not the canvas size) plus a bounded field grid sampled from the
+     * same Coulomb sum the readouts use.
+     */
+    getVisualState(): EngineVisualState {
+      const w2 = W / 2;
+      const h2 = H / 2;
+      // Grid half-extent keeps the charges at ~25% of the domain for any
+      // separation, so the 3D arrows around the charges stay well sampled.
+      const span = Math.max(2 * params.separation, 260);
+      const N = CHARGES_FIELD_GRID;
+      const vectors: EngineFieldVector[] = [];
+      for (let j = 0; j < N; j++) {
+        for (let i = 0; i < N; i++) {
+          const x = ((i + 0.5) / N) * 2 * span - span;
+          const y = ((j + 0.5) / N) * 2 * span - span;
+          const { ex, ey } = fieldAt(w2 + x, h2 + y);
+          vectors.push({ x, y, ex, ey, magnitude: Math.hypot(ex, ey) });
+        }
+      }
+      return {
+        bodies: {
+          charge1: { x: charges[0].x - w2, y: charges[0].y - h2 },
+          charge2: { x: charges[1].x - w2, y: charges[1].y - h2 },
+        },
+        field: { vectors, width: N, height: N, span },
+      };
     },
 
     serializeState(): ChargesState {

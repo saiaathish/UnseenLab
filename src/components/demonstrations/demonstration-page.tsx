@@ -11,7 +11,11 @@ import {
 } from "@/demonstrations/state/demo-store";
 import { validateDemoSpec } from "@/demonstrations/validation";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
-import type { Readout } from "@/demonstrations/renderers/lumina-2d/types";
+import type {
+  EngineVisualState,
+  Readout,
+} from "@/demonstrations/renderers/lumina-2d/types";
+import { engineMappingForSpec } from "@/demonstrations/showcases/coupling";
 import { loadLocalSession } from "@/storage/session-storage";
 
 import { DemonstrationShell } from "./demonstration-shell";
@@ -206,6 +210,13 @@ function DemoExperienceReady({
   const [resetSignal, setResetSignal] = useState(0);
   const [readouts, setReadouts] = useState<Readout[]>([]);
 
+  // Canonical engine visual state (hybrid showcases): the hidden 2D engine
+  // stage emits it via onVisualState; the 3D stage consumes it together with
+  // the curated engine mapping, so the 3D picture always reads exactly the
+  // state the readouts and 2D view come from.
+  const [visualState, setVisualState] = useState<EngineVisualState | null>(null);
+  const engineMapping = useMemo(() => engineMappingForSpec(spec), [spec]);
+
   const [predictionIndex, setPredictionIndex] = useState<number | null>(null);
   const [manipulated, setManipulated] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -350,6 +361,9 @@ function DemoExperienceReady({
       resetSignal={resetSignal}
       readouts={readouts}
       onReadouts={setReadouts}
+      onVisualState={setVisualState}
+      visualState={visualState}
+      engineMapping={engineMapping}
       onParameterChange={handleParameterChange}
       onPlayPause={() => setPlaying((p) => !p)}
       onSpeedChange={setSpeed}

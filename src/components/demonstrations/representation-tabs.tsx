@@ -155,10 +155,15 @@ export function DemonstrationRepresentationTabs({
    * render TWO surfaces: the verified lumina-2d engine stage is kept mounted
    * (hidden while the 3D view is active) so live readouts keep flowing into
    * the table; the 3D stage mounts only when its tab is active — one visible
-   * canvas at a time.
+   * canvas at a time. The coupling props thread the canonical engine state
+   * from the hidden engine stage to the 3D stage so both surfaces always
+   * agree: the hidden 2D stage emits onVisualState (lifted to the page), and
+   * the 3D stage consumes visualState + the showcase engineMapping.
    */
   const hybridEngineDriver =
     !!spec.simulation && spec.renderer.kind !== "lumina_2d";
+
+  const { onVisualState, visualState, engineMapping, ...stageBase } = stage;
 
   return (
     <section
@@ -210,10 +215,15 @@ export function DemonstrationRepresentationTabs({
         {hybridEngineDriver && (
           <>
             <div hidden={active.kind !== "stage_2d"}>
-              <DemonstrationStage {...stage} mode="2d" />
+              <DemonstrationStage {...stageBase} mode="2d" onVisualState={onVisualState} />
             </div>
             {active.kind === "stage_3d" && (
-              <DemonstrationStage {...stage} mode="3d" />
+              <DemonstrationStage
+                {...stageBase}
+                mode="3d"
+                visualState={visualState ?? null}
+                engineMapping={engineMapping ?? null}
+              />
             )}
           </>
         )}

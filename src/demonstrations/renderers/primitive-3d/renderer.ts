@@ -11,7 +11,13 @@
  */
 
 import * as THREE from "three";
-import type { DemoSpecV1, PrimitiveKind, Vec3 } from "@/demonstrations/spec/demo-spec";
+import type {
+  AnimationOperator,
+  DemoSpecV1,
+  PrimitiveKind,
+  Vec3,
+} from "@/demonstrations/spec/demo-spec";
+import type { EngineFieldVector, EngineVisualState } from "@/demonstrations/renderers/lumina-2d/types";
 import { FrameStatsSampler } from "@/demonstrations/performance/frame-stats";
 import { buildSceneGraph } from "./scene-graph";
 import {
@@ -26,6 +32,8 @@ import {
   type OperatorParams,
 } from "./operators";
 import type {
+  EngineMapping,
+  EngineMappingEntry,
   PrimitiveSceneRendererOptions,
   RendererStatus,
   SceneGraph,
@@ -176,6 +184,79 @@ interface OrbitState {
 const OPACITY_ANIMATORS = new Set(["fade", "pulse", "reveal"]);
 const COLOR_ANIMATORS = new Set(["change_color"]);
 
+/**
+ * Operators that change an object's POSITION. When an object's position is
+ * owned by the canonical engine state (hybrid showcases), these operators are
+ * skipped — rotation/pulse/glow/etc. may still run (decorative).
+ */
+const POSITION_OPERATORS = new Set<AnimationOperator>([
+  "translate",
+  "orbit",
+  "oscillate",
+  "follow_path",
+]);
+
+/** Sentinel mapping body keys for grid-driven objects (see EngineMapping). */
+const FIELD_BODY = "@field";
+const SURFACE_BODY = "@surface";
+
+/** Bilinear sample of a row-major values grid at continuous (gx, gy) cells. */
+function sampleBilinear(
+  gx: number,
+  gy: number,
+  width: number,
+  height: number,
+  values: number[]
+): number {
+  if (width < 2 || height < 2) return values[0] ?? 0;
+  const x = clampNum(gx, 0, width - 1);
+  const y = clampNum(gy, 0, height - 1);
+  const x0 = Math.min(Math.floor(x), width - 2);
+  const y0 = Math.min(Math.floor(y), height - 2);
+  const fx = x - x0;
+  const fy = y - y0;
+  const i0 = x0 + y0 * width;
+  return (
+    values[i0] * (1 - fx) * (1 - fy) +
+    values[i0 + 1] * fx * (1 - fy) +
+    values[i0 + width] * (1 - fx) * fy +
+    values[i0 + width + 1] * fx * fy
+  );
+}
+
+/** Bilinear sample of a row-major field-vector grid (cell index j*width+i). */
+function sampleFieldBilinear(
+  gx: number,
+  gy: number,
+  width: number,
+  height: number,
+  vectors: EngineFieldVector[]
+): EngineFieldVector {
+  const fallback: EngineFieldVector = { x: 0, y: 0, ex: 0, ey: 0, magnitude: 0 };
+  if (width < 2 || height < 2) return vectors[0] ?? fallback;
+  const x = clampNum(gx, 0, width - 1);
+  const y = clampNum(gy, 0, height - 1);
+  const x0 = Math.min(Math.floor(x), width - 2);
+  const y0 = Math.min(Math.floor(y), height - 2);
+  const fx = x - x0;
+  const fy = y - y0;
+  const i0 = x0 + y0 * width;
+  const mix = (
+    a: number,
+    b: number,
+    c: number,
+    d: number
+  ) => a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy;
+  const v00 = vectors[i0];
+  const v10 = vectors[i0 + 1];
+  const v01 = vectors[i0 + width];
+  const v11 = vectors[i0 + width + 1];
+  if (!v00 || !v10 || !v01 || !v11) return fallback;
+  const ex = mix(v00.ex, v10.ex, v01.ex, v11.ex);
+  const ey = mix(v00.ey, v10.ey, v01.ey, v11.ey);
+  return { x: 0, y: 0, ex, ey, magnitude: Math.hypot(ex, ey) };
+}
+
 export class PrimitiveSceneRenderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly options: Required<
@@ -196,6 +277,13 @@ export class PrimitiveSceneRenderer {
   private edges: RuntimeEdge[] = [];
   private animationsByTarget = new Map<string, SceneGraphAnimation[]>();
   private disposables: Array<{ dispose(): void }> = [];
+
+  /** Object-id → engine body/grid mapping (hybrid showcases; set per spec). */
+  private engineMapping: EngineMapping | null = null;
+  /** The latest canonical engine visual state (null → operator-driven). */
+  private engineState: EngineVisualState | null = null;
+  /** Max field magnitude in the current field state (bounds arrow lengths). */
+  private engineFieldMaxMag = 0;
 
   private raf = 0;
   private last = 0;
@@ -333,9 +421,17 @@ export class PrimitiveSceneRenderer {
   // Spec + scene building
   // -------------------------------------------------------------------------
 
-  /** Build the scene from a spec; fully disposes the previous scene. */
-  setSpec(spec: DemoSpecV1): void {
+  /** Build the scene from a spec; fully disposes the previous scene. The
+   * optional engineMapping couples scene object ids to canonical engine state
+   * (hybrid showcases); without it every object is operator-driven. */
+  setSpec(
+    spec: DemoSpecV1,
+    options?: { engineMapping?: EngineMapping | null }
+  ): void {
     this.spec = spec;
+    this.engineMapping = options?.engineMapping ?? null;
+    this.engineState = null;
+    this.engineFieldMaxMag = 0;
     if (this.webglFailed || this.disposed) return;
     const { graph, reasons } = buildSceneGraph(spec, {
       mobile: this.options.mobile,
@@ -351,6 +447,25 @@ export class PrimitiveSceneRenderer {
       this.animationsByTarget.set(anim.target, list);
     }
     this.buildScene(graph);
+  }
+
+  /**
+   * Feed the canonical engine visual state into the scene. Every mapped
+   * object with a matching body/field/surface is overridden per frame (see
+   * applyTransforms / applyEngineField / applyEngineSurface); objects without
+   * engine state keep their operator-driven behavior. Passing null restores
+   * operator-driven behavior for everything.
+   */
+  setEngineState(state: EngineVisualState | null): void {
+    this.engineState = state;
+    this.engineFieldMaxMag = 0;
+    if (state?.field?.vectors) {
+      for (const v of state.field.vectors) {
+        if (v.magnitude > this.engineFieldMaxMag) {
+          this.engineFieldMaxMag = v.magnitude;
+        }
+      }
+    }
   }
 
   private buildScene(graph: SceneGraph): void {
@@ -912,11 +1027,42 @@ export class PrimitiveSceneRenderer {
     this.applyCamera();
   }
 
+  // -------------------------------------------------------------------------
+  // Canonical-state coupling (hybrid showcases)
+  // -------------------------------------------------------------------------
+
+  /** The engine body position owning a node, or null when not engine-owned. */
+  private engineBodyPosition(rn: RuntimeNode): { x: number; y: number } | null {
+    const mapping = this.engineMapping?.[rn.graph.id];
+    if (!mapping || !this.engineState?.bodies) return null;
+    const body = this.engineState.bodies[mapping.body];
+    if (!body) return null;
+    return { x: body.x, y: body.y };
+  }
+
+  /** Mapping entry for a vector_field node when a field grid is present. */
+  private engineFieldEntry(rn: RuntimeNode): EngineMappingEntry | null {
+    if (!this.engineState?.field) return null;
+    const entry = this.engineMapping?.[rn.graph.id];
+    return entry && entry.body === FIELD_BODY ? entry : null;
+  }
+
+  /** Mapping entry for a wave_surface node when a surface grid is present. */
+  private engineSurfaceEntry(rn: RuntimeNode): EngineMappingEntry | null {
+    if (!this.engineState?.surface) return null;
+    const entry = this.engineMapping?.[rn.graph.id];
+    return entry && entry.body === SURFACE_BODY ? entry : null;
+  }
+
   private applyAnimations(rn: RuntimeNode, dt: number, time: number): void {
     const anims = this.animationsByTarget.get(rn.graph.id);
     if (!anims || anims.length === 0) return;
+    // Engine-owned position: skip translation/orbit/oscillate/follow_path so
+    // the operator animation can never diverge from the canonical state.
+    const engineOwned = this.engineBodyPosition(rn) !== null;
     let state = rn.state;
     for (const anim of anims) {
+      if (engineOwned && POSITION_OPERATORS.has(anim.operator)) continue;
       const params: OperatorParams = {
         speed: this.effectiveSpeed(anim),
         delayMs: anim.delayMs,
@@ -942,6 +1088,19 @@ export class PrimitiveSceneRenderer {
     rn.group.position.set(s.position.x, s.position.y, s.position.z);
     rn.group.rotation.set(s.rotation.x, s.rotation.y, s.rotation.z);
     rn.group.scale.setScalar(s.scale);
+    // Engine-owned position override: authoritative over any operator state.
+    // Engine (x, y) maps to world (x, y-base, z) via the curated mapping, so
+    // the object sits exactly on the engine trajectory (e.g. the 3D planet on
+    // the engine's orbit radius).
+    const body = this.engineBodyPosition(rn);
+    if (body) {
+      const entry = this.engineMapping![rn.graph.id];
+      rn.group.position.set(
+        (entry.offsetX ?? 0) + body.x * entry.scale,
+        rn.graph.position.y,
+        (entry.offsetY ?? 0) + body.y * entry.scale
+      );
+    }
     for (const owned of rn.owned) {
       if (owned.animateOpacity) {
         owned.material.opacity = s.opacity;
@@ -983,37 +1142,125 @@ export class PrimitiveSceneRenderer {
 
     if (rn.wave) {
       const w = rn.wave;
-      const wavelength = Math.max(0.001, w.size / 3);
-      const amplitude = w.size * 0.15;
-      for (let i = 0; i < w.base.length; i += 3) {
-        const x = w.base[i];
-        // Displace the local y (world z after the -90deg x rotation).
-        w.attribute.array[i + 1] =
-          amplitude * Math.sin(Math.PI * 2 * (x / wavelength + this.time * 0.5));
+      const surfaceEntry = this.engineSurfaceEntry(rn);
+      if (surfaceEntry) {
+        this.applyEngineSurface(w, surfaceEntry);
+      } else {
+        const wavelength = Math.max(0.001, w.size / 3);
+        const amplitude = w.size * 0.15;
+        for (let i = 0; i < w.base.length; i += 3) {
+          const x = w.base[i];
+          // Displace the local y (world z after the -90deg x rotation).
+          w.attribute.array[i + 1] =
+            amplitude * Math.sin(Math.PI * 2 * (x / wavelength + this.time * 0.5));
+        }
+        w.attribute.needsUpdate = true;
       }
-      w.attribute.needsUpdate = true;
     }
 
     if (rn.vectorTicks) {
       const vt = rn.vectorTicks;
-      const v = s.vector;
-      for (let k = 0; k < vt.origins.length / 3; k++) {
-        const ox = vt.origins[k * 3];
-        const oy = vt.origins[k * 3 + 1];
-        const oz = vt.origins[k * 3 + 2];
-        vt.attribute.array[k * 6] = ox;
-        vt.attribute.array[k * 6 + 1] = oy;
-        vt.attribute.array[k * 6 + 2] = oz;
-        vt.attribute.array[k * 6 + 3] = ox + v.x * vt.len;
-        vt.attribute.array[k * 6 + 4] = oy + v.y * vt.len;
-        vt.attribute.array[k * 6 + 5] = oz + v.z * vt.len;
+      const fieldEntry = this.engineFieldEntry(rn);
+      if (fieldEntry) {
+        this.applyEngineField(vt, fieldEntry);
+      } else {
+        const v = s.vector;
+        for (let k = 0; k < vt.origins.length / 3; k++) {
+          const ox = vt.origins[k * 3];
+          const oy = vt.origins[k * 3 + 1];
+          const oz = vt.origins[k * 3 + 2];
+          vt.attribute.array[k * 6] = ox;
+          vt.attribute.array[k * 6 + 1] = oy;
+          vt.attribute.array[k * 6 + 2] = oz;
+          vt.attribute.array[k * 6 + 3] = ox + v.x * vt.len;
+          vt.attribute.array[k * 6 + 4] = oy + v.y * vt.len;
+          vt.attribute.array[k * 6 + 5] = oz + v.z * vt.len;
+        }
+        vt.attribute.needsUpdate = true;
       }
-      vt.attribute.needsUpdate = true;
     }
 
     if (rn.trail && dt > 0) {
       this.pushTrailPoint(rn);
     }
+  }
+
+  /**
+   * Drive a wave_surface mesh from the engine's u field. The mesh is rotated
+   * -90° about x, so local +y maps to world -z; the engine's normalized y
+   * (row/GH - 0.5, positive toward +z) therefore samples the flipped row:
+   *   engineY = (0.5 - localY/size) - 0.5 = -localY/size
+   * Heights are written into the local y channel (same visual language as the
+   * operator-driven ripples), additively on top of the base plane so the
+   * surface keeps its in-plane spread. Bilinear-sampled from the engine grid,
+   * values clamped to ±1 before scaling.
+   */
+  private applyEngineSurface(
+    w: NonNullable<RuntimeNode["wave"]>,
+    entry: EngineMappingEntry
+  ): void {
+    const surface = this.engineState?.surface;
+    if (!surface) return;
+    const { width, height, values } = surface;
+    const dispScale = w.size * 0.15; // matches the operator ripple amplitude
+    const inv = 1 / entry.scale;
+    const ox = entry.offsetX ?? 0;
+    const oy = entry.offsetY ?? 0;
+    for (let i = 0; i < w.base.length; i += 3) {
+      const lx = w.base[i];
+      const ly = w.base[i + 1];
+      const gx = ((lx - ox) * inv + 0.5) * width;
+      const gy = (-(ly - oy) * inv + 0.5) * height;
+      const value = sampleBilinear(gx, gy, width, height, values);
+      w.attribute.array[i + 1] =
+        w.base[i + 1] + clampNum(value, -1, 1) * dispScale;
+    }
+    w.attribute.needsUpdate = true;
+  }
+
+  /**
+   * Drive a vector_field's arrows from the engine's field grid. Each arrow
+   * samples the grid at its own world position (mapped back through the
+   * curated entry scale/offsets); the direction follows (ex, 0, ey) and the
+   * length is bounded by the field maximum in the current state, so arrows
+   * near charges compress rather than explode.
+   */
+  private applyEngineField(
+    vt: NonNullable<RuntimeNode["vectorTicks"]>,
+    entry: EngineMappingEntry
+  ): void {
+    const field = this.engineState?.field;
+    if (!field) return;
+    const { width, height, vectors, span } = field;
+    const maxMag = this.engineFieldMaxMag > 0 ? this.engineFieldMaxMag : 1;
+    const inv = 1 / entry.scale;
+    const ox = entry.offsetX ?? 0;
+    const oy = entry.offsetY ?? 0;
+    const invSpan = 1 / (2 * span);
+    for (let k = 0; k < vt.origins.length / 3; k++) {
+      const oxW = vt.origins[k * 3];
+      const ozW = vt.origins[k * 3 + 2];
+      const px = (oxW - ox) * inv;
+      const py = (ozW - oy) * inv;
+      const gx = (px * invSpan + 0.5) * width;
+      const gy = (py * invSpan + 0.5) * height;
+      const sample = sampleFieldBilinear(gx, gy, width, height, vectors);
+      const mag = sample.magnitude;
+      const len =
+        mag > 1e-6
+          ? vt.len * Math.max(0.08, Math.sqrt(Math.min(1, mag / maxMag)))
+          : 0;
+      const dirX = mag > 1e-6 ? sample.ex / mag : 0;
+      const dirY = mag > 1e-6 ? sample.ey / mag : 0;
+      vt.attribute.array[k * 6] = oxW;
+      vt.attribute.array[k * 6 + 1] = 0;
+      vt.attribute.array[k * 6 + 2] = ozW;
+      // engine (ex, ey) → world (x, z): the field lives in the plane.
+      vt.attribute.array[k * 6 + 3] = oxW + dirX * len;
+      vt.attribute.array[k * 6 + 4] = 0;
+      vt.attribute.array[k * 6 + 5] = ozW + dirY * len;
+    }
+    vt.attribute.needsUpdate = true;
   }
 
   private pushTrailPoint(rn: RuntimeNode): void {

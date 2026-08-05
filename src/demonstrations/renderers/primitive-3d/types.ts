@@ -99,6 +99,35 @@ export interface PrimitiveSceneRendererOptions {
   onFps?: (fps: number) => void;
 }
 
+// ---------------------------------------------------------------------------
+// Canonical-state coupling (hybrid showcases)
+// ---------------------------------------------------------------------------
+//
+// Maps a scene object id to the engine body key that owns its position, plus
+// the scale/offset converting engine coordinates to world coordinates:
+//   worldX = (offsetX ?? 0) + x * scale
+//   worldZ = (offsetY ?? 0) + y * scale
+//   worldY = the object's base (graph) y — engine state is planar.
+// The `body` key references EngineVisualState.bodies. For vector_field and
+// wave_surface objects the entry's scale/offsets are used to map the object's
+// world position back into the engine grid; `body` then carries the sentinel
+// "@field" / "@surface" (the renderer dispatches on the object's kind).
+// The mapping is the single source of truth curated in
+// src/demonstrations/showcases/coupling.ts.
+
+export interface EngineMappingEntry {
+  /** Engine body key (or "@field" / "@surface" sentinel for grid objects). */
+  body: string;
+  /** Engine units -> world units. */
+  scale: number;
+  /** World x offset applied before scaling. */
+  offsetX?: number;
+  /** World z offset applied before scaling (engine y -> world z). */
+  offsetY?: number;
+}
+
+export type EngineMapping = Record<string, EngineMappingEntry>;
+
 export type RendererStatus =
   | "ready"
   | "webgl_unavailable"

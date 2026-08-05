@@ -10,7 +10,14 @@
  * scale directly. `phase` shifts the second source (fraction of a cycle).
  */
 
-import type { EngineMeta, Readout, SimulationModule, SimContext, SimPointer } from "../types";
+import type {
+  EngineMeta,
+  EngineVisualState,
+  Readout,
+  SimulationModule,
+  SimContext,
+  SimPointer,
+} from "../types";
 
 export const WAVES_META: EngineMeta = {
   id: "waves",
@@ -60,6 +67,18 @@ export function createWaves(): SimulationModule {
 
   const idx = (i: number, j: number) => j * GW + i;
 
+  /** The source column (both point sources share it). */
+  const sourceColumn = () => Math.floor(GW * 0.28);
+
+  /** The current source rows (j), clamped to the driveable grid band. */
+  function sourceRows(): [number, number] {
+    const half = params.separation / 2;
+    return [
+      Math.round(clamp(GH / 2 - half, 1, GH - 3)),
+      Math.round(clamp(GH / 2 + half, 1, GH - 3)),
+    ];
+  }
+
   function ensurePixels() {
     if (img) return;
     try {
@@ -98,13 +117,10 @@ export function createWaves(): SimulationModule {
     u = up;
     up = tmp;
     // drive the two point sources
-    const cy = GH / 2;
-    const half = params.separation / 2;
-    const sx = Math.floor(GW * 0.28);
+    const sx = sourceColumn();
     const drive = params.amplitude * Math.sin(2 * Math.PI * params.frequency * simTime);
     const drive2 = params.amplitude * Math.sin(2 * Math.PI * params.frequency * simTime + 2 * Math.PI * params.phase);
-    const j1 = Math.round(cy - half);
-    const j2 = Math.round(cy + half);
+    const [j1, j2] = sourceRows();
     if (j1 > 1 && j1 < GH - 2) u[idx(sx, j1)] = drive;
     if (j2 > 1 && j2 < GH - 2) u[idx(sx, j2)] = drive2;
   }
@@ -213,6 +229,24 @@ export function createWaves(): SimulationModule {
         { label: "Intensity", value: intensity.toFixed(4), color: "#22d3ee" },
         { label: "Wavelength", value: "~" + lambda.toFixed(0) + " cells" },
       ];
+    },
+
+    /**
+     * Canonical state for coupled 3D surfaces: the full u field (row-major)
+     * plus the two source positions in normalized grid coordinates
+     * (x = col/GW - 0.5, y = row/GH - 0.5) — resolution-independent.
+     */
+    getVisualState(): EngineVisualState {
+      const sx = sourceColumn();
+      const [j1, j2] = sourceRows();
+      const ux = sx / GW - 0.5;
+      return {
+        bodies: {
+          source1: { x: ux, y: j1 / GH - 0.5 },
+          source2: { x: ux, y: j2 / GH - 0.5 },
+        },
+        surface: { values: Array.from(u), width: GW, height: GH },
+      };
     },
 
     serializeState(): WavesState {

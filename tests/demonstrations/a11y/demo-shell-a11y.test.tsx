@@ -94,6 +94,7 @@ vi.mock("@/demonstrations/renderers/primitive-3d", () => {
     setSpec() {}
     setPlaying() {}
     setSpeed() {}
+    setEngineState() {}
     dispose() {}
   }
   return { PrimitiveSceneRenderer: MockPrimitiveSceneRenderer };

@@ -29,6 +29,69 @@ export interface Readout {
   color?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Engine visual state — the canonical-state coupling contract
+// ---------------------------------------------------------------------------
+//
+// An engine may expose its CURRENT quantitative state to other surfaces (the
+// primitive-3d stage in hybrid showcases) via getVisualState(). This is the
+// single channel that guarantees every learner-visible control modifies
+// canonical engine state and every coupled 3D visual reads that same state:
+// readouts, table, 2D view and 3D stage then cannot diverge.
+//
+// Coordinate conventions (documented so the coupling layer can map engine
+// space to world space deterministically, independent of the live canvas
+// size — the hidden 2D engine stage can run on a 1x1 canvas):
+//  - orbits bodies: engine units, origin at the canvas centre (the engine's
+//    own simulation coordinates; already resolution-independent).
+//  - charges bodies: CENTERED canvas px (x - W/2, y - H/2) — the charge
+//    separation is a parameter, so these are resolution-independent.
+//  - charges field: vectors at CENTERED canvas px; `span` is the half-extent
+//    px the grid covers (cells at (i+0.5)/width*2*span - span). `span` lets
+//    the 3D renderer map any world position back to a grid cell.
+//  - waves bodies: normalized grid coordinates: x = col/GW - 0.5,
+//    y = row/GH - 0.5 (row = grid row j), matching the surface sampling
+//    convention used by the renderer (see renderer.ts applyEngineSurface).
+//  - waves surface: row-major u-field values (index j*width + i).
+//
+// All numbers must be finite.
+
+/** One sampled field vector on the charges engine's grid. */
+export interface EngineFieldVector {
+  /** Centered canvas px x of the grid cell. */
+  x: number;
+  /** Centered canvas px y of the grid cell. */
+  y: number;
+  /** Field x component at the cell (engine units, fieldScale applied). */
+  ex: number;
+  /** Field y component at the cell. */
+  ey: number;
+  /** Math.hypot(ex, ey). */
+  magnitude: number;
+}
+
+export interface EngineVisualState {
+  /**
+   * Keyed body positions (e.g. { star, planet } for orbits,
+   * { charge1, charge2 } for charges, { source1, source2 } for waves).
+   */
+  bodies?: Record<string, { x: number; y: number }>;
+  /** charges only: a bounded vector-field grid. */
+  field?: {
+    vectors: EngineFieldVector[];
+    width: number;
+    height: number;
+    /** Half-extent px the grid spans (cells cover [-span, span]^2). */
+    span: number;
+  };
+  /** waves only: the u field, row-major. */
+  surface?: {
+    values: number[];
+    width: number;
+    height: number;
+  };
+}
+
 export interface SimPointer {
   x: number;
   y: number;
@@ -81,6 +144,14 @@ export interface SimulationModule {
   reset(seed?: number): void;
   /** Human-facing readouts for the UI. */
   getReadouts(): Readout[];
+  /**
+   * OPTIONAL: the engine's current quantitative state for coupled surfaces
+   * (the primitive-3d stage in hybrid showcases). The runner polls this at a
+   * bounded rate and forwards it via onVisualState. Modules that do not
+   * implement it are untouched — the lumina-2d-only flow behaves exactly as
+   * before. Coordinate conventions are documented on EngineVisualState.
+   */
+  getVisualState?(): EngineVisualState | null;
   /** JSON-safe snapshot of the full simulation state (for replay). */
   serializeState(): unknown;
   /** Restore a state produced by serializeState(). */

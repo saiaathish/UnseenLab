@@ -4,8 +4,12 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { SimRunner } from "@/demonstrations/renderers/lumina-2d/runner";
-import type { Readout } from "@/demonstrations/renderers/lumina-2d/types";
+import type {
+  EngineVisualState,
+  Readout,
+} from "@/demonstrations/renderers/lumina-2d/types";
 import { PrimitiveSceneRenderer } from "@/demonstrations/renderers/primitive-3d";
+import type { EngineMapping } from "@/demonstrations/renderers/primitive-3d/types";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 
 import { AccessibleRepresentation } from "./accessible-representation";
@@ -20,6 +24,16 @@ export interface StageProps {
   reducedMotion: boolean;
   readouts: Readout[];
   onReadouts: (readouts: Readout[]) => void;
+  /**
+   * Canonical engine visual state, lifted from the (possibly hidden) 2D
+   * engine stage to the page, which forwards it to the 3D stage so the 3D
+   * picture always reads the same state as the readouts.
+   */
+  onVisualState?: (state: EngineVisualState) => void;
+  /** Latest canonical engine state for the 3D stage (null → operator-driven). */
+  visualState?: EngineVisualState | null;
+  /** Scene-object → engine-body coupling for hybrid showcases. */
+  engineMapping?: EngineMapping | null;
   /**
    * Which surface a hybrid spec should show. "2d" renders the verified
    * lumina-2d engine (SimRunner) — the source of truth for readouts; "3d"
@@ -105,15 +119,18 @@ function Lumina2DStage({
   resetSignal,
   readouts,
   onReadouts,
+  onVisualState,
 }: StageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const runnerRef = useRef<SimRunner | null>(null);
   const [startError, setStartError] = useState(false);
   const onReadoutsRef = useRef(onReadouts);
-  // Keep the latest onReadouts for the runner without recreating it; runs
+  const onVisualStateRef = useRef(onVisualState);
+  // Keep the latest callbacks for the runner without recreating it; runs
   // before the runner-creation effect on mount so the first emission lands.
   useEffect(() => {
     onReadoutsRef.current = onReadouts;
+    onVisualStateRef.current = onVisualState;
   });
 
   const simulation = spec.simulation;
@@ -127,6 +144,7 @@ function Lumina2DStage({
     try {
       runner = new SimRunner(canvas);
       runner.onReadouts = (r) => onReadoutsRef.current(r);
+      runner.onVisualState = (s) => onVisualStateRef.current?.(s);
       runner.setScene({
         engineId: simulation.engineId,
         parameters: paramsAtMountRef.current,
@@ -217,6 +235,8 @@ function Primitive3DStage({
   reducedMotion,
   readouts,
   parameters,
+  visualState,
+  engineMapping,
 }: StageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<PrimitiveSceneRenderer | null>(null);
@@ -241,7 +261,7 @@ function Primitive3DStage({
           }
         },
       });
-      renderer.setSpec(spec);
+      renderer.setSpec(spec, { engineMapping: engineMapping ?? null });
       rendererRef.current = renderer;
     } catch {
       renderer?.dispose();
@@ -253,8 +273,24 @@ function Primitive3DStage({
       rendererRef.current = null;
       renderer?.dispose();
     };
+    // The mapping is derived from the spec (stable); when it changes the
+    // renderer is rebuilt with the new coupling.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec.id]);
+  }, [spec.id, engineMapping]);
+
+  // Apply the canonical engine state on change only. A ref of the last
+  // applied (stringified) state avoids re-applying identical emissions every
+  // ~66 ms from the engine loop; the renderer stays in sync with the latest
+  // state without redundant setEngineState calls.
+  const lastAppliedRef = useRef<{ specId: string; json: string } | null>(null);
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const json = JSON.stringify(visualState ?? null);
+    const last = lastAppliedRef.current;
+    if (last && last.specId === spec.id && last.json === json) return;
+    lastAppliedRef.current = { specId: spec.id, json };
+    renderer?.setEngineState(visualState ?? null);
+  }, [visualState, engineMapping, spec.id]);
 
   useEffect(() => {
     rendererRef.current?.setPlaying(playing);

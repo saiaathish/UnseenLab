@@ -10,7 +10,14 @@
  * Deterministic: no randomness anywhere — same parameters, same trajectory.
  */
 
-import type { EngineMeta, Readout, SimulationModule, SimContext, SimPointer } from "../types";
+import type {
+  EngineMeta,
+  EngineVisualState,
+  Readout,
+  SimulationModule,
+  SimContext,
+  SimPointer,
+} from "../types";
 
 export const ORBITS_META: EngineMeta = {
   id: "orbits",
@@ -289,6 +296,19 @@ export function createOrbits(): SimulationModule {
         { label: "Speed", value: speed.toFixed(1) },
         { label: "Distance", value: dist.toFixed(0) },
       ];
+    },
+
+    /**
+     * Canonical body positions for coupled 3D surfaces. Coordinates are the
+     * engine's own simulation units (origin at the star / canvas centre) —
+     * resolution-independent by construction.
+     */
+    getVisualState(): EngineVisualState {
+      const at = (i: number) =>
+        bodies.length > i
+          ? { x: bodies[i].x, y: bodies[i].y }
+          : { x: 0, y: 0 };
+      return { bodies: { star: at(0), planet: at(1) } };
     },
 
     serializeState(): OrbitsState {

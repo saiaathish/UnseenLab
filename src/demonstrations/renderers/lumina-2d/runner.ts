@@ -8,7 +8,13 @@
  */
 
 import { createModule } from "./registry";
-import type { Readout, SimContext, SimulationModule, SimPointer } from "./types";
+import type {
+  EngineVisualState,
+  Readout,
+  SimContext,
+  SimulationModule,
+  SimPointer,
+} from "./types";
 
 export interface SceneSpec {
   engineId: string;
@@ -18,6 +24,8 @@ export interface SceneSpec {
 
 export const MAX_DT = 0.05; // seconds; avoid huge jumps on tab refocus
 export const READOUT_INTERVAL = 0.12; // seconds between readout emissions
+/** Seconds between visual-state emissions (~15 Hz) for coupled 3D surfaces. */
+export const VISUAL_STATE_INTERVAL = 0.066;
 
 /** DPR caps — desktop 2, mobile viewports 1.5 (mirrors primitive-3d). */
 export const DPR_CAP = 2;
@@ -92,10 +100,18 @@ export class SimRunner {
   private ctx: SimContext;
   private ro: ResizeObserver | null = null;
   private readoutAcc = 0;
+  private visualAcc = 0;
   private disposed = false;
 
   onReadouts: (readouts: Readout[]) => void = () => {};
   onParam: (key: string, value: number) => void = () => {};
+  /**
+   * Canonical engine visual state, emitted at ~15 Hz for coupled surfaces
+   * (the primitive-3d stage in hybrid showcases). Only fires when the active
+   * module implements getVisualState(); otherwise never called, so the
+   * lumina-2d-only flow is untouched.
+   */
+  onVisualState: (state: EngineVisualState) => void = () => {};
 
   constructor(canvas: HTMLCanvasElement) {
     if (canvasOwners.has(canvas)) {
@@ -231,6 +247,18 @@ export class SimRunner {
       this.readoutAcc = 0;
       if (this.module) this.onReadouts(this.module.getReadouts());
     }
+
+    this.visualAcc += dt;
+    if (this.visualAcc >= VISUAL_STATE_INTERVAL) {
+      this.visualAcc = 0;
+      this.emitVisualState();
+    }
+  }
+
+  /** Emit the module's canonical visual state when it provides one. */
+  private emitVisualState() {
+    const state = this.module?.getVisualState?.() ?? null;
+    if (state) this.onVisualState(state);
   }
 
   // -------------------------------------------------------------------------
@@ -248,6 +276,7 @@ export class SimRunner {
     this.module = nextModule;
     this.ctx.time = 0;
     this.readoutAcc = 0;
+    this.visualAcc = 0;
     this.module.init(this.ctx);
     this.module.reset(spec.seed ?? 1);
     if (spec.parameters) {
@@ -256,6 +285,9 @@ export class SimRunner {
       }
     }
     this.onReadouts(this.module.getReadouts());
+    // Initial canonical state so coupled surfaces render defaults immediately
+    // (the next loop emission may be a full interval away).
+    this.emitVisualState();
   }
 
   setParam(key: string, value: number) {
@@ -275,6 +307,9 @@ export class SimRunner {
   reset() {
     this.module?.reset();
     if (this.module) this.onReadouts(this.module.getReadouts());
+    // A reset re-seeds body positions; push the canonical state immediately so
+    // coupled surfaces snap back without waiting for the next emission.
+    this.emitVisualState();
   }
 
   getModule(): SimulationModule | null {
