@@ -133,8 +133,10 @@ const primitiveObjectSchema = z
     kind: z.enum(PRIMITIVE_KINDS),
     label: labelString.optional(),
     position: vec3Schema.optional(),
-    // size/trailPoints/particleCount are REPAIRED (clamped) — accept wide.
-    size: wideScalar.optional(),
+    // size/trailPoints/particleCount are REPAIRED (clamped or dropped) — accept
+    // wide values here; models sometimes emit non-numeric size ("medium"),
+    // which the sanitizer strips (renderer defaults apply).
+    size: z.unknown().optional(),
     color: colorString.optional(),
     trailPoints: wideIntScalar.optional(),
     particleCount: wideIntScalar.optional(),
@@ -292,18 +294,14 @@ const limitsSchema = z
     // absurd budgets (1e6, 1e9, 1e12) or zero.
     maxObjects: z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER),
     maxParticles: z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER),
+    // Same policy for timeline/control budgets: over-declared caps are
+    // clamped by the sanitizer, so the gate must not reject them.
     maxTimelineEvents: z
       .number()
       .finite()
-      .int()
-      .min(1)
-      .max(SPEC_LIMITS.maxTimelineEvents),
-    maxControls: z
-      .number()
-      .finite()
-      .int()
-      .min(1)
-      .max(SPEC_LIMITS.maxControls),
+      .min(0)
+      .max(Number.MAX_SAFE_INTEGER),
+    maxControls: z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER),
   })
   .strict();
 
@@ -336,8 +334,11 @@ export const modelOutputSchema = z
         animations: z.array(animationSchema).max(100),
       })
       .strict()
-      .optional(),
-    timeline: timelineSchema.optional(),
+      // nullish: models sometimes emit null for an optional object field
+      // meaning "absent". The sanitizer strips null scene3d/timeline; the gate
+      // must not reject what the repair pass can fix.
+      .nullish(),
+    timeline: timelineSchema.nullish(),
     controls: z.array(controlSchema).max(SPEC_LIMITS.maxControls),
     prediction: predictionSchema,
     observationPrompts: z

@@ -198,6 +198,75 @@ describe("generateDemo — model path", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts scene3d: null with a repair label (ONE call, no retry)", async () => {
+    // deepseek-v4-flash with thinking disabled emits "scene3d": null for
+    // "absent". The optional-field repair strips it — verified on the
+    // deployed preview where this used to burn two attempts into
+    // schema_rejected.
+    const spec = structuredClone(MODEL_SPEC) as unknown as Record<
+      string,
+      unknown
+    >;
+    spec.scene3d = null;
+    // A spec that declares no 3D scene cannot ship animation-targeting
+    // controls (they would dangle) — drop them like a model would.
+    (spec.controls as Array<{ target: { kind: string } }>) = (
+      spec.controls as Array<{ target: { kind: string } }>
+    ).filter((c) => c.target.kind !== "animation");
+    fetchMock.mockResolvedValue(chatCompletion(JSON.stringify(spec)));
+
+    const result = await generateDemo(ORBITS_QUERY);
+    const data = expectSpecData(result);
+
+    expect(data.outcome).toBe("spec");
+    expect(data.source).toBe("model");
+    expect(data.reason).toContain("repaired:null_scene3d");
+    expect(data.spec.scene3d).toBeUndefined();
+    // The verified engine is untouched — trust boundary intact.
+    expect(data.spec.trust.level).toBe("verified_simulation");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts timeline: null with a repair label (ONE call, no retry)", async () => {
+    const spec = structuredClone(MODEL_SPEC) as unknown as Record<
+      string,
+      unknown
+    >;
+    spec.timeline = null;
+    fetchMock.mockResolvedValue(chatCompletion(JSON.stringify(spec)));
+
+    const result = await generateDemo(ORBITS_QUERY);
+    const data = expectSpecData(result);
+
+    expect(data.outcome).toBe("spec");
+    expect(data.source).toBe("model");
+    expect(data.reason).toContain("repaired:null_timeline");
+    expect(data.spec.timeline).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts a non-numeric scene3d object size with a repair label (ONE call, no retry)", async () => {
+    const spec = structuredClone(MODEL_SPEC) as unknown as Record<
+      string,
+      unknown
+    >;
+    const objects = (spec.scene3d as { objects: Array<Record<string, unknown>> })
+      .objects;
+    if (objects.length) {
+      objects[0].size = "medium";
+    }
+    fetchMock.mockResolvedValue(chatCompletion(JSON.stringify(spec)));
+
+    const result = await generateDemo(ORBITS_QUERY);
+    const data = expectSpecData(result);
+
+    expect(data.outcome).toBe("spec");
+    expect(data.source).toBe("model");
+    expect(data.reason).toContain("repaired:non_numeric_size");
+    expect("size" in data.spec.scene3d!.objects[0]).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("repairs out-of-range tuning numbers and returns the repaired spec as model", async () => {
     const spec = structuredClone(MODEL_SPEC);
     // Push the first engine parameter far past ITS declared max; the

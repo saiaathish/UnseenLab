@@ -971,6 +971,115 @@ describe("validateDemoSpec — safe numeric repair", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Repair: model-shaped nulls and non-numeric visual scalars
+// ---------------------------------------------------------------------------
+
+describe("validateDemoSpec — model-shaped repairs (null optional objects, non-numeric size)", () => {
+  it("strips scene3d: null as absent (2D engine remains canonical)", () => {
+    const spec = verifiedSimulationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    raw.scene3d = null;
+    const result = validateDemoSpec(JSON.stringify(raw));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:null_scene3d");
+    expect(result.spec!.scene3d).toBeUndefined();
+    // The verified engine itself is untouched — trust boundary intact.
+    expect(result.spec!.trust.level).toBe("verified_simulation");
+    expect(result.spec!.simulation!.engineId).toBe("pendulum");
+  });
+
+  it("strips timeline: null as absent", () => {
+    const spec = conceptualDemonstrationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    raw.timeline = null;
+    const result = validateDemoSpec(JSON.stringify(raw));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:null_timeline");
+    expect(result.spec!.timeline).toBeUndefined();
+  });
+
+  it("drops a non-numeric size on a scene3d object (renderer default applies)", () => {
+    const spec = verifiedSimulationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    (raw.scene3d as { objects: Array<Record<string, unknown>> }).objects[1].size =
+      "medium";
+    const result = validateDemoSpec(JSON.stringify(raw));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:non_numeric_size");
+    const objects = result.spec!.scene3d!.objects;
+    expect("size" in objects[1]).toBe(false);
+    // Other objects' numeric sizes survive untouched.
+    expect("size" in objects[0]).toBe(false); // fixture object 0 has no size
+  });
+
+  it("keeps a numeric size intact (no repair)", () => {
+    const spec = verifiedSimulationSpec();
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+    expect(result.spec!.scene3d!.objects[1].size).toBe(0.25);
+  });
+
+  it("still rejects a Level 3 spec whose timeline was null (science policy)", () => {
+    const spec = explanatoryAnimationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    raw.timeline = null;
+    const result = validateDemoSpec(JSON.stringify(raw));
+    // Stripped to absent, then the science policy demands a timeline.
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("science_policy:level3_timeline");
+  });
+
+  it("clamps an over-declared maxTimelineEvents budget", () => {
+    const spec = conceptualDemonstrationSpec();
+    spec.limits.maxTimelineEvents = 999;
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:maxTimelineEvents");
+    expect(result.spec!.limits.maxTimelineEvents).toBe(
+      SPEC_LIMITS.maxTimelineEvents
+    );
+  });
+
+  it("clamps an over-declared maxControls budget", () => {
+    const spec = verifiedSimulationSpec();
+    spec.limits.maxControls = 999;
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:maxControls");
+    expect(result.spec!.limits.maxControls).toBe(SPEC_LIMITS.maxControls);
+  });
+
+  it("raises an under-declared timeline budget to actual event usage", () => {
+    const spec = explanatoryAnimationSpec();
+    spec.limits.maxTimelineEvents = 1;
+    const events = spec.timeline!.events.length;
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:maxTimelineEvents");
+    expect(result.spec!.limits.maxTimelineEvents).toBe(events);
+  });
+
+  it("raises an under-declared controls budget to actual control usage", () => {
+    const spec = verifiedSimulationSpec();
+    spec.limits.maxControls = 0;
+    const controls = spec.controls.length;
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:maxControls");
+    expect(result.spec!.limits.maxControls).toBe(controls);
+  });
+
+  it("accepts a zero timeline/controls budget when nothing is used", () => {
+    const spec = conceptualDemonstrationSpec();
+    spec.limits.maxTimelineEvents = 0;
+    spec.limits.maxControls = 0;
+    spec.controls = [];
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // sciencePolicy unit
 // ---------------------------------------------------------------------------
 

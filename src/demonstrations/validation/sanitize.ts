@@ -136,6 +136,25 @@ function repairTree(
       repairs.push("repaired:empty_unit");
       continue;
     }
+    if (
+      value === null &&
+      (key === "scene3d" || key === "timeline")
+    ) {
+      // Models emit null for an optional object field meaning "absent" — the
+      // contract types these fields optional, not nullable. A null scene3d is
+      // semantically identical to no 3D scene (the 2D engine remains
+      // canonical); a null timeline on a Level 3 spec is later rejected by the
+      // science policy for missing its timeline. Strip with a repair reason.
+      repairs.push(`repaired:null_${key}`);
+      continue;
+    }
+    if (key === "size" && typeof value !== "number") {
+      // Non-numeric size (models emit strings like "medium", or null): visual
+      // tuning only, the renderer has defaults. Drop rather than reject —
+      // meaning is preserved (size is never physics).
+      repairs.push("repaired:non_numeric_size");
+      continue;
+    }
     if (typeof value === "number" && isTuningBlock(record) && key === "value") {
       // Engine-parameter value: clamp into its own [min, max].
       const min = record.min as number;
@@ -192,6 +211,24 @@ function clampField(
     const clamped = clampNumber(value, 0, SPEC_LIMITS.maxObjects);
     if (clamped !== value) {
       repairs.push("repaired:maxObjects");
+      return Math.round(clamped);
+    }
+    return null;
+  }
+  if (field === "maxTimelineEvents") {
+    // Over-declared timeline budgets clamp to the hard cap; zero is valid.
+    const clamped = clampNumber(value, 0, SPEC_LIMITS.maxTimelineEvents);
+    if (clamped !== value) {
+      repairs.push("repaired:maxTimelineEvents");
+      return Math.round(clamped);
+    }
+    return null;
+  }
+  if (field === "maxControls") {
+    // Over-declared control budgets clamp to the hard cap; zero is valid.
+    const clamped = clampNumber(value, 0, SPEC_LIMITS.maxControls);
+    if (clamped !== value) {
+      repairs.push("repaired:maxControls");
       return Math.round(clamped);
     }
     return null;
@@ -405,6 +442,21 @@ function raiseDeclaredLimits(node: unknown, repairs: string[]): void {
       SPEC_LIMITS.maxParticlesDesktop
     );
     repairs.push("repaired:maxParticles");
+  }
+  // Timeline and control budgets are the same kind of promise: raised to the
+  // actual event/control count when under-declared (bounded by the hard caps).
+  const timeline = record.timeline as Record<string, unknown> | null | undefined;
+  const events = Array.isArray(timeline?.events) ? timeline.events.length : 0;
+  const declaredTimeline = limits.maxTimelineEvents;
+  if (typeof declaredTimeline === "number" && events > declaredTimeline) {
+    limits.maxTimelineEvents = Math.min(events, SPEC_LIMITS.maxTimelineEvents);
+    repairs.push("repaired:maxTimelineEvents");
+  }
+  const controls = Array.isArray(record.controls) ? record.controls.length : 0;
+  const declaredControls = limits.maxControls;
+  if (typeof declaredControls === "number" && controls > declaredControls) {
+    limits.maxControls = Math.min(controls, SPEC_LIMITS.maxControls);
+    repairs.push("repaired:maxControls");
   }
 }
 
