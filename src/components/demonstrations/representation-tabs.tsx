@@ -150,6 +150,15 @@ export function DemonstrationRepresentationTabs({
 
   const stageActive = isStageRep(active);
   const hasStageRep = ordered.some(isStageRep);
+  /**
+   * Hybrid showcase specs (renderer.kind hybrid/primitive_3d + simulation)
+   * render TWO surfaces: the verified lumina-2d engine stage is kept mounted
+   * (hidden while the 3D view is active) so live readouts keep flowing into
+   * the table; the 3D stage mounts only when its tab is active — one visible
+   * canvas at a time.
+   */
+  const hybridEngineDriver =
+    !!spec.simulation && spec.renderer.kind !== "lumina_2d";
 
   return (
     <section
@@ -193,10 +202,20 @@ export function DemonstrationRepresentationTabs({
         aria-labelledby={`demo-rep-tab-${active.id}`}
         className="mt-4"
       >
-        {hasStageRep && (
+        {hasStageRep && !hybridEngineDriver && (
           <div hidden={!stageActive}>
             <DemonstrationStage {...stage} />
           </div>
+        )}
+        {hybridEngineDriver && (
+          <>
+            <div hidden={active.kind !== "stage_2d"}>
+              <DemonstrationStage {...stage} mode="2d" />
+            </div>
+            {active.kind === "stage_3d" && (
+              <DemonstrationStage {...stage} mode="3d" />
+            )}
+          </>
         )}
         {!stageActive && (
           <NonStageView

@@ -20,12 +20,24 @@ export interface StageProps {
   reducedMotion: boolean;
   readouts: Readout[];
   onReadouts: (readouts: Readout[]) => void;
+  /**
+   * Which surface a hybrid spec should show. "2d" renders the verified
+   * lumina-2d engine (SimRunner) — the source of truth for readouts; "3d"
+   * renders the approved-primitive Three.js stage. Defaults by renderer.kind:
+   * lumina_2d → "2d", primitive_3d/hybrid → "3d".
+   */
+  mode?: "2d" | "3d";
 }
 
 /**
- * The stage. Renders by spec.renderer.kind:
- *  - lumina_2d        → canvas owned by a SimRunner (spec.simulation)
- *  - primitive_3d/hybrid → canvas owned by the PrimitiveSceneRenderer
+ * The stage. Renders by spec.renderer.kind and the requested mode:
+ *  - lumina_2d (or mode "2d")  → canvas owned by a SimRunner (spec.simulation)
+ *  - primitive_3d/hybrid (or mode "3d") → canvas owned by the
+ *    PrimitiveSceneRenderer
+ *
+ * For hybrid showcase specs the shell keeps a hidden mode="2d" engine stage
+ * mounted as the readout driver, so the readout table stays live while the
+ * learner watches the 3D view.
  *
  * The Lumina runner exposes no serialize/restore, so parameter state stays in
  * the shell: parameter changes are pushed with setParam, and a reset re-seeds
@@ -41,14 +53,14 @@ export interface StageProps {
  * honest note.
  */
 export function DemonstrationStage(props: StageProps) {
-  const { spec } = props;
+  const { spec, mode } = props;
   const engineId = spec.simulation?.engineId ?? spec.trust.engineId;
 
   if (engineId === "nuclear_chain_reaction") {
     return <NuclearChainReactionCard />;
   }
 
-  if (spec.renderer.kind === "lumina_2d") {
+  if (spec.renderer.kind === "lumina_2d" || mode === "2d") {
     return <Lumina2DStage {...props} />;
   }
   return <Primitive3DStage {...props} />;
