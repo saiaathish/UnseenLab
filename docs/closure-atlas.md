@@ -40,11 +40,17 @@ Attempted fix: none applicable. Changing the Atlas Network Access list requires 
 
 ## 6. Exact console steps (human, ~2 minutes)
 
+**ORDER MATTERS — remediate §9 FIRST.** The live user is `atlasAdmin` (see
+§9); opening the network before downgrading the user would expose a
+full-admin credential to the internet. Sequence:
+
+0. **Security → Database Access → edit user `saiaathish_db_user`** → replace
+   `atlasAdmin` with `readWrite` on the `unseenlab` database only (per §9).
 1. Sign in to https://cloud.mongodb.com with the Atlas account that owns the cluster behind `MONGODB_URI` (the account whose current IP is allowlisted — local dev works, so that account has project access).
 2. Pick the project whose cluster hostname matches the `mongodb+srv://` URI host.
 3. Left sidebar → **Security** → **Network Access**.
 4. Click **Add IP Address**.
-5. Choose **"Allow access from anywhere"** (adds `0.0.0.0/0`) — acceptable *temporarily* because the URI user `saiaathish_db_user` is a dedicated, least-privilege database user, not an admin/owner. (Alternative: paste Vercel egress IP ranges, but Hobby egress is a dynamic shared pool, so ranges are not stable — `0.0.0.0/0` is the reliable choice for the hackathon.)
+5. Choose **"Allow access from anywhere"** (adds `0.0.0.0/0`) — acceptable *temporarily* ONLY AFTER step 0, because the URI user is then a least-privilege `readWrite` user on `unseenlab` only. (Alternative: paste Vercel egress IP ranges, but Hobby egress is a dynamic shared pool, so ranges are not stable — `0.0.0.0/0` is the reliable choice for the hackathon.)
 6. Click **Confirm**. Entry becomes Active within ~1–5 minutes.
 7. Trigger a new preview deployment (any push to the PR branch, or `vercel deploy --preview` from the repo). No env change needed — `MONGODB_URI` is already in the preview environment.
 

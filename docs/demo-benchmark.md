@@ -125,7 +125,7 @@ prompt, and never an escalation to verified_simulation.
 
 | Flow | Result |
 | --- | --- |
-| Guest save → reload | banner "Saved on this device" + trials restored (real browser, preview) |
+| Guest save → reload | banner "Saved on this device" + trials restored (real browser, LOCAL app against real Firebase + Atlas — the preview is behind Vercel SSO, see docs/closure-persistence.md) |
 | Signed-in PUT | 200, revision 1, owner-scoped row |
 | GET by id (owner) | 200, row returned |
 | Idempotent replay | same `mutation_id` → same revision, no new write |

@@ -144,7 +144,7 @@ science — the science stays the science."* Echo the mandated pitch.
 | Unsafe/clarify/unsupported routed offline before the model | `src/demonstrations/generation/intent/route.ts` |
 | Guest save → reload restores honestly ("Saved on this device") | Gate 4, real browser |
 | Account save + second-browser resume verified live (local app vs real Firebase + Atlas; preview blocked by Atlas Network Access until console step) | Gate 4, `docs/closure-atlas.md` |
-| Suite: 1096 unit/component green; Playwright guest 40/10 env-gated | README + latest run |
+| Suite: 66 files / 1127 unit+component green (2026-08-05 closure run); Playwright 39 passed / 10 env-gated skipped locally (1 pre-existing env-mismatch), CI e2e green | README + closure final gate |
 
 **Recording:** do NOT fabricate. If a beat fails on screen, say so and
 use the matching fallback line above. The participant-session revision
