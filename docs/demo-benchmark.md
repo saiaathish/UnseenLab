@@ -100,3 +100,42 @@ Photosynthesis/ecosystem returned `explanatory_animation` (timeline
 narrative) instead of the gold's `conceptual_demonstration` — a trust-level
 downgrade (rank 3 → 1), explicitly permitted for biological processes by the
 prompt, and never an escalation to verified_simulation.
+
+---
+
+## Gate 4 — real persistence (2026-08-05)
+
+### Defects found in a real browser and fixed (commit d8b2db0)
+
+1. **Lying save banner (guest).** `saveToDevice()` serialized the session
+   BEFORE flipping `savedToDevice`, so the persisted blob always carried
+   `false` — after reload the banner said "Not saved" while the trial log
+   restored. Now the flag flips before serialization; the reload shows
+   "Saved on this device" + "Save again" with the trial log intact.
+   Regression test pins the persisted blob.
+2. **No account restore.** The demo page only read localStorage, so a
+   signed-in learner on a second browser got "No demonstration found" even
+   though `GET /api/demonstrations/<id>` existed. The page now falls back to
+   `loadFromCloud()`; the store maps the row's provenance source to the UI
+   badge, restores with an honest empty trial log (entries are
+   device-local by design) and `savedToCloud: true`. 401/404/absent rows
+   restore nothing.
+
+### Verified live (real Firebase + real Atlas, identical code paths)
+
+| Flow | Result |
+| --- | --- |
+| Guest save → reload | banner "Saved on this device" + trials restored (real browser, preview) |
+| Signed-in PUT | 200, revision 1, owner-scoped row |
+| GET by id (owner) | 200, row returned |
+| Idempotent replay | same `mutation_id` → same revision, no new write |
+| Second browser resume | no device copy + account cookie → demo restored "Saved to your account" (client `loadFromCloud`) |
+| Two-user isolation | learner_b GET → `null`; learner_b PUT → own row under `{firebaseUid, demonstrationId}`; learner_b never sees learner_a's row |
+
+### Environment blocker on the preview (not a code defect)
+
+Vercel Hobby egress is a dynamic shared pool; the Atlas Network Access list
+only contains the local IP, so the lambda's TLS handshake is terminated
+(`tlsv1 alert internal error`) and cloud writes 503 `not_configured`. Fix:
+Atlas console → Network Access → add `0.0.0.0/0` (strong app-user
+password). Documented in `docs/firebase-mongodb-setup.md`.

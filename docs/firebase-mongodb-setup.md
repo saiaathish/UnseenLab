@@ -182,3 +182,28 @@ popup round trip is skipped. The suite self-skips without
 - `npm audit`: 3 high findings in `sharp` (transitive via Next.js image
   optimization; unused by the app). Fix: `next@16.3.0` (out of pinned range,
   deferred).
+
+### Gate-4 note (2026-08-05): Vercel preview cloud persistence
+
+`PUT/GET /api/demonstrations` (generated-demo cloud save) on a Vercel
+**preview** fails with `503 not_configured` even when `MONGODB_URI` is set
+on the branch. Diagnosis (deployment logs + a temporary health probe, since
+reverted): the lambda reaches Atlas but Atlas terminates the TLS handshake
+(`tlsv1 alert internal error`) — the classic Atlas response to a client IP
+that is NOT in the project's Network Access list. Your local IP is
+allowlisted (which is why every local/e2e run passes), but Vercel Hobby
+functions egress from a dynamic shared pool; Vercel Static IPs are
+Pro/Enterprise-only ($100/mo, no Hobby equivalent).
+
+**Fix (Atlas console, one step):** Atlas → Network Access → Add IP address →
+`0.0.0.0/0` (protect with the strong app-user password; the app user has
+read/write only on the `unseenlab` database). Or add the current Vercel
+function egress IP, but it rotates on Hobby.
+
+Verified with the allowlisted path (local `next dev` against the real
+Firebase project + real Atlas, identical code): signed-in PUT 200 (revision
+1), GET-by-id 200 owner-scoped, idempotent replay (same `mutation_id` →
+same revision, no new write), two-user isolation (learner_b GET → null;
+PUT creates learner_b's own row under the composite key), and the client
+`loadFromCloud` second-browser resume restores the demo with an honest
+"Saved to your account" banner and empty trial log.
