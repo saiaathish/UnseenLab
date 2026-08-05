@@ -1166,3 +1166,185 @@ describe("exported constants", () => {
     expect(SPEC_LIMITS.maxExplanationChars).toBe(800);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Scientific-field boundary: the sanitizer must REJECT (never repair) any
+// malformation touching a scientifically meaningful field. Documented in
+// docs/sanitizer-repair-policy.md. Repair is a closed allowlist; everything
+// else rejects through the strict schema or the science policy.
+// ---------------------------------------------------------------------------
+
+describe("sanitizer scientific-field boundary", () => {
+  it("rejects a trust escalation to verified without a simulation block", () => {
+    const spec = conceptualDemonstrationSpec();
+    spec.trust.level = "verified_simulation";
+    spec.trust.label = "Verified simulation";
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("rejected");
+    expect(result.spec).toBeUndefined();
+    expect(result.reasons).toContain("science_policy:level1_simulation");
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+
+  it("rejects a trust escalation that adds an engineId without a simulation block", () => {
+    const spec = conceptualDemonstrationSpec();
+    spec.trust.level = "verified_simulation";
+    spec.trust.label = "Verified simulation";
+    spec.trust.engineId = "pendulum";
+    spec.trust.engineVersion = "1.0.0";
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("science_policy:level1_simulation");
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+
+  it("rejects an engine substitution to a different engine (no repair)", () => {
+    const spec = verifiedSimulationSpec();
+    spec.simulation!.engineId = "waves";
+    spec.simulation!.engineVersion = "1.0.0";
+    spec.trust.engineId = "waves";
+    spec.trust.engineVersion = "1.0.0";
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("rejected");
+    expect(result.spec).toBeUndefined();
+    // The pendulum parameter/readout keys are foreign to the waves engine.
+    expect(result.reasons).toContain("incompatible_engine");
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+
+  it("rejects a control retargeted to a foreign parameter (never repaired)", () => {
+    const spec = verifiedSimulationSpec();
+    spec.controls[0].target = { kind: "parameter", ref: "frequency" };
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("invalid_control_target");
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+
+  it("rejects a fabricated correctIndex on a model-generated spec (never stripped)", () => {
+    const spec = verifiedSimulationSpec();
+    spec.provenance.source = "model_generated_spec";
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("rejected");
+    expect(result.spec).toBeUndefined();
+    expect(result.reasons).toContain(
+      "science_policy:model_graded_prediction"
+    );
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+
+  it("rejects a correctIndex added to a conceptual spec (curated-only truth)", () => {
+    const spec = conceptualDemonstrationSpec();
+    spec.prediction.correctIndex = 0;
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("science_policy:level2_prediction");
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+
+  it("never repairs a relationship operator mutated to another valid operator", () => {
+    const spec = verifiedSimulationSpec();
+    spec.scene3d!.relationships[0].type = "inhibits"; // was "causes"
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+    expect(result.reasons).toEqual([]);
+    expect(result.spec!.scene3d!.relationships[0].type).toBe("inhibits");
+  });
+
+  it("rejects an unknown relationship operator", () => {
+    const spec = verifiedSimulationSpec();
+    (spec.scene3d!.relationships[0] as { type: string }).type =
+      "causally_drives";
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons.some((r) => r.startsWith("invalid_enum"))).toBe(true);
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+
+  it("never repairs a parameter unit mutated to a scientifically different unit", () => {
+    const spec = verifiedSimulationSpec();
+    spec.simulation!.parameters[0].unit = "kg"; // pendulum length in kilograms
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+    expect(result.reasons).toEqual([]);
+    expect(result.spec!.simulation!.parameters[0].unit).toBe("kg");
+  });
+
+  it("rejects a unit string beyond the schema bound (never repaired)", () => {
+    const spec = verifiedSimulationSpec();
+    spec.simulation!.parameters[0].unit = "kilogram-force-seconds";
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("text_exceeded:unit");
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+
+  it("rejects formula content carrying an executable marker in a scientific text field", () => {
+    const spec = verifiedSimulationSpec();
+    spec.normalizedConcept = "a = F/m, fallback eval(0)";
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("unsafe_value:code");
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+
+  it("never repairs plain formula text in a scientific field (verbatim pass-through)", () => {
+    const spec = verifiedSimulationSpec();
+    spec.normalizedConcept = "Newton's second law: F = m × a";
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+    expect(result.reasons).toEqual([]);
+    expect(result.spec!.normalizedConcept).toBe(
+      "Newton's second law: F = m × a"
+    );
+  });
+
+  it("rejects an explanatory animation claiming verified status", () => {
+    const spec = explanatoryAnimationSpec();
+    spec.trust.level = "verified_simulation";
+    spec.trust.label = "Verified simulation";
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("science_policy:level1_simulation");
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+
+  it("still strips a null scene3d (allowed representational repair)", () => {
+    const spec = verifiedSimulationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    raw.scene3d = null;
+    const result = validateDemoSpec(JSON.stringify(raw));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:null_scene3d");
+    expect(result.spec!.scene3d).toBeUndefined();
+    // The verified engine itself is untouched — trust boundary intact.
+    expect(result.spec!.simulation!.engineId).toBe("pendulum");
+  });
+
+  it("still clamps an over-declared maxControls budget (allowed repair)", () => {
+    const spec = verifiedSimulationSpec();
+    spec.limits.maxControls = 999;
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:maxControls");
+    expect(result.spec!.limits.maxControls).toBe(SPEC_LIMITS.maxControls);
+  });
+
+  it("still drops an empty unit string (display-only repair)", () => {
+    const spec = verifiedSimulationSpec();
+    spec.simulation!.parameters[0].unit = "";
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:empty_unit");
+    expect(result.spec!.simulation!.parameters[0].unit).toBeUndefined();
+  });
+
+  it("rejects an unknown malformation: non-numeric engine parameter value", () => {
+    const spec = verifiedSimulationSpec();
+    (spec.simulation!.parameters[0] as { value: unknown }).value = "fast";
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons.some((r) => r.startsWith("invalid_type"))).toBe(true);
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+});

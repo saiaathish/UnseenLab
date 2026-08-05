@@ -58,7 +58,12 @@ The platform layer is:
    cluster.
 2. **Database Access → Add new database user**: create an app user (e.g.
    `unseenlab`) with a strong password. The app needs read/write on the
-   `unseenlab` database only.
+   `unseenlab` database only. **Live-state check (2026-08-05):** the current
+   app user `saiaathish_db_user` is provisioned as `atlasAdmin` on the live
+   cluster — verify with `connectionStatus` and downgrade it to `readWrite`
+   on `unseenlab` only (see `docs/closure-atlas.md` §9). Atlas does not
+   permit `createUser` over the wire protocol; user roles are changed in the
+   Atlas console only.
 3. **Network Access → Add IP address**: allow your deployment's egress
    (for local dev, add your current IP; for Vercel/Render, follow their
    static-egress docs or open the CIDR your provider documents).

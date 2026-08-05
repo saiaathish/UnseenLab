@@ -5,8 +5,10 @@ flagged experience (`NEXT_PUBLIC_GENERATIVE_DEMOS_ENABLED=1`) on the preview.
 
 ## Core script (8–10 min, one learner)
 
-1. **Ask**: "Show why planets stay in orbit." → expect "Verified simulation"
-   badge, orbit stage (3D or hybrid), prediction prompt BEFORE controls unlock.
+1. **Ask** (mandated verbatim task — judge audit Gate 5/6): "Ask UnseenLab
+   to help you understand why planets remain in orbit." → expect "Verified
+   simulation" badge, orbit stage (3D or hybrid), prediction prompt BEFORE
+   controls unlock.
 2. **Predict** → submit → controls unlock → raise the speed slider → observe
    the orbit widen and the period grow (readouts live).
 3. **Compare**: open the table representation; compare your prediction with the

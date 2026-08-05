@@ -617,6 +617,41 @@ describe("demonstration shell accessibility", () => {
     expect(changedOnTab[0]).toBe("View: Data table");
   });
 
+  it("announces adaptation decisions in a polite status region", async () => {
+    const spec = verifiedPendulumSpec();
+    assertValidSpec(spec);
+    const user = userEvent.setup();
+    const { container } = render(<Harness spec={spec} />);
+
+    // Suggestions appear once the prediction gate is passed.
+    await submitPredictionKeyboard(user, "It increases but not by double");
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Accept" }).length).toBeGreaterThan(0);
+    });
+
+    // Polite/status regions only (slider outputs are aria-live=off and are
+    // not announcements): exactly one region may change per decision.
+    const polite = () =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(
+          "[aria-live='polite'], [role='status']"
+        )
+      ).map((el) => ({ el, text: el.textContent ?? "" }));
+    const before = polite();
+    await user.click(screen.getAllByRole("button", { name: "Accept" })[0]);
+    const changed = changedRegionTexts(before, polite());
+    expect(changed).toHaveLength(1);
+    expect(changed[0]).toMatch(/^Adaptation applied: /);
+    expect(changed[0]).toContain("pendulum length");
+
+    // Rejecting announces a distinct outcome, again as the only change.
+    const beforeReject = polite();
+    await user.click(screen.getAllByRole("button", { name: "Reject" })[0]);
+    const changedOnReject = changedRegionTexts(beforeReject, polite());
+    expect(changedOnReject).toHaveLength(1);
+    expect(changedOnReject[0]).toMatch(/^Adaptation dismissed: /);
+  });
+
   it("renders a visible, announced canvas-fallback message when WebGL is unavailable", async () => {
     const spec = conceptual3dSpec();
     assertValidSpec(spec);

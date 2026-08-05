@@ -19,9 +19,9 @@
  *   - doubling the separation (140 -> 280) drops the midpoint field readout
  *     from 0.004 to 0.001.
  *
- * The "Dipole preset" toggle drives the q2 parameter (on -> -q1, off -> +1),
- * flipping between the dipole (potential null at the midpoint) and the
- * same-sign configuration (field null at the midpoint).
+ * The q2 slider sets the second charge directly (default -1 with q1=+1:
+ * dipole, potential null at the midpoint; set q2=+1 for the same-sign
+ * configuration, field null at the midpoint).
  */
 import { TRUST_LABELS } from "@/demonstrations/spec/demo-spec";
 import type {
@@ -157,11 +157,14 @@ const CONTROLS: DemoSpecV1["controls"] = [
     target: { kind: "animation", ref: "anim-translate-charge-negative" },
   },
   {
-    id: "ctl-dipole",
-    type: "toggle",
-    label: "Dipole preset (opposite signs)",
+    id: "ctl-q2",
+    type: "slider",
+    label: "Charge 2 (q2)",
     target: { kind: "parameter", ref: "q2" },
-    defaultValue: "on",
+    min: -10,
+    max: 10,
+    step: 0.5,
+    defaultValue: -1,
   },
   {
     id: "ctl-q1",

@@ -76,14 +76,14 @@ function sceneObjects(mobile: boolean): PrimitiveObjectSpec[] {
       kind: "orbit_path",
       label: "Planet orbit",
       position: { x: 0, y: 0, z: 0 },
-      size: 6,
+      size: 12,
       color: "#64748b",
     },
     {
       id: "planet-system",
       kind: "group",
       position: { x: 6, y: 0, z: 0 },
-      children: ["planet", "orbit-path-moon", "moon", "velocity-arrow", "gravity-arrow"],
+      children: ["planet", "moon"],
     },
     {
       id: "planet",
@@ -95,14 +95,6 @@ function sceneObjects(mobile: boolean): PrimitiveObjectSpec[] {
       trailPoints: 140,
     },
     {
-      id: "orbit-path-moon",
-      kind: "orbit_path",
-      label: "Moon orbit",
-      position: { x: 6, y: 0, z: 0 },
-      size: 1.4,
-      color: "#94a3b8",
-    },
-    {
       id: "moon",
       kind: "sphere",
       label: "Moon (illustrative)",
@@ -110,22 +102,6 @@ function sceneObjects(mobile: boolean): PrimitiveObjectSpec[] {
       size: 0.35,
       color: "#d6d3d1",
       trailPoints: 80,
-    },
-    {
-      id: "velocity-arrow",
-      kind: "arrow",
-      label: "Velocity",
-      position: { x: 7.1, y: 0, z: 0 },
-      size: 1.6,
-      color: "#22d3ee",
-    },
-    {
-      id: "gravity-arrow",
-      kind: "arrow",
-      label: "Gravity pull",
-      position: { x: 5.3, y: 0, z: 0 },
-      size: 1.4,
-      color: "#f87171",
     },
     {
       id: "camera-marker",
@@ -162,13 +138,11 @@ const RELATIONSHIPS = [
   },
 ];
 
-/** Full-motion stage: orbit + rotate + rotating vector arrows + soft glow. */
+/** Full-motion stage: orbit + rotate + soft glow. */
 const ANIMATIONS: AnimationSpec[] = [
   { id: "anim-orbit-planet", target: "planet-system", operator: "orbit", speed: 1, axis: "y" },
   { id: "anim-orbit-moon", target: "moon", operator: "orbit", speed: 2.6, axis: "y" },
   { id: "anim-rotate-star", target: "star", operator: "rotate", speed: 0.35, axis: "y" },
-  { id: "anim-velocity-vector", target: "velocity-arrow", operator: "update_vector", speed: 1, axis: "y" },
-  { id: "anim-gravity-vector", target: "gravity-arrow", operator: "update_vector", speed: 1, axis: "y" },
   { id: "anim-star-glow", target: "star-glow", operator: "pulse", speed: 0.8, amplitude: 0.15 },
 ];
 
@@ -224,13 +198,6 @@ function controls(reducedMotion: boolean): DemoSpecV1["controls"] {
   return [
     base[0],
     base[1],
-    {
-      id: "ctl-vectors",
-      type: "toggle",
-      label: "Show velocity and gravity vectors",
-      target: { kind: "animation", ref: "anim-velocity-vector" },
-      defaultValue: "on",
-    },
     base[2],
     {
       id: "ctl-speed-adj",
@@ -311,7 +278,7 @@ export function buildOrbitsShowcase(prefs?: ShowcasePrefs): DemoSpecV1 {
 
   const limitations: string[] = [
     "Idealized point-mass gravity; the engine simulates exactly one star and one planet (RK4 two-body).",
-    "The moon on the 3D stage is illustrative; the engine readouts describe the planet only.",
+    "The moon and the 3D orbit ring are illustrative stage guides (the ring marks the default orbit); the engine's live path, readouts, and table are the quantitative source.",
   ];
   if (reducedMotion) {
     limitations.push(

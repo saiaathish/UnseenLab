@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 
 /**
@@ -121,40 +123,63 @@ interface Props {
 }
 
 export function DemonstrationAdaptationPanel({ suggestions, onDecision }: Props) {
-  if (suggestions.length === 0) return null;
+  const [announcement, setAnnouncement] = useState<string | null>(null);
+
+  const decide = (suggestion: AdaptationSuggestion, accepted: boolean) => {
+    setAnnouncement(
+      accepted
+        ? `Adaptation applied: ${suggestion.text}`
+        : `Adaptation dismissed: ${suggestion.text}`
+    );
+    onDecision(suggestion, accepted);
+  };
 
   return (
-    <section
-      aria-label="Adaptation suggestions"
-      className="flex flex-col gap-3 rounded-xl border border-accent/40 bg-surface p-4"
-    >
-      <h2 className="text-sm font-semibold uppercase tracking-widest text-accent">
-        Suggested adaptation
-      </h2>
-      {suggestions.map((suggestion) => (
-        <div
-          key={suggestion.id}
-          className="rounded-lg border border-border bg-surface-raised p-3"
+    <>
+      {suggestions.length > 0 && (
+        <section
+          aria-label="Adaptation suggestions"
+          className="flex flex-col gap-3 rounded-xl border border-accent/40 bg-surface p-4"
         >
-          <p className="text-sm leading-6">{suggestion.text}</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => onDecision(suggestion, true)}
-              className="min-h-11 rounded-lg bg-accent-strong px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+          <h2 className="text-sm font-semibold uppercase tracking-widest text-accent">
+            Suggested adaptation
+          </h2>
+          {suggestions.map((suggestion) => (
+            <div
+              key={suggestion.id}
+              className="rounded-lg border border-border bg-surface-raised p-3"
             >
-              Accept
-            </button>
-            <button
-              type="button"
-              onClick={() => onDecision(suggestion, false)}
-              className="min-h-11 rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-raised"
-            >
-              Reject
-            </button>
-          </div>
-        </div>
-      ))}
-    </section>
+              <p className="text-sm leading-6">{suggestion.text}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => decide(suggestion, true)}
+                  className="min-h-11 rounded-lg bg-accent-strong px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+                >
+                  Accept
+                </button>
+                <button
+                  type="button"
+                  onClick={() => decide(suggestion, false)}
+                  className="min-h-11 rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-raised"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+      {/* Polite announcement of the learner's adaptation decision. The
+          region mounts only with text (like the prediction status) and the
+          text changes only on a decision, so it never spams; once mounted it
+          stays mounted even when the panel empties, so the final decision is
+          still announced. */}
+      {announcement !== null && (
+        <p role="status" className="sr-only">
+          {announcement}
+        </p>
+      )}
+    </>
   );
 }

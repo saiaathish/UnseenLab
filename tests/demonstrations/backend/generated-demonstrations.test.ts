@@ -456,3 +456,77 @@ describe("listDemonstrations", () => {
     expect(rows.map((r) => r.demonstrationId)).toEqual(["demo-a1"]);
   });
 });
+
+describe("concurrent writers and operator-shaped ids", () => {
+  let collection: FakeCollection;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    collection = demonstrationCollection();
+  });
+
+  it("two simultaneous writers with the same expected_revision produce exactly one success", async () => {
+    await upsertDemonstration("user-a", upsertInput("demo-race"), {
+      expectedRevision: 0,
+    });
+    const writesBefore = collection.writeCount;
+    const [a, b] = await Promise.all([
+      upsertDemonstration(
+        "user-a",
+        { ...upsertInput("demo-race"), title: "Writer A" },
+        { expectedRevision: 1 }
+      ),
+      upsertDemonstration(
+        "user-a",
+        { ...upsertInput("demo-race"), title: "Writer B" },
+        { expectedRevision: 1 }
+      ),
+    ]);
+    const statuses = [a.status, b.status].sort();
+    // Exactly one write lands; the loser observes the winner's row as a
+    // conflict (the revision is part of the atomic match filter).
+    expect(statuses).toEqual(["conflict", "ok"]);
+    const winner = a.status === "ok" ? a : b;
+    const loser = a.status === "ok" ? b : a;
+    expect(winner.row?.revision).toBe(2);
+    expect(loser.status === "conflict" ? loser.row?.revision : -1).toBe(2);
+    expect(collection.rows.size).toBe(1);
+    expect(collection.writeCount).toBe(writesBefore + 1);
+  });
+
+  it("a simultaneous writer with the same mutation_id and expected_revision replays, not overwrites", async () => {
+    await upsertDemonstration("user-a", upsertInput("demo-replay"), {
+      mutationId: "m-seed",
+      expectedRevision: 0,
+    });
+    const writesBefore = collection.writeCount;
+    const [a, b] = await Promise.all([
+      upsertDemonstration("user-a", upsertInput("demo-replay"), {
+        mutationId: "m-same",
+        expectedRevision: 1,
+      }),
+      upsertDemonstration("user-a", upsertInput("demo-replay"), {
+        mutationId: "m-same",
+        expectedRevision: 1,
+      }),
+    ]);
+    const statuses = [a.status, b.status].sort();
+    // One writer advances the revision; the other's atomic filter misses and
+    // the stored mutation id matches, so it is served as a replay.
+    expect(statuses).toEqual(["ok", "replay"]);
+    expect(collection.writeCount).toBe(writesBefore + 1);
+    expect(collection.rows.size).toBe(1);
+  });
+
+  it("dollar-prefixed ids are matched as literals, never as operators", async () => {
+    collection.seed("user-a", "$gt");
+    collection.seed("user-a", "demo-1");
+    // An id of "$gt" reads back only the literal row — no operator behavior.
+    expect((await findDemonstration("user-a", "$gt"))?.demonstrationId).toBe("$gt");
+    expect(await findDemonstration("user-a", "$ne")).toBeNull();
+    expect(await findDemonstration("user-a", "$in")).toBeNull();
+    const deleted = await deleteDemonstrations("user-a", ["$gt"]);
+    expect(deleted).toBe(1);
+    expect(await findDemonstration("user-a", "demo-1")).not.toBeNull();
+  });
+});

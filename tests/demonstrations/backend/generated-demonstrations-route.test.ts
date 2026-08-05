@@ -646,3 +646,56 @@ describe("fixture sanity", () => {
     expect(result.status).toBe("valid");
   });
 });
+
+describe("RED-TEAM: Mongo operator injection at the API boundary", () => {
+  let collection: FakeCollection;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    collection = demonstrationCollection();
+    mocks.verifySessionUser.mockResolvedValue(SESSION_USER);
+  });
+
+  it("DELETE rejects operator-object ids ($gt/$ne/$in) with 400 before touching any row", async () => {
+    collection.seed("user-platform-a", "demo-1");
+    for (const evil of [{ $gt: "" }, { $ne: "demo-1" }, { $in: ["demo-1"] }]) {
+      const response = await batchDelete(deleteRequest({ ids: [evil] }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "invalid_input" });
+    }
+    expect(collection.rows.size).toBe(1); // nothing was deleted
+  });
+
+  it("PUT rejects a spec whose id is an operator object (400 invalid_spec, nothing persisted)", async () => {
+    const evil = validSpec() as unknown as { id: unknown };
+    evil.id = { $gt: "" };
+    const response = await PUT(
+      putRequest({ demonstration: evil as unknown as Partial<DemoSpecV1> }),
+    );
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("invalid_spec");
+    expect(collection.rows.size).toBe(0);
+  });
+
+  it("operator-looking strings in ids are literals, never operators (no injection)", async () => {
+    collection.seed("user-platform-a", "$gt");
+    collection.seed("user-platform-a", "demo-1");
+    const response = await batchDelete(deleteRequest({ ids: ["$gt"] }));
+    expect(response.status).toBe(200);
+    expect(collection.rows.size).toBe(1); // only the literal "$gt" row went away
+    const remaining = [...collection.rows.values()][0];
+    expect(remaining.demonstrationId).toBe("demo-1");
+  });
+
+  it("GET /api/demonstrations/[id] treats an operator-shaped path id as a literal", async () => {
+    collection.seed("user-platform-a", "$gt", { title: "literal dollar row" });
+    const response = await getOne(
+      idRouteRequest("$gt", "GET"),
+      idParams("$gt")
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.demonstration.demonstrationId).toBe("$gt");
+  });
+});

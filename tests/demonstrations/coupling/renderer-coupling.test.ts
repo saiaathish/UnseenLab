@@ -622,6 +622,49 @@ describe("primitive renderer canonical-state coupling", () => {
     renderer.dispose();
   });
 
+  it("setEngineState never mutates the canonical state object (one state shared by all surfaces)", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const renderer = new PrimitiveSceneRenderer(canvas);
+    const mapping: EngineMapping = {
+      p: { body: "planet", scale: 1, offsetX: 0, offsetY: 0 },
+      vf: { body: "@field", scale: 3 / 70, offsetX: 0, offsetY: 0 },
+      ws: { body: "@surface", scale: 10, offsetX: 0, offsetY: 0 },
+    };
+    renderer.setSpec(
+      makeSpec({
+        objects: [
+          { id: "p", kind: "sphere", position: { x: 0, y: 0, z: 0 } },
+          { id: "vf", kind: "vector_field", size: 9, position: { x: 0, y: 0, z: 0 } },
+          { id: "ws", kind: "wave_surface", size: 10, position: { x: 0, y: 0, z: 0 } },
+        ],
+        relationships: [],
+        animations: [],
+      }),
+      { engineMapping: mapping }
+    );
+    const state = {
+      bodies: { planet: { x: 3, y: 2 } },
+      field: {
+        vectors: Array.from({ length: 16 }, () => ({ x: 0, y: 0, ex: 1, ey: 0, magnitude: 1 })),
+        width: 4,
+        height: 4,
+        span: 280,
+      },
+      surface: { values: new Array<number>(200 * 120).fill(0.5), width: 200, height: 120 },
+    };
+    const snapshot = JSON.stringify(state);
+    renderer.setEngineState(state);
+    fireFrame(1000);
+    fireFrame(1100);
+    fireFrame(1200);
+    // The page lifts ONE canonical state object to every surface; the 3D
+    // renderer must consume it read-only, or the 2D view / readouts / replay
+    // would diverge from what the 3D stage saw.
+    expect(JSON.stringify(state)).toBe(snapshot);
+    renderer.dispose();
+  });
+
   it("wave_surface heights are bilinearly sampled from a fake surface grid", () => {
     const canvas = makeCanvas();
     mockWebGL(canvas);
