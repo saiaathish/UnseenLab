@@ -17,6 +17,24 @@ import { normalizeQuery } from "../intent/normalize";
 import type { IntentSpec } from "../intent/types";
 import { buildEngineSpec } from "./engine-builder";
 import { buildConceptualSpec, buildTimelineSpec } from "./template-builder";
+import {
+  showcaseById,
+  type ShowcaseId,
+} from "@/demonstrations/showcases";
+import type { VerifiedEngineId } from "@/demonstrations/spec/demo-spec";
+
+/**
+ * The three showcase families are the immersive entry point for their
+ * engines: orbits, charges and waves route to the curated hybrid 3D/2D
+ * showcases (Level 1, engine-coupled, with 2D stage + table + timeline +
+ * text-sequence alternatives). Every other engine uses the generic 2D
+ * builder, which stays fully accessible without a 3D stage.
+ */
+const ENGINE_TO_SHOWCASE: Partial<Record<VerifiedEngineId, ShowcaseId>> = {
+  orbits: "orbits",
+  charges: "electric-fields",
+  waves: "wave-interference",
+};
 
 export interface OfflineDemoResult {
   status: "spec" | "clarify" | "unsafe" | "unsupported";
@@ -38,7 +56,15 @@ function buildSpecFromIntent(
     return buildTimelineSpec(intent.timeline_topic, query, prefs);
   }
   if (intent.candidate_engine_ids.length > 0) {
-    return buildEngineSpec(intent.candidate_engine_ids[0], query, prefs);
+    const engineId = intent.candidate_engine_ids[0];
+    const showcaseId = ENGINE_TO_SHOWCASE[engineId];
+    if (showcaseId) {
+      const showcase = showcaseById(showcaseId);
+      if (showcase) {
+        return showcase.build({ reducedMotion: prefs.reducedMotion });
+      }
+    }
+    return buildEngineSpec(engineId, query, prefs);
   }
   if (intent.candidate_template_ids.length > 0) {
     return buildConceptualSpec(

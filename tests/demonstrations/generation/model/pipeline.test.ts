@@ -156,7 +156,9 @@ describe("generateDemo — model path", () => {
 
   it("repairs out-of-range tuning numbers and returns the repaired spec as model", async () => {
     const spec = structuredClone(MODEL_SPEC);
-    // orbits "g" parameter range is 0.2..3; the sanitizer clamps to 3.
+    // Push the first engine parameter far past ITS declared max; the
+    // sanitizer must clamp it back to the bound (max is engine-specific).
+    const paramMax = spec.simulation!.parameters[0].max;
     spec.simulation!.parameters[0].value = 9999;
     fetchMock.mockResolvedValue(chatCompletion(JSON.stringify(spec)));
 
@@ -166,7 +168,7 @@ describe("generateDemo — model path", () => {
     expect(data.outcome).toBe("spec");
     expect(data.source).toBe("model");
     expect(data.reason).toContain("repaired:param_value");
-    expect(data.spec.simulation?.parameters[0].value).toBeLessThanOrEqual(3);
+    expect(data.spec.simulation?.parameters[0].value).toBeLessThanOrEqual(paramMax);
   });
 
   it("retries ONCE with a repair directive when the first pass rejects, then returns the model spec", async () => {

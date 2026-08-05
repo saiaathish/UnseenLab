@@ -209,6 +209,9 @@ describe("RED-TEAM: string exhaustion", () => {
       relationships: [],
       animations: [],
     };
+    // The showcase base spec carries animation-targeting controls; the
+    // replaced scene3d must not leave dangling targets behind.
+    spec.controls = [];
     const outcome = validateDemoSpec(spec);
     expect(["repaired"]).toContain(outcome.status);
     expect(outcome.reasons.some((r) => r.startsWith("repaired:"))).toBe(true);

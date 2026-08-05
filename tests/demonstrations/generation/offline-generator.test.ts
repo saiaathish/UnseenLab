@@ -109,8 +109,13 @@ async function expectNotRejected(spec: DemoSpecV1): Promise<void> {
 // ---------------------------------------------------------------------------
 
 describe("offline generator — verified engines (Level 1)", () => {
+  // orbits/charges/waves route to the immersive curated showcases (hybrid
+  // 3D/2D, engine-coupled); every other engine uses the generic 2D builder.
+  const SHOWCASE_ENGINES: readonly string[] = ["orbits", "charges", "waves"];
+
   for (const engineId of VERIFIED_ENGINE_IDS) {
     const catalog = ENGINE_CATALOG[engineId];
+    const isShowcase = SHOWCASE_ENGINES.includes(engineId);
 
     describe(`engine ${engineId}`, () => {
       const result = generateOfflineDemo(ENGINE_QUERIES[engineId], prefs);
@@ -149,23 +154,39 @@ describe("offline generator — verified engines (Level 1)", () => {
         }
       });
 
-      it("has no scene3d or timeline", () => {
-        expect(spec.scene3d).toBeUndefined();
-        expect(spec.timeline).toBeUndefined();
-      });
+      it(
+        isShowcase
+          ? "has an immersive scene3d (showcase)"
+          : "has no scene3d or timeline",
+        () => {
+          if (isShowcase) {
+            expect(spec.scene3d).toBeDefined();
+            expect(spec.scene3d!.objects.length).toBeGreaterThan(0);
+            // Timeline is optional for showcases (orbits carries one as an
+            // educational sequence); the generic builder never emits one.
+            return;
+          }
+          expect(spec.scene3d).toBeUndefined();
+          expect(spec.timeline).toBeUndefined();
+        },
+      );
 
-      it("controls are within limits and include play/pause and reset", () => {
+      it("controls are within limits and unique; play/pause+reset where meaningful", () => {
         expect(spec.controls.length).toBeLessThanOrEqual(SPEC_LIMITS.maxControls);
         expect(spec.controls.length).toBeGreaterThanOrEqual(3);
         const types = spec.controls.map((c) => c.type);
-        expect(types).toContain("play_pause");
-        expect(types).toContain("reset");
-        const sliders = spec.controls.filter((c) => c.type === "slider");
-        expect(sliders.length).toBeGreaterThanOrEqual(2);
-        expect(sliders.length).toBeLessThanOrEqual(3);
+        // The electric-fields showcase is a static field: no play/pause/reset.
+        if (engineId !== "charges") {
+          expect(types).toContain("play_pause");
+          expect(types).toContain("reset");
+        }
+        const manipulables = spec.controls.filter(
+          (c) => c.type === "slider" || c.type === "drag_handle",
+        );
+        expect(manipulables.length).toBeGreaterThanOrEqual(2);
         const ids = new Set(spec.controls.map((c) => c.id));
         expect(ids.size).toBe(spec.controls.length);
-        for (const slider of sliders) {
+        for (const slider of spec.controls.filter((c) => c.type === "slider")) {
           expect(typeof slider.min).toBe("number");
           expect(typeof slider.max).toBe("number");
           expect(typeof slider.step).toBe("number");
@@ -189,8 +210,18 @@ describe("offline generator — verified engines (Level 1)", () => {
           expect((REPRESENTATION_KINDS as readonly string[])).toContain(rep.kind);
         }
         const repKinds = spec.representations.map((r) => r.kind);
-        expect(repKinds).toContain("stage_2d");
-        expect(repKinds).toContain("diagram");
+        // Showcases lead with the 3D stage; generic specs lead with the 2D
+        // stage. Both always carry a non-3D data view and a text sequence.
+        if (isShowcase) {
+          expect(repKinds).toContain("stage_3d");
+        } else {
+          expect(repKinds).toContain("stage_2d");
+        }
+        // Non-3D data view: diagram (scene-based), table (parameter/readout
+        // data), or graph (e.g. intensity profile).
+        expect(
+          repKinds.some((k) => k === "diagram" || k === "table" || k === "graph"),
+        ).toBe(true);
         expect(repKinds).toContain("text_sequence");
         expect(spec.adaptationContext.allowed).toBe(true);
         expect(spec.adaptationContext.oneVariableMode).toBe(prefs.oneVariableMode);
@@ -200,9 +231,21 @@ describe("offline generator — verified engines (Level 1)", () => {
       });
 
       it("respects aspect ratio and limits from the catalog and SPEC_LIMITS", () => {
-        expect(spec.renderer.preferredAspectRatio).toBe(
-          catalog.supports3D ? 16 / 9 : 4 / 3,
-        );
+        if (isShowcase) {
+          // Showcases are hybrid 16:9 and declare tight (actual) limits that
+          // must never exceed the SPEC_LIMITS hard caps.
+          expect(spec.renderer.preferredAspectRatio).toBe(16 / 9);
+          expect(spec.limits.maxObjects).toBeLessThanOrEqual(SPEC_LIMITS.maxObjects);
+          expect(spec.limits.maxParticles).toBeLessThanOrEqual(
+            SPEC_LIMITS.maxParticlesMobile,
+          );
+          expect(spec.limits.maxTimelineEvents).toBeLessThanOrEqual(
+            SPEC_LIMITS.maxTimelineEvents,
+          );
+          expect(spec.limits.maxControls).toBeLessThanOrEqual(SPEC_LIMITS.maxControls);
+          return;
+        }
+        expect(spec.renderer.preferredAspectRatio).toBe(4 / 3);
         expect(spec.limits).toEqual({
           maxObjects: SPEC_LIMITS.maxObjects,
           maxParticles: SPEC_LIMITS.maxParticlesMobile,

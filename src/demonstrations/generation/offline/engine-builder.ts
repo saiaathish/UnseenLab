@@ -441,12 +441,13 @@ export function buildEngineSpec(
   });
 
   const supports3D = catalog.supports3D;
+  // The offline engine builder emits a 2D engine spec with NO scene3d, so it
+  // only advertises representations it can actually render: the 2D stage, a
+  // data table of parameters + readouts, and a text sequence. A stage_3d or
+  // diagram tab without scene3d content would be a dead end.
   const representations: DemoSpecV1["representations"] = [
     { id: "rep_stage_2d", kind: "stage_2d", label: "2D stage" },
-    ...(supports3D
-      ? [{ id: "rep_stage_3d", kind: "stage_3d", label: "3D view" } as const]
-      : []),
-    { id: "rep_diagram", kind: "diagram", label: "Diagram" },
+    { id: "rep_table", kind: "table", label: "Table" },
     { id: "rep_text", kind: "text_sequence", label: "Text sequence" },
   ];
 
@@ -475,7 +476,7 @@ export function buildEngineSpec(
 
     renderer: {
       kind: "lumina_2d",
-      fallbackKind: "accessible_diagram",
+      fallbackKind: "data_table",
       preferredAspectRatio: supports3D ? 16 / 9 : 4 / 3,
       background: "dark",
     },
