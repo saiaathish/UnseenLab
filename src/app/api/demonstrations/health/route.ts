@@ -36,6 +36,7 @@ export async function GET(): Promise<NextResponse> {
     configured: boolean;
     reachable: boolean;
     error?: string;
+    detail?: string;
   } = { hasUri: hasMongoUri, configured: false, reachable: false };
   if (hasMongoUri) {
     // Connect directly (bypassing getPlatformDb's error swallowing) so the
@@ -58,6 +59,7 @@ export async function GET(): Promise<NextResponse> {
     } catch (error) {
       mongo.error =
         error instanceof Error ? error.name : "unknown";
+      mongo.detail = error instanceof Error ? error.message.slice(0, 220) : undefined;
     }
   }
   const apiKey = process.env.LLM_API_KEY;
