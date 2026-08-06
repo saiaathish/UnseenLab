@@ -97,7 +97,7 @@ import { HOLDOUT, META } from "./holdout-v4-manifest-2026-08-06.mjs";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
 // FROZEN CONSTANTS (do not edit after the freeze declaration)
@@ -570,13 +570,6 @@ function isProviderNetworkRow(row) {
     "empty_response",
     "provider_fallback",
   ].includes(row.outcome) || String(row.outcome).startsWith("http_");
-}
-
-/** Fail-closed clause (docs/phase12-metrics.md): a row WITH a spec is judged
- * by the structural/accessible checks alone — availability never excuses a
- * real validation failure. */
-function specRowPassesValidation(row) {
-  return row.outcome === "spec" && row.structural === "ok" && row.accessible === true;
 }
 
 // ---------------------------------------------------------------------------
