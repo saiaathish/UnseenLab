@@ -5,11 +5,11 @@ Audit verdict: **PARTICIPANT_READY** (2026-08-06, head `00d2943`, preview deploy
 ## 1. The exact session URL
 
 ```
-https://unseen-krlbio12v-sai-aathish-karthiks-projects.vercel.app
+https://unseen-k4nudwiwu-sai-aathish-karthiks-projects.vercel.app
 ```
 
 - Behind Vercel SSO → **open it in a browser where you are already signed in to Vercel** (the facilitator's session). The learner uses the product only; no accounts, no keys, no terminal.
-- Commit: `00d29438407c74df293f251da48b3e3288190a2e` (PR #10 draft head; code frozen until the participant produces evidence).
+- Commit: `089aef0d0d460f77dd189f02a7b266430cf2494b` (PR #10 draft head; code frozen until the participant produces evidence).
 
 ## 2. The task (verbatim)
 
