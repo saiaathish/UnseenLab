@@ -23,6 +23,7 @@ import {
   SPEC_LIMITS,
   RENDERER_KINDS,
   FALLBACK_KINDS,
+  ENGINE_CATALOG,
 } from "@/demonstrations/spec/demo-spec";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 
@@ -129,6 +130,15 @@ const readoutSchema = z
   })
   .strict();
 
+/** Model's bounded engine-owned control selection: 1-4 keys, each bounded to
+ * the contract's identifier length. Membership against the engine catalog is
+ * enforced by the superRefine below (reason `invalid_engine_key`). */
+const focusParameterKeysSchema = z
+  .array(z.string().min(1).max(MAX_ID_CHARS))
+  .min(1)
+  .max(4)
+  .optional();
+
 const simulationSchema = z
   .object({
     engineId: z.enum(VERIFIED_ENGINE_IDS),
@@ -136,8 +146,28 @@ const simulationSchema = z
     seed: z.number().finite().int().min(0).max(2 ** 32 - 1),
     parameters: z.array(engineParameterSchema).min(1).max(20),
     readouts: z.array(readoutSchema).min(1).max(20),
+    focusParameterKeys: focusParameterKeysSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((sim, ctx) => {
+    // Phase 2C engine-owned membership: the model may only select parameter
+    // keys the VERIFIED engine itself owns. Mirrors the two existing
+    // parameter-key validations: the root superRefine builds a `parameterKeys`
+    // set from simulation.parameters for control-target resolution
+    // (`invalid_control_target`), and science-policy checks parameter/readout
+    // keys against ENGINE_CATALOG[engineId].parameterKeys / .readoutKeys
+    // (`incompatible_engine`). Here the catalog check happens in the schema so
+    // demoSpecSchema direct consumers get it too. engineId is a verified-enum,
+    // so ENGINE_CATALOG[sim.engineId] always exists.
+    if (sim.focusParameterKeys !== undefined) {
+      const capability = ENGINE_CATALOG[sim.engineId];
+      for (const key of sim.focusParameterKeys) {
+        if (!capability.parameterKeys.includes(key)) {
+          ctx.addIssue({ code: "custom", message: "invalid_engine_key" });
+        }
+      }
+    }
+  });
 
 const primitiveObjectSchema = z
   .object({

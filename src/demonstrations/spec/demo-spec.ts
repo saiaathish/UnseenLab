@@ -190,6 +190,17 @@ export interface VerifiedSimulationSpec {
   seed: number;
   parameters: EngineParameterSpec[];
   readouts: ReadoutSpec[];
+  /**
+   * Phase 2C: the model's bounded, engine-owned control selection. The hosted
+   * model may emit ONLY this field for verified engines — every entry must be
+   * a key in ENGINE_CATALOG[engineId].parameterKeys (validator reason
+   * `invalid_engine_key`), 1-4 entries. Deterministic code (the controls
+   * materializer) builds the full ControlSpec[] from this selection and the
+   * EngineControlCatalog; the model never invents controls. Optional so every
+   * existing curated spec (explicit controls, no focus selection) validates
+   * unchanged.
+   */
+  focusParameterKeys?: string[];
 }
 
 export interface PrimitiveObjectSpec {

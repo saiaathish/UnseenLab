@@ -64,6 +64,10 @@ import { hashString } from "@/demonstrations/generation/offline/engine-builder";
 import { sanitizeDemoSpec } from "@/demonstrations/validation";
 import { buildGenerationPrompt } from "./prompt";
 import { firstPassModelCheck } from "./schema";
+import {
+  materializeControls,
+  type MaterializeOptions,
+} from "@/demonstrations/generation/controls/materialize";
 
 // ---------------------------------------------------------------------------
 // Public result types (mirror the API envelope)
@@ -398,6 +402,8 @@ async function runModelRound(
   userMessage: string,
   config: GenerationModelConfig,
   startedAt: number,
+  /** Deterministic materialization signals (intent + preferences). */
+  materialization: MaterializeOptions,
 ): Promise<ModelRoundResult> {
   const request = await requestModelSpec(systemPrompt, userMessage, config);
   if (!request.ok) {
@@ -457,6 +463,17 @@ async function runModelRound(
     ...new Set([...(gate.repairs ?? []), ...outcome.reasons]),
   ];
 
+  // Phase 2B — deterministic control materialization: for a model-generated
+  // verified spec the model no longer authors controls. materializeControls()
+  // replaces spec.controls (and the engine parameters the controls must match)
+  // with definitions from the ED-owned ENGINE_CONTROL_CATALOG, driven by the
+  // model's bounded learning focus (simulation.focusParameterKeys) plus the
+  // deterministic intent/preference signals. Provenance stays
+  // "model_generated_spec" — the model wrote the spec; the controls are
+  // deterministic code (see controls/materialize.ts), never claimed as
+  // model-authored. Level 2/3 specs and curated/offline specs are untouched.
+  const spec = materializeControls(outcome.spec, materialization);
+
   console.info("[generation] model_attempt", {
     outcome: repairedReasons.length > 0 ? "repaired" : "valid",
     source: "model",
@@ -466,7 +483,7 @@ async function runModelRound(
   });
   return {
     kind: "spec",
-    spec: outcome.spec,
+    spec,
     repairedReasons,
   };
 }
@@ -613,8 +630,18 @@ async function runGeneration(
   );
   const userMessage = buildUserMessage(normalized, prefs);
 
+  // Deterministic materialization signals: the intent layer's comparison
+  // inference (never model text) + learner preferences. Controls for verified
+  // engines are always materialized from ENGINE_CONTROL_CATALOG (Phase 2B);
+  // these options only pick HOW MANY / WHICH the catalog contributes.
+  const materialization: MaterializeOptions = {
+    comparisonIntent: intent.learner_goal === "compare scenarios",
+    reducedMotion: prefs.reducedMotion,
+    animationSpeed: prefs.animationSpeed,
+  };
+
   // c. First model attempt.
-  const attempt1 = await runModelRound(systemPrompt, userMessage, config, startedAt);
+  const attempt1 = await runModelRound(systemPrompt, userMessage, config, startedAt, materialization);
   if (attempt1.kind === "spec") {
     if (!specMatchesIntent(attempt1.spec, intent)) {
       recordModelFailure();
@@ -635,6 +662,7 @@ async function runGeneration(
     `${userMessage}\n\n${repairDirective}`,
     config,
     startedAt,
+    materialization,
   );
   if (attempt2.kind === "spec") {
     if (!specMatchesIntent(attempt2.spec, intent)) {

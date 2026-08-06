@@ -124,6 +124,18 @@ const simulationSchema = z
     seed: z.number().finite().int().min(0).max(2 ** 32 - 1),
     parameters: z.array(engineParameterSchema).min(1).max(20),
     readouts: z.array(readoutSchema).min(1).max(20),
+    // Phase 2C: the model's raw output may carry the bounded engine-owned
+    // control selection. Admitted here with the same shape/bounds as the full
+    // validator (demo-spec-schema simulationSchema) so the gate never rejects
+    // what the pipeline can validate. Engine-catalog membership is a cross-
+    // field invariant (needs ENGINE_CATALOG) and is enforced by the full
+    // validator, not repeated here — a spec that passes this gate may still be
+    // rejected downstream (invalid_engine_key).
+    focusParameterKeys: z
+      .array(z.string().min(1).max(MAX_ID_CHARS))
+      .min(1)
+      .max(4)
+      .optional(),
   })
   .strict();
 
