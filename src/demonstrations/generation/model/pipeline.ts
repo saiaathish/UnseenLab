@@ -500,8 +500,14 @@ const TRUST_RANK: Record<TrustLevel, number> = {
  * simulation), and verified topics must stay inside the routed engine
  * candidates. Violations are rejected and fall back to the offline path —
  * the intent's deterministic routing is the ceiling, not a suggestion.
+ *
+ * The candidate level here IS the one trust function's outcome: route.ts
+ * derives intent.candidate_trust_level from resolveTrustIntent (the decision
+ * table), so the cross-check enforces the table on the model's output —
+ * "the runtime executes the trust policy". Exported so every call site and
+ * the trust-wiring tests share the exact same cross-check.
  */
-function specMatchesIntent(spec: DemoSpecV1, intent: IntentSpec): boolean {
+export function specMatchesIntent(spec: DemoSpecV1, intent: IntentSpec): boolean {
   if (
     TRUST_RANK[spec.trust.level] > TRUST_RANK[intent.candidate_trust_level]
   ) {
@@ -627,17 +633,24 @@ async function runGeneration(
     normalized,
     prefs,
     narrowCatalog(intent),
+    // Hosted prompt context: the deterministic trust decision (the ONE trust
+    // function, via the intent's candidate level) is embedded so the model
+    // never re-derives the trust policy from scratch.
+    intent.candidate_trust_level,
   );
   const userMessage = buildUserMessage(normalized, prefs);
 
   // Deterministic materialization signals: the intent layer's comparison
-  // inference (never model text) + learner preferences. Controls for verified
-  // engines are always materialized from ENGINE_CONTROL_CATALOG (Phase 2B);
-  // these options only pick HOW MANY / WHICH the catalog contributes.
+  // inference (never model text) + learner preferences + the canonical
+  // normalized query (the focus-key ranking reads learner words, never the
+  // model's userQuery). Controls for verified engines are always materialized
+  // from ENGINE_CONTROL_CATALOG (Phase 2B); these options only pick HOW
+  // MANY / WHICH the catalog contributes.
   const materialization: MaterializeOptions = {
     comparisonIntent: intent.learner_goal === "compare scenarios",
     reducedMotion: prefs.reducedMotion,
     animationSpeed: prefs.animationSpeed,
+    query: normalized,
   };
 
   // c. First model attempt.

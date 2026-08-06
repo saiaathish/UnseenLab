@@ -19,9 +19,11 @@ import {
   PRIMITIVE_KINDS,
   RELATIONSHIP_OPERATORS,
   SPEC_LIMITS,
+  TRUST_LABELS,
   type EngineCapability,
   type VerifiedEngineId,
 } from "@/demonstrations/spec/demo-spec";
+import type { TrustResolution } from "@/demonstrations/generation/trust/decision-table";
 
 /** Preference subset that changes spec structure (prompt-relevant only). */
 interface PromptPreferences {
@@ -96,10 +98,25 @@ const LIMITS_SECTION = [
  * router BEFORE the model (one clarification question) — the model never
  * guesses a level. Level 1 additionally carries the Phase 2B/2C controls
  * contract: the model emits ONLY simulation.focusParameterKeys (bounded,
- * engine-owned) and never authors parameter controls or their metadata. */
-function trustRulesSection(engines: EngineCapability[]): string[] {
+ * engine-owned) and never authors parameter controls or their metadata.
+ *
+ * `resolvedTrust` is the ONE trust function's outcome for this request
+ * (resolveTrustIntent via the intent's candidate level). When present, it is
+ * embedded as the authoritative decision — the model never re-derives the
+ * policy; the pipeline cross-check enforces the same level deterministically. */
+function trustRulesSection(
+  engines: EngineCapability[],
+  resolvedTrust?: TrustResolution,
+): string[] {
+  const decisionLine =
+    resolvedTrust !== undefined && resolvedTrust !== "clarify"
+      ? [
+          `- DETERMINISTIC TRUST DECISION — the trust layer resolved this request to ${resolvedTrust} ("${TRUST_LABELS[resolvedTrust]}"). This is authoritative: the pipeline cross-check enforces it on your output.`,
+        ]
+      : [];
   if (engines.length > 0) {
     return [
+      ...decisionLine,
       "TRUST LEVEL — the learner's request routes to a verified engine, so your spec MUST be:",
       `- Level 1 "verified_simulation" using ONE engine from the VERIFIED ENGINES list.`,
       `- trust.engineId and simulation.engineId must be the same engine; parameters and readouts only from that engine's catalog.`,
@@ -112,6 +129,7 @@ function trustRulesSection(engines: EngineCapability[]): string[] {
     ];
   }
   return [
+    ...decisionLine,
     "TRUST LEVEL — no verified engine matches this request, so your spec MUST be Level 2 or Level 3, chosen by the learner's EXPLICIT intent, never by topic name:",
     `- Level 2 "conceptual_demonstration": qualitative only. NO simulation, NO correctIndex, NO parameter-driven controls, NO numeric claims in text. Include at least one limitation.`,
     `- Level 3 "explanatory_animation": timeline-driven narrative. NO simulation, NO correctIndex, NO parameter-driven controls; controls only play_pause / speed_control / reset.`,
@@ -160,11 +178,16 @@ function preferenceSection(prefs: PromptPreferences): string[] {
  * @param engineCatalog the verified-engine catalog the model may use — the
  *   pipeline narrows it to the intent's candidate engines; an empty object
  *   forbids Level 1 entirely.
+ * @param resolvedTrust the ONE trust function's outcome for this request
+ *   (resolveTrustIntent, via the intent's candidate level). When provided,
+ *   the trust section embeds it as the authoritative decision — the model
+ *   never re-derives the trust policy from scratch.
  */
 export function buildGenerationPrompt(
   normalizedQuery: string,
   prefs: LearnerPreferences,
   engineCatalog: Partial<Record<VerifiedEngineId, EngineCapability>>,
+  resolvedTrust?: TrustResolution,
 ): string {
   const engines = Object.values(engineCatalog);
   return [
@@ -177,7 +200,7 @@ export function buildGenerationPrompt(
     "",
     ...engineCatalogLines(engines),
     "",
-    ...trustRulesSection(engines),
+    ...trustRulesSection(engines, resolvedTrust),
     "",
     CATALOG_SECTION,
     "",

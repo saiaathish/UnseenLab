@@ -47,6 +47,10 @@ import {
   type VerifiedEngineId,
 } from "@/demonstrations/spec/demo-spec";
 import { ENGINE_CONTROL_CATALOG } from "./catalog";
+import {
+  FOCUS_VARIABLE_WORDS,
+  LEARNING_RELATIONSHIPS,
+} from "./relationships";
 
 // ---------------------------------------------------------------------------
 // Catalog contract (structural — tolerant of the ED's exact field naming for
@@ -213,6 +217,108 @@ export interface MaterializeOptions {
   reducedMotion?: boolean;
   /** animationSpeed preference -> default of the speed_control transport. */
   animationSpeed?: number;
+  /**
+   * The canonical normalized learner query (the pipeline passes the intent
+   * layer's normalized query, never the model's userQuery text). Drives the
+   * deterministic focus-key ranking (rankFocusKeys). When absent, the spec's
+   * own userQuery is used (direct materializeControls callers).
+   */
+  query?: string;
+}
+
+// ---------------------------------------------------------------------------
+// rankFocusKeys — deterministic focus-key ranking (4-step precedence)
+// ---------------------------------------------------------------------------
+// Contract (docs/focus-ranking.md, evaluation-director; consumed data in
+// relationships.ts): the model is NEVER the only mechanism deciding which
+// control the learner receives. Tiers, first tier satisfied leads; all tiers
+// contribute, deduped, engine-owned only:
+//   1. explicit learner variable  (FOCUS_VARIABLE_WORDS, declaration order)
+//   2. catalog relationship match (LEARNING_RELATIONSHIPS, priority order)
+//   3. model-suggested valid keys (model order, deduped)
+//   4. curated default            (top-priority catalog entry, when empty)
+// opts.oneVariableMode -> the single top-ranked key.
+
+export interface FocusRankOptions {
+  oneVariableMode?: boolean;
+}
+
+/** Ranked result plus the tier that produced it (for the materializer's own
+ * count guarantees: the curated-default tier is topped up to two keys, the
+ * learner/model tiers are taken as ranked). */
+interface RankResult {
+  keys: string[];
+  fromCuratedDefault: boolean;
+}
+
+function rankFocusKeysInternal(
+  engineId: VerifiedEngineId,
+  normalizedQuery: string,
+  modelFocusKeys: string[],
+): RankResult {
+  const parameterKeys = ENGINE_CATALOG[engineId].parameterKeys;
+  const query = normalizedQuery.toLowerCase();
+  const ranked: string[] = [];
+  const pushKey = (key: string): void => {
+    if (parameterKeys.includes(key) && !ranked.includes(key)) {
+      ranked.push(key);
+    }
+  };
+
+  // Tier 1 — explicit learner variable (FOCUS_VARIABLE_WORDS declaration
+  // order; phrases not matching an engine key are inert by construction).
+  for (const [phrase, key] of Object.entries(FOCUS_VARIABLE_WORDS)) {
+    if (query.includes(phrase)) {
+      pushKey(key);
+    }
+  }
+
+  // Tier 2 — catalog relationship match (ascending priority; every matching
+  // entry contributes, a query can express several concepts).
+  const relationships = [...LEARNING_RELATIONSHIPS[engineId]].sort(
+    (a, b) => a.priority - b.priority,
+  );
+  for (const entry of relationships) {
+    if (entry.phrases.some((phrase) => query.includes(phrase))) {
+      for (const key of entry.keys) {
+        pushKey(key);
+      }
+    }
+  }
+
+  // Tier 3 — model-suggested valid keys (model order, deduped against 1-2).
+  for (const key of modelFocusKeys) {
+    pushKey(key);
+  }
+
+  // Tier 4 — curated default: the top-priority catalog entry (the contract
+  // guarantees >= 1 entry per engine).
+  if (ranked.length === 0) {
+    pushKey(entriesInPriorityOrder(engineId)[0].key);
+    return { keys: ranked, fromCuratedDefault: true };
+  }
+  return { keys: ranked, fromCuratedDefault: false };
+}
+
+/**
+ * Deterministic focus-key ranking — the single ranking function every
+ * materialization path consumes (docs/focus-ranking.md, frozen contract).
+ *
+ * @param engineId the verified engine whose keys may be selected.
+ * @param normalizedQuery the canonical normalized learner query (lowercased
+ *   defensively; phrase match = substring containment).
+ * @param modelFocusKeys the model's simulation.focusParameterKeys as emitted.
+ * @param opts.oneVariableMode single top-ranked key.
+ * @returns engine-owned keys, ranked, deduped; never empty.
+ */
+export function rankFocusKeys(
+  engineId: VerifiedEngineId,
+  normalizedQuery: string,
+  modelFocusKeys: string[],
+  opts: FocusRankOptions = {},
+): string[] {
+  const { keys } = rankFocusKeysInternal(engineId, normalizedQuery, modelFocusKeys);
+  return opts.oneVariableMode === true ? keys.slice(0, 1) : keys;
 }
 
 function dedupe(values: string[]): string[] {
@@ -265,37 +371,56 @@ export function materializeControls(
   // `invalid_engine_key` before this code ever runs.)
   const simulation = spec.simulation; // VerifiedSimulationSpec (guard above)
   const requested = dedupe(simulation.focusParameterKeys ?? []);
-  const validRequested = requested.filter((key) =>
-    entries.some((e) => e.key === key)
-  );
 
   // Transport controls are part of the deterministic set (the stage renders
   // ONLY spec.controls — without them the learner cannot run the sim).
   const transportCount = options.reducedMotion ? 2 : 3; // play_pause+reset, +speed_control
   const sliderBudget = Math.max(0, SPEC_LIMITS.maxControls - transportCount);
 
+  // Requirement (focus-ranking): the deterministic 4-step ranking decides
+  // WHICH keys — explicit learner variable, catalog relationship match,
+  // model-suggested valid keys, curated default (docs/focus-ranking.md). The
+  // ranking query is the canonical normalized learner query (options.query,
+  // passed by the pipeline), never model-authored text.
+  const rankingQuery = options.query ?? spec.userQuery;
+  const { keys: rankedKeys, fromCuratedDefault } = rankFocusKeysInternal(
+    engineId,
+    rankingQuery,
+    requested,
+  );
+
   let keys: string[];
   if (spec.adaptationContext.oneVariableMode) {
     // Requirement 4: the single-variable contract — at most ONE parameter
-    // control (the highest-priority valid focus, else the top catalog entry).
-    keys = [validRequested[0] ?? entries[0].key];
+    // control (the single top-ranked key).
+    keys = rankedKeys.slice(0, 1);
   } else if (options.comparisonIntent) {
-    // Requirement 3: comparison -> the two highest-priority (valid) keys.
-    if (validRequested.length >= 2) {
-      keys = validRequested.slice(0, 2);
-    } else if (validRequested.length === 1) {
-      const second = entries.find((e) => e.key !== validRequested[0]);
-      keys = second ? [validRequested[0], second.key] : [validRequested[0]];
-    } else {
-      keys = entries.slice(0, 2).map((e) => e.key);
+    // Requirement 3: comparison -> at least two (top-ranked) keys.
+    keys = rankedKeys.slice(0, 2);
+    if (keys.length < 2) {
+      for (const entry of entries) {
+        if (!keys.includes(entry.key)) {
+          keys.push(entry.key);
+          if (keys.length === 2) break;
+        }
+      }
     }
-  } else if (validRequested.length > 0) {
-    // Requirement 1: the model's learning focus is honored, in the requested
-    // (deterministic) order, bounded by the control budget.
-    keys = validRequested;
+  } else if (fromCuratedDefault) {
+    // The curated-default tier yields the top-1 entry; the materializer keeps
+    // its historical count guarantee: the two highest-priority entries.
+    keys = rankedKeys.slice(0, 2);
+    if (keys.length < 2) {
+      for (const entry of entries) {
+        if (!keys.includes(entry.key)) {
+          keys.push(entry.key);
+          if (keys.length === 2) break;
+        }
+      }
+    }
   } else {
-    // Requirement 6: curated defaults — the two highest-priority entries.
-    keys = entries.slice(0, 2).map((e) => e.key);
+    // Learner-signal / model tiers: the ranked list is taken as-is (the
+    // model's bounded selection is honored, in ranked order).
+    keys = rankedKeys;
   }
   keys = keys.slice(0, sliderBudget);
 
