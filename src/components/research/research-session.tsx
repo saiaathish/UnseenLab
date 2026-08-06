@@ -162,8 +162,9 @@ export function ResearchSession() {
   );
 }
 
-const CONSENT_COPY =
-  "This session records your interactions, responses, and anonymized screenshots for product testing. You may stop at any time.";
+/** Consent copy shown to the participant at the research gate. */
+export const CONSENT_COPY =
+  "This session is voluntary — you can stop at any time, no questions asked. If you agree, we may collect anonymized notes, anonymized quotes, anonymized screenshots, and your responses to help improve the product. Recording is optional and only happens with your permission. This is not a diagnosis or an evaluation of you, and taking part does not guarantee any learning benefit.";
 
 function ConsentGate({
   onAgree,
