@@ -48,3 +48,43 @@ Red-team verdict: **PARTICIPANT_READY** (conditions: enforce 2026-08-09 removal 
 ## Participant handoff checklist
 
 See `docs/pre-participant-handoff.md` (one page, this audit's allowed write).
+
+---
+
+## CRITIQUE CLOSEOUT (2026-08-06, engineering resumed by account holder: "fix these NOW")
+
+All items from the red-pen critique are now closed (product changes with regression
+tests; PRs stay DRAFT; no merge; no production deploy):
+
+1. **HIGH — zero e2e coverage of the shipped journey → FIXED**: `e2e/demo-journey.spec.ts`
+   (+ `e2e/fixtures/orbit-spec.json`, a captured verified-simulation spec) covers the full
+   ask→orbit→save→reload→restore journey on BOTH paths: offline-generator fallback
+   (generate API stubbed to 500) and hosted path (stubbed with the fixture). The reload
+   step asserts the prediction gate is restored (regression for #2). 2 tests.
+2. **P2 — prediction not re-applied on bare reload → FIXED**: `restoredPredictionIndex`
+   (demonstration-page.tsx) restores the last prediction-carrying trial on boot; the gate
+   state and the trial log now agree. 5 unit tests (tests/demonstrations/ui/prediction-restore.test.ts).
+3. **P2 — account sign-in broken in the deployed preview → FIXED (root cause)**: the
+   `NEXT_PUBLIC_FIREBASE_*` vars existed in the Vercel project env but with type
+   **sensitive**, which Vercel does not inline into client bundles (the `plain` flag var
+   was inlined; Firebase never was). Recreated as `plain` for preview and redeployed head
+   `089aef0` → the Google popup now opens the Firebase auth handler with the real config
+   (verified live: `unseenlab-eece2.firebaseapp.com/__/auth/handler?...authType=signIn`).
+   New participant URL: https://unseen-k4nudwiwu-sai-aathish-karthiks-projects.vercel.app
+4. **P2 — API key usable from any IP + revocation obligation → CLOSED**: the Atlas Project
+   Owner key was **revoked (204, 0 keys remain)** after all Phase-1 automation completed;
+   `ATLAS_API_*` removed from the gitignored `.env`. The `0.0.0.0/0` rule keeps
+   `deleteAfterDate: 2026-08-09T23:59:59Z` (Atlas-enforced removal).
+5. **P2 — stale docs/phase12-integration.md → FIXED**: "Round 2 final" section superseded
+   with the verified current state (contract 3/3, lint/typecheck/build clean, CI success,
+   flaky test named, auto-expiry, key revoked).
+6. **P3 — forced-colors → FIXED**: `@media (forced-colors: active)` guards in globals.css
+   (focus outline CanvasText, borders CanvasText, controls ButtonText).
+7. **P3 — consent omits screenshots → FIXED**: in-app consent copy + facilitator sheet now
+   name anonymized screenshots.
+8. **P3 — nuclear-specific pre/post question → FIXED**: `RESEARCH_CONCEPT_QUESTION` is now
+   topic-agnostic ("What happens to the system when one thing changes?").
+
+Final gate after fixes: full suite **1297/1297 (75 files)** · typecheck clean · lint clean ·
+production build OK · e2e spec collects (2 tests). New head: `089aef0`. The Vercel token
+used for the env fix was deleted from the dashboard and removed from `.env`.
