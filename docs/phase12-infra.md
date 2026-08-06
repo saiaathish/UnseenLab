@@ -105,3 +105,25 @@ Attempted every non-human path for the 1A downgrade; evidence below (URI/credent
 - Tooling sweep: `atlas` CLI absent, `mongosh` absent, no Atlas API keys in env names, `~/.atlasrc`, `~/.config/atlas`, or GitHub repo secret names. `.env` is gitignored (`.env*`) — an API key can be added there safely if the account holder chooses the API path.
 
 Conclusion unchanged: 1A downgrade is **human-only** via (a) Atlas console click path (section 1A.3) or (b) an Atlas Admin API key (Project Owner/Project Access Manager) exported as `ATLAS_API_PUBLIC_KEY` / `ATLAS_API_PRIVATE_KEY` in the gitignored `.env` — with which the full ordered sequence (downgrade FIRST, then 0.0.0.0/0 with comment, then verify) can be automated and verified. 1B remains blocked until 1A; 1C unchanged.
+
+---
+
+## PHASE 1 RESOLUTION (2026-08-06) — 1A RESOLVED, 1B OPENED, 1C unchanged
+
+Executed with a project-scoped API key created in the user's own authenticated Atlas session (Playwright, user-authed; key values written directly into the gitignored `.env` via a loopback bridge — never printed, never in any transcript/log; access-list entry for the machine IP `35.144.17.152`).
+
+**1A — DOWNGRADE COMPLETE (status 200, ordered per 1A.3: downgrade FIRST):**
+- Before (Atlas Admin API readback): `atlasAdmin@admin`
+- PATCH `databaseUsers/admin/saiaathish_db_user` → `[{roleName:"readWrite", databaseName:"unseenlab"}]` → **200 accepted**
+- After (3 independent verifications): API readback `readWrite@unseenlab` (single role) · driver `usersInfo` via the app URI: `readWrite@unseenlab` · security-contract test **3/3 PASS** (previously 2/3 with 1 intended failure)
+- App round-trip under the downgraded role: INSERT + READ + DELETE on `unseenlab.zz_role_probe` OK (scratch doc removed)
+- P1 CLOSED. Least-privilege satisfied: the app user holds exactly `readWrite@unseenlab`, nothing else.
+
+**1B — NETWORK RULE OPENED (only after 1A verified, exactly per policy):**
+- POST `/groups/{gid}/accessList` (list body, `cidrBlock`) → **201** — `0.0.0.0/0` with comment exactly `UNSEENLAB TEMP PREVIEW ACCESS - REMOVE AFTER SUBMISSION`
+- Readback: `35.144.17.152/32` (pre-existing auto-setup) + `0.0.0.0/0` (temporary rule) both present.
+- **REMOVAL DEADLINE 2026-08-09**: delete the `0.0.0.0/0` entry (API: DELETE `/groups/{gid}/accessList/0.0.0.0` or console Network Access) — and revoke the API key in `.env` right after (console → Access Manager → API Keys → delete).
+
+**1C — unchanged:** Vercel preview SSO still requires an authenticated human session (no bypass, by design). Deployed-persistence verification remains a preview-session step (now technically unblocked by 1B — the deployed app can reach Atlas; verify live persistence in the SSO-authenticated preview).
+
+**Cleanup reminders (2026-08-09):** (1) delete `0.0.0.0/0` network entry; (2) delete/revoke `ATLAS_API_PUBLIC_KEY`/`ATLAS_API_PRIVATE_KEY` from `.env` + Atlas console; (3) optionally keep `35.144.17.152/32` if this machine remains a dev egress.
