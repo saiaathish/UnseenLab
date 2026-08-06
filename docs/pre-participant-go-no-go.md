@@ -93,7 +93,7 @@ Presentation 7/10 → **verified ≈ 75/100**. Projected after participant ≈ 8
 
 ## CLOSURE PROGRAM — 2026-08-06
 
-**Status: all audit-identified blockers closed on code + CI; final verdict PENDING the Executive Director's live journey + red-team pass.**
+**Status: all audit-identified blockers closed on code + CI; one human verification step remains before the participant session (see Final verdict).**
 
 Four closure commits landed on PR #10 head `168ecd3` (the one-revision rule is intact — these are audit-identified blockers, not a participant-caused revision; `validation-pack/revision-log.md` still zero rows):
 
@@ -114,4 +114,9 @@ https://unseen-jra0d5mjk-sai-aathish-karthiks-projects.vercel.app
 
 **Security state unchanged:** contract 3/3 · readWrite@unseenlab only · API key revoked (204/0) · Vercel token revoked · `0.0.0.0/0` expires 2026-08-09T23:59:59Z · secret scan clean. VoiceOver: **BLOCKED_PERMISSION** (P2, acceptable).
 
-**Final verdict: PENDING** — the Executive Director is executing the live deployed journey in an authenticated browser at the new canonical URL right now; the go/no-go report will be finalized after the live journey + red-team pass.
+**Final verdict: BLOCKED — one human step remains.** Red-team round 2 (`valid: false`) found one residual P1 and one P2, both closed in `ed00a27`:
+- **P1-1 (closed)** — the handoff routed the orbit session's Before/After through the nuclear-lab Part B/D sheets (`user-testing-protocol.md` B1–B3, `user-testing-session-sheet.md` B1–B3: "free neutrons", "absorber"). Fixed: the handoff now routes the orbit session to the topic-agnostic orbit pre/post form (`facilitator-session-sheet.md` §2/§4, "What happens to the system when one thing changes?"), and both paper sheets carry an explicit scope note that B1–B3 apply to the nuclear-lab research flow only. Grep-verified: no participant-session file instructs a nuclear-specific question for the orbit session.
+- **P2-1 (closed)** — facilitator sheet's consent script was the old 2-clause copy; now byte-equal to the app's 8-clause CONSENT_COPY.
+- **P2-2 (preserved as historical)** — `docs/pre-participant-final-audit.md` describes the pre-fix consent copy; historical reports are not rewritten.
+
+**Remaining (human, ~10 min):** the live deployed guest journey + Firebase popup on the exact-SHA preview (https://unseen-jra0d5mjk-sai-aathish-karthiks-projects.vercel.app) must be executed in the **account holder's authenticated Vercel session** — the preview is SSO-walled by design (facilitator-authenticated mode) and the audit environment has no Vercel session or credentials. The deployment is Ready and SHA-matched (`meta.githubCommitSha=168ecd3`); every proxy (deterministic journey E2E 6/6 on a CI-identical build, all local gates, green CI) passes. After that live pass, the participant session may start; the one-revision rule, VoiceOver, video, and 2026-08-09 Atlas cleanup remain as planned.
