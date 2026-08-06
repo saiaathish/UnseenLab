@@ -90,3 +90,18 @@ A person with Atlas console access must perform exactly the following:
 - UNKNOWN:
   - `ssoProtection.deploymentType` value (standard vs preview-only) — not inspected per field-names-only instruction; immaterial to the outcome (SSO confirmed live via 302).
   - Whether the Atlas account has Vercel–Atlas integration/PrivateLink availability — requires console (human).
+
+---
+
+## RE-VERIFIED 2026-08-06 (Atlas item attempt — credential-safe, in-process)
+
+Attempted every non-human path for the 1A downgrade; evidence below (URI/credentials never read into any transcript or log; script at /tmp/atlas-verify-wire.mjs, mongodb driver 7.5.0, real Node 24.17.0):
+
+- CONNECTED: ok — app `MONGODB_URI` reaches the Atlas cluster.
+- CURRENT_ROLES: `atlasAdmin@admin` (P1 still live).
+- `updateUser` (→ readWrite@unseenlab): **BLOCKED code=8000 AtlasError (Unauthorized)**.
+- `grantRolesToUser`: **BLOCKED code=8000 AtlasError**.
+- `createUser` (readWrite@unseenlab): **BLOCKED code=8000 AtlasError**.
+- Tooling sweep: `atlas` CLI absent, `mongosh` absent, no Atlas API keys in env names, `~/.atlasrc`, `~/.config/atlas`, or GitHub repo secret names. `.env` is gitignored (`.env*`) — an API key can be added there safely if the account holder chooses the API path.
+
+Conclusion unchanged: 1A downgrade is **human-only** via (a) Atlas console click path (section 1A.3) or (b) an Atlas Admin API key (Project Owner/Project Access Manager) exported as `ATLAS_API_PUBLIC_KEY` / `ATLAS_API_PRIVATE_KEY` in the gitignored `.env` — with which the full ordered sequence (downgrade FIRST, then 0.0.0.0/0 with comment, then verify) can be automated and verified. 1B remains blocked until 1A; 1C unchanged.
