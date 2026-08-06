@@ -13,7 +13,7 @@ beforeEach(() => {
 });
 
 const CONSENT_COPY =
-  "This session records your interactions and responses for product testing. You may stop at any time.";
+  "This session records your interactions, responses, and anonymized screenshots for product testing. You may stop at any time.";
 
 async function agreeAndStart(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Agree and begin" }));

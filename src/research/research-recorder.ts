@@ -30,8 +30,11 @@ export const RESEARCH_LABEL =
   "Initial design case study evidence. Not a statistically validated learning study.";
 
 /** One fixed concept question, asked identically before and after the lab. */
+/** One fixed concept question, asked identically before and after the lab.
+ * Topic-agnostic: the same wording must make sense for any demonstration
+ * (orbits, projectile, pendulum, …), not just the nuclear lab. */
 export const RESEARCH_CONCEPT_QUESTION =
-  "What happens to the number of free neutrons over time if nothing changes?";
+  "What happens to the system when one thing changes?";
 
 export const researchConsentSchema = z.enum(["agreed", "declined"]).nullable();
 export type ResearchConsent = z.infer<typeof researchConsentSchema>;

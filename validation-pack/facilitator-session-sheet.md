@@ -37,8 +37,8 @@ Open **http://localhost:3000/research** (reachable via the subtle footer link
 
 Read the consent copy **exactly**:
 
-> **"This session records your interactions and responses for product testing.
-> You may stop at any time."**
+> **"This session records your interactions, responses, and anonymized
+> screenshots for product testing. You may stop at any time."**
 
 The participant chooses:
 

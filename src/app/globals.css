@@ -146,6 +146,30 @@ summary {
   border-radius: 6px;
 }
 
+/* Forced-colors (Windows high-contrast / forced-colors emulation): keep the
+   trust badge, borders, and focus ring visible when the system strips custom
+   colors — no surface may rely on fill color alone. */
+@media (forced-colors: active) {
+  *,
+  *::before,
+  *::after {
+    forced-color-adjust: auto;
+  }
+  :focus-visible {
+    outline: 3px solid CanvasText;
+  }
+  .border,
+  [class*="border"] {
+    border-color: CanvasText;
+  }
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="switch"] {
+    border: 1px solid ButtonText;
+  }
+}
+
 @keyframes lab-pulse {
   0% {
     opacity: 0.9;

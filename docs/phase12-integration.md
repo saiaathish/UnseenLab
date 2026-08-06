@@ -101,3 +101,28 @@ Intended contract failure (1/1292, unchanged from base, no diff in range): `test
 - Phase 2: FAIL — v4 control relevance 65% below the 85% gate; diagnosed as a gold-authoring contract violation (frozen red-team condition), not a product defect; trust 96.6% PASS and valid-spec/renderable/availability 100%.
 - Additional gate finding: lint is RED on the final head (2 unused vars in the v4 runner) — identical on local Node 24 and CI Node 22; CI unit tests were skipped on the final head (fail-fast).
 - Both PRs stay DRAFT. No merge, no push, no deployment.
+
+---
+
+## 2026-08-06 CORRECTION — Round 2 final section superseded (red-team audit finding P2)
+
+The "Round 2 final" section above described the state at `12518d3` and is now
+stale. Verified current state (pre-participant final audit, head `d15482f`,
+then the audit-remediation commits):
+
+- Security-contract test: **3/3 PASS** — the live app user was downgraded to
+  `readWrite@unseenlab` (Atlas Admin API PATCH 200, verified 3 ways). The
+  "1 intended contract failure" no longer exists. A SECOND admin user
+  (`saiaathishk_db_user`) found by the audit was also downgraded; **no admin
+  role remains on the cluster**.
+- Lint/typecheck/build: clean on final heads; CI run `31108256848` = SUCCESS
+  on the exact PR #10 head (all jobs). The 12518d3 lint failure was fixed in
+  `446096d` (dead-code removal, no re-run).
+- The one local unit failure at 1292-total runs is the flaky
+  `tests/components/lab-flow.test.tsx` 5s timeout (green in isolation 824 ms;
+  green in CI on the same SHA) — NOT the contract test.
+- `0.0.0.0/0` re-created with `deleteAfterDate: 2026-08-09T23:59:59Z`
+  (Atlas-enforced removal). Atlas Project Owner API key **revoked
+  (204, 0 keys remain)** after all Phase-1 automation completed; `ATLAS_API_*`
+  removed from the gitignored `.env`.
+- Audit verdict: PARTICIPANT_READY (docs/pre-participant-final-audit.md).
