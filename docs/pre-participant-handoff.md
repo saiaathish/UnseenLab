@@ -1,15 +1,16 @@
 # UnseenLab — Participant Session Handoff (one page)
 
-Audit verdict: **PARTICIPANT_READY** (2026-08-06, head `00d2943`, preview deployment `5780793198`).
+Audit verdict: **PARTICIPANT_READY** (2026-08-06; closure head `168ecd3`, canonical preview deployment `dpl_465ggSSHfaFNPC6iQfRZ6k7SaSUk`; verdict originally recorded at head `00d2943`, deployment `5780793198`).
 
 ## 1. The exact session URL
 
 ```
-https://unseen-k4nudwiwu-sai-aathish-karthiks-projects.vercel.app
+https://unseen-jra0d5mjk-sai-aathish-karthiks-projects.vercel.app
 ```
 
 - Behind Vercel SSO → **open it in a browser where you are already signed in to Vercel** (the facilitator's session). The learner uses the product only; no accounts, no keys, no terminal.
-- Commit: `089aef0d0d460f77dd189f02a7b266430cf2494b` (PR #10 draft head; code frozen until the participant produces evidence).
+- Commit: `168ecd3ed2122cf7a46bf8cafb904dfd7dc91176` (PR #10 draft head; code frozen until the participant produces evidence).
+- Superseded preview (historical, 089aef0-era): https://unseen-k4nudwiwu-sai-aathish-karthiks-projects.vercel.app
 
 ## 2. The task (verbatim)
 

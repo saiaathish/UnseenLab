@@ -88,3 +88,30 @@ Presentation 7/10 → **verified ≈ 75/100**. Projected after participant ≈ 8
 
 - **2026-08-09T23:59:59Z** — verify 0.0.0.0/0 rule auto-removal; verify Atlas API key remains revoked.
 - Engineering stays frozen; no merge of PR #9/#10; no production change.
+
+---
+
+## CLOSURE PROGRAM — 2026-08-06
+
+**Status: all audit-identified blockers closed on code + CI; final verdict PENDING the Executive Director's live journey + red-team pass.**
+
+Four closure commits landed on PR #10 head `168ecd3` (the one-revision rule is intact — these are audit-identified blockers, not a participant-caused revision; `validation-pack/revision-log.md` still zero rows):
+
+| Commit | Fix |
+|---|---|
+| `237eb92` | docs(research): facilitator protocol generic question + handoff rationale |
+| `e0051ed` | fix(consent): all 8 consent clauses — app copy + facilitator script + semantic tests |
+| `ab68bea` | test(a11y): 375px + 200% zoom viewport coverage (4/4) |
+| `168ecd3` | test(e2e): journey locator + per-path targets + CI demo flag |
+
+**Local gates on `168ecd3` (all green):** lint 0 · typecheck 0 · unit **1300/1300 (76 files)** · build OK · Playwright **45/11/0** env-matched (journey spec **2/2**, both paths) · browser-verify 26/26 · bundle scan CLEAN.
+
+**CI on `168ecd3`: run 31129369169 = SUCCESS** — Lint/typecheck/unit, Production build, Secrets scan, and E2E (46 passed / 10 skipped, guest build) all green.
+
+**Canonical participant URL (deployment `dpl_465ggSSHfaFNPC6iQfRZ6k7SaSUk`, Ready, meta.githubCommitSha=168ecd3):**
+https://unseen-jra0d5mjk-sai-aathish-karthiks-projects.vercel.app
+(previous https://unseen-k4nudwiwu-sai-aathish-karthiks-projects.vercel.app is the superseded 089aef0-era preview, kept as historical.)
+
+**Security state unchanged:** contract 3/3 · readWrite@unseenlab only · API key revoked (204/0) · Vercel token revoked · `0.0.0.0/0` expires 2026-08-09T23:59:59Z · secret scan clean. VoiceOver: **BLOCKED_PERMISSION** (P2, acceptable).
+
+**Final verdict: PENDING** — the Executive Director is executing the live deployed journey in an authenticated browser at the new canonical URL right now; the go/no-go report will be finalized after the live journey + red-team pass.
