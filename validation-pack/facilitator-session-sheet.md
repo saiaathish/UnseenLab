@@ -52,8 +52,8 @@ The participant chooses:
 
 With consent agreed, have the participant complete the pre form:
 
-1. The concept question (shown on screen): *"What happens to the number of free
-   neutrons over time if nothing changes?"*
+1. The concept question (shown on screen): *"What happens to the system when one
+   thing changes?"*
 2. Confidence 1–5 (expected to be low before the lab — record as given).
 3. Expected mental effort 1–5.
 4. Preferred explanation style (visual first / step by step / concise).

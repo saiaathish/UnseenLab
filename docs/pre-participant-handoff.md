@@ -20,7 +20,7 @@ On screen: the same idea is one click — the example button **"Show why planets
 ## 3. Session flow (15–20 min)
 
 1. **Consent** (facilitator script, `validation-pack/user-testing-protocol.md:38-39`): participate, anonymous notes, no name, stop anytime; note that screenshots may be taken; no screen recording (by design).
-2. **Before** (paper Part B/D — the in-app recorder is nuclear-specific, use paper for the orbits task): explanation, prediction, confidence 1–5, expected mental effort 1–5.
+2. **Before** (paper Part B/D — the orbit session uses the paper protocol with the topic-agnostic concept question; the in-app recorder targets the lab flow): explanation, prediction, confidence 1–5, expected mental effort 1–5.
 3. **Task**: learner types the sentence (or clicks the example), generates, enters the demonstration.
 4. **During** (paper, `validation-pack/facilitator-session-sheet.md`): time to first meaningful action; time to prediction; first variable changed; hesitation; help requests; representation chosen (3D/Timeline/Graph); their interpretation of "Verified simulation"; adaptation accepted/rejected/modified; any accessibility settings used (record in notes).
 5. **After** (paper Part B/D): revised explanation, revised prediction, confidence 1–5, actual mental effort 1–5, clearer/confusing, one thing to keep, one thing to remove, **one exact quote**.
