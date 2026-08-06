@@ -65,7 +65,13 @@ cases + 6 more (incl. engine queries)**:
 - trust-mismatch end-to-end, clarify equality, engine-only Level 1, offline
   divergence marking, and the `rankFocusKeys` wiring/invariants.
 
-Run tail (this worktree, vitest via Bun with a /tmp-only zod-inline config;
+Run tail (CORRECTED 2026-08-06 — local bun toolchain cannot collect
+trust-wiring.test.ts/benchmark.test.ts: zod v4 ESM/CJS transform artifact;
+authoritative result is Node 22 CI, run 31073041674 on d040446 = SUCCESS,
+full suite green incl. the 41 wiring tests and the benchmark conformance
+block. Local bun: trust/ suites 69/69 pass (decision-table 32, catalog 13,
+ranking 24); the two collection failures are environmental, not assertions.
+Formerly claimed /tmp zod-inline config:
 CI runs Node 22 with the repo's own `vitest.config.ts`):
 
 ```text
@@ -187,5 +193,7 @@ learner signals above the model.
 - `FOCUS_VARIABLE_WORDS` is a test-pinned mirror of `route.ts`
   `VARIABLE_WORDS` (route.ts does not export it) — ED's own note; a future
   route.ts edit fails the pin loudly.
-- Local verification used a /tmp-only vitest config inlining `zod` (Bun
+- Local verification: bun toolchain (see correction above); the /tmp
+  zod-inline config claim is RETRACTED (the key is inert on the installed
+  vitest 4.1.10). Node 22 CI is the authority: green on d040446. (Bun
   interop workaround); the repo's `vitest.config.ts` is unchanged.

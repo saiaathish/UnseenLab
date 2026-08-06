@@ -167,9 +167,10 @@ with the repo's vitest via bun. With the repo's default vitest config the
 suite failed to COLLECT under bun (`TypeError: undefined is not an object
 (evaluating 'z.string')` at src/demonstrations/validation/demo-spec-schema.ts:74)
 — a bun-only zod v4 ESM/CJS interop artifact of the transform pipeline, not a
-test failure: `bun -e "import { z } from 'zod'"` resolves `z.string` fine with
-installed zod 4.4.3, and the same suite passes under the identical config with
-`server.deps.inline: ["zod"]` (temp config in /tmp, nothing added to the repo).
+test failure (CORRECTED 2026-08-06: the `server.deps.inline: ["zod"]`
+workaround is inert on the installed vitest 4.1.10 and is RETRACTED; the
+authoritative verification is Node 22 CI — run 31073041674 on d040446 =
+SUCCESS, full suite green).
 
 Result with the zod-inlined config:
 
