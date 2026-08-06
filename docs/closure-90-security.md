@@ -111,13 +111,15 @@ client at :183) but asserts no isolation/role/index contract.
 LIVE DRIFT (verified by direct query with the app URI — index keys only):
 - `profiles`, `learner_preferences`, `learning_sessions`: validators
   installed at `strict`, declared indexes present — setup script has run.
-- `generated_demonstrations`: only the `_id` index exists; NO validator;
-  0 documents — the collection was auto-created by the app and
-  `node scripts/mongo-setup.mjs` has NOT been re-run on the live cluster
-  since commit 94ff681 added the collection. Until the unique index is
-  installed, the repository's duplicate-key conflict path
-  (generated-demonstrations.ts:260-262) cannot fire and two concurrent
-  upserts of the same (firebaseUid, demonstrationId) can both insert.
+- `generated_demonstrations`: **drift CLOSED 2026-08-05** — `node
+  scripts/mongo-setup.mjs` re-ran successfully after this finding: the
+  composite unique index `{firebaseUid, demonstrationId}` + list index are
+  live (3 indexes) and the `$jsonSchema` validator is installed at `strict`
+  on all four collections. The duplicate-key conflict path
+  (generated-demonstrations.ts:260-262) is now protected on the live
+  cluster. Verified by the security contract test: index + validator
+  assertions pass; only the atlasAdmin role assertion remains red (human
+  console step).
 
 ### Client Mongo access
 
