@@ -15,6 +15,11 @@ Single design participant. One session per sheet. **Fill in nothing that did not
 
 ## Part B — Baseline (before using the app)
 
+> **Scope**: the B1–B3 questions below belong to the **nuclear-chain-reaction lab
+> research** flow. For the **generative orbit session**, use the topic-agnostic
+> concept question ("What happens to the system when one thing changes?") from
+> `facilitator-session-sheet.md` §2 instead — do not administer B1–B3.
+
 | Question | Answer (verbatim) | Confidence (1–5) | Mental effort (1–5) |
 |---|---|---|---|
 | B1. What happens to the number of free neutrons over time if nothing changes? |  |  |  |

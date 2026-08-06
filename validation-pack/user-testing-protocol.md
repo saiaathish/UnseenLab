@@ -58,6 +58,13 @@ Optional context question (record if he answers, skip if he doesn't want to): "I
 
 ## Part B — Baseline (3 min, 3 conceptual questions)
 
+> **Scope**: Part B/D below are the **nuclear-chain-reaction lab research** questions
+> (asked when the session runs the `/lab/nuclear-chain-reaction?research=1` flow).
+> For the **generative orbit session** ("Ask UnseenLab to help you understand why
+> planets remain in orbit."), do NOT administer B1–B3; use the orbit pre/post form
+> in `facilitator-session-sheet.md` §2/§4 with the topic-agnostic concept question:
+> "What happens to the system when one thing changes?"
+
 Purpose: a coarse pre/post read on whether the app shifts understanding of chain reactions. Three short conceptual questions, asked **orally** (no app open). For each: record the answer (verbatim), confidence 1–5, and mental effort 1–5 (how hard the question felt to think about). There are no right answers; the facilitator never corrects.
 
 **B1.** "Imagine the same starting conditions every step — same number of neutrons, nothing else changing. What do you think happens to the number of free neutrons over time: does it stay steady, grow, shrink — and why do you think that?"
