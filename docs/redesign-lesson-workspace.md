@@ -64,6 +64,16 @@ graph.
    `cause_effect_network`, `ar1` in `energy_transfer`); edges derive from
    `relationships`. Scene node labels/positions stay unchanged so 2D/3D agree.
 
+## Design read & taste contract (design-taste-frontend + ui-ux-pro-max + ui-styling)
+
+Applied to every frontend assignment (A2-A4; copy-relevant parts in A3; A1 only where SVG/diagram visuals are touched).
+
+- **Design read:** "Reading this as: a trust-first STEM learning-tool product UI for self-directed learners, with a calm, focused language, leaning toward the project's existing Tailwind token system (surface/accent-strong), restrained motion, one accent, generous whitespace."
+- **Dials:** `DESIGN_VARIANCE: 3` (predictable learner layout; the 70/30 split is the one deliberate asymmetry), `MOTION_INTENSITY: 3` (motivated motion only: prediction reveal, manipulation cascade, step transitions; every animation must honor the existing reduced-motion preference), `VISUAL_DENSITY: 4` (one question per step, no dashboard clutter).
+- **Hard rules (from the taste skills):** ZERO em-dashes (`—`) in any visible UI copy (use hyphens, periods, or colons); ONE accent color locked across the page (project tokens: `accent-strong` etc.); one corner-radius system (project already uses `rounded-lg` consistently — do not mix pill/sharp); every button text readable against its background (WCAG AA 4.5:1); no CTA label wrapping at desktop; copy self-audit before shipping (no AI-slop phrases, no fake-precise numbers, no "Elevate/Seamless/Next-Gen" verbs); no decorative status dots, version labels, or section-numbering eyebrows; no hand-rolled SVG icons and no new icon dependencies (project has none — use text/unicode glyphs the project already uses, e.g. `←`, `ⓘ`); no emojis in code or copy; loading/empty/error states complete (project already has these — preserve them); no `h-screen` (use `min-h-[100dvh]` where full-height is needed); grid over flex-math for the 70/30 layout; explicit mobile collapse per section.
+- **Theme lock:** the project has a high-contrast token palette and light/dark surfaces — keep section-level consistency; do not introduce new theme modes.
+- **Redesign-preserve mode:** this is a targeted evolution (IA preserved: same routes, same feature-flag gating, same honesty information — demoted, not deleted). Preserve existing analytics events, aria labels, and test hooks unless the contract requires a rename.
+
 ## Firm assignments (consecutive, disjoint file ownership)
 
 Dispatched one at a time, in order. Each agent uses its saved profile as
