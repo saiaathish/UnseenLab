@@ -63,6 +63,10 @@ export function DemoSummaryCard({
         </span>
       </div>
 
+      {source === "offline" ? (
+        <p className="mt-2 text-xs text-gray-400">Built from the offline catalog</p>
+      ) : null}
+
       <ul className="sr-only" aria-label="Main controls">
         {mainControls.map((control) => (
           <li key={control.id}>{control.label}</li>
