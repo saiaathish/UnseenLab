@@ -91,6 +91,24 @@ export function sciencePolicy(spec: DemoSpecV1): SciencePolicyResult {
     reasons.push("science_policy:model_graded_prediction");
   }
 
+  // --- executable-stage contract ---
+  // A stage_2d tab is the Lumina simulation surface. It is structurally
+  // impossible to execute without a simulation payload. Likewise, a spec
+  // whose renderer is lumina_2d must not expose *any* stage tab unless a
+  // simulation exists. Timeline-only Level-3 specs may still declare
+  // renderer.kind=lumina_2d because DemonstrationStage is never mounted for
+  // them; the invariant is specifically about executable stage surfaces.
+  const hasStage2D = spec.representations.some((rep) => rep.kind === "stage_2d");
+  const hasAnyStage = spec.representations.some(
+    (rep) => rep.kind === "stage_2d" || rep.kind === "stage_3d"
+  );
+  if (!spec.simulation && hasStage2D) {
+    reasons.push("science_policy:stage2d_requires_simulation");
+  }
+  if (!spec.simulation && spec.renderer.kind === "lumina_2d" && hasAnyStage) {
+    reasons.push("science_policy:lumina_stage_requires_simulation");
+  }
+
   const level = spec.trust.level;
 
   // --- Level 1: verified simulation ---
