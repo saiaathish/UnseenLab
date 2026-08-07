@@ -30,22 +30,24 @@ export function DemonstrationObservationPanel({
   return (
     <section
       aria-label="Observations"
-      className="rounded-xl border border-border bg-surface p-4"
+      className="rounded-2xl border border-border/70 bg-surface/60 p-4 backdrop-blur-sm"
     >
-      <h2 className="text-sm font-semibold uppercase tracking-widest text-muted">
-        What do you notice?
+      <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+        <span className="sr-only">Observations</span>
+        <span aria-hidden="true">Notice</span>
       </h2>
+      <p className="mt-1 text-sm text-muted-strong">
+        What changed when you tested your idea?
+      </p>
 
       {prompts.length > 0 ? (
         <fieldset className="mt-3">
-          <legend className="text-sm font-medium">
-            Check what you observed
-          </legend>
-          <div className="mt-2 flex flex-col gap-2">
+          <legend className="sr-only">Check what you observed</legend>
+          <div className="flex flex-col gap-1.5">
             {prompts.map((prompt) => (
               <label
                 key={prompt.prompt}
-                className="flex min-h-11 cursor-pointer items-start gap-2 rounded-lg border border-border px-3 py-2.5 text-sm hover:bg-surface-raised"
+                className="flex min-h-11 cursor-pointer items-start gap-2.5 rounded-xl px-2.5 py-2 text-sm leading-5 transition hover:bg-surface-raised/70"
               >
                 <input
                   type="checkbox"
@@ -53,7 +55,7 @@ export function DemonstrationObservationPanel({
                   onChange={(event) =>
                     onToggle(prompt.prompt, event.target.checked)
                   }
-                  className="mt-0.5 h-4 w-4 accent-accent"
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
                 />
                 {prompt.prompt}
               </label>
@@ -68,23 +70,23 @@ export function DemonstrationObservationPanel({
 
       <label
         htmlFor="demo-observation-notes"
-        className="mt-4 block text-sm font-medium"
+        className="mt-3 block text-xs font-medium text-muted-strong"
       >
-        Your notes
+        Your notes <span aria-hidden="true" className="font-normal text-muted">— one thing you noticed</span>
       </label>
       <textarea
         id="demo-observation-notes"
         value={notes}
         onChange={(event) => onNotesChange(event.target.value)}
-        rows={3}
-        placeholder="What changed when you adjusted the controls?"
-        className="mt-1 w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm placeholder:text-muted"
+        rows={2}
+        placeholder="What changed?"
+        className="mt-1 w-full resize-y rounded-xl border border-border/70 bg-transparent px-3 py-2 text-sm placeholder:text-muted focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/15"
       />
 
       <button
         type="button"
         onClick={onSave}
-        className="mt-3 w-full rounded-lg bg-accent-strong px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110"
+        className="mt-3 w-full rounded-full border border-border bg-surface-raised/70 px-4 py-2.5 text-sm font-semibold transition hover:bg-surface-raised"
       >
         Save observations to my trial log
       </button>
