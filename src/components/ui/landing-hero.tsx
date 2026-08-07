@@ -50,7 +50,7 @@ export function LandingHero() {
           </p>
 
           <div className="mt-8 w-full max-w-xl text-left">
-            <AskDemoForm />
+            <AskDemoForm ctaLabel="Find my learning path" />
           </div>
 
           <Link
