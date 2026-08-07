@@ -67,7 +67,7 @@ test("focus-visible: Sign in and the topic input show a focus indicator after Ta
   expect(triggerIndicator.focusVisible).toBe(true);
   expect(triggerIndicator.boxShadow).not.toBe("none");
 
-  const textarea = page.getByLabel("Describe the topic you need help with");
+  const textarea = page.getByRole("textbox", { name: "What topic do you need help with?" });
   await tabTo(page, textarea);
   await expect(textarea).toBeFocused();
   const inputIndicator = await textarea.evaluate((el) => {
@@ -179,7 +179,7 @@ test.describe("320px viewport", () => {
   test("homepage fits without horizontal overflow", async ({ page }) => {
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "What topic do you need help with?" }),
+      page.getByRole("heading", { name: "Ask for a demonstration" }),
     ).toBeVisible();
     const fits = await page.evaluate(
       () =>

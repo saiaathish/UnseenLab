@@ -33,13 +33,13 @@ test.describe("375px viewport (mobile)", () => {
   }) => {
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "What topic do you need help with?" }),
+      page.getByRole("heading", { name: "Ask for a demonstration" }),
     ).toBeVisible();
 
     // The ask input is usable at 375px: it is the flow's primary control.
-    const textarea = page.getByLabel(
-      "Describe the topic you need help with",
-    );
+    const textarea = page.getByRole("textbox", {
+      name: "What topic do you need help with?",
+    });
     await expect(textarea).toBeVisible();
     await textarea.fill("nuclear chain reaction");
 
@@ -76,12 +76,12 @@ test.describe("200% zoom (1280x800 desktop at 2x = 640x400 CSS layout viewport)"
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "What topic do you need help with?" }),
+      page.getByRole("heading", { name: "Ask for a demonstration" }),
     ).toBeVisible();
 
-    const textarea = page.getByLabel(
-      "Describe the topic you need help with",
-    );
+    const textarea = page.getByRole("textbox", {
+      name: "What topic do you need help with?",
+    });
     await expect(textarea).toBeVisible();
     await textarea.fill("nuclear chain reaction");
 

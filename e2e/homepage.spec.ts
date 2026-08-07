@@ -1,102 +1,161 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * New homepage topic-input flow, browser level:
- * - keyboard-only path from topic to lab for a supported topic
- * - unsupported-topic recovery loop (Edit my topic preserves input)
- * - reduced-motion rendering (static gradient, no WebGL canvas)
+ * Homepage ask-to-demonstration flow, browser level:
+ * - keyboard-only path: a STEM topic generates a demonstration and enters it
+ * - the Newton's-second-law acceptance: generated experience, never the
+ *   legacy nuclear fallback, never "unsupported"
+ * - breadth examples are the single entrance; the legacy nuclear hero and
+ *   the nuclear homepage sections are gone
+ * - ambiguous topics get one clarifying question (recovery loop)
+ * - reduced-motion rendering (no canvas)
  * - mobile layout: no horizontal overflow, menu + anchor navigation
  * - the single auth entry point (header Sign in -> dialog) and the guest
  *   path staying auth-free
  */
 
-test("keyboard-only: supported topic reaches the lab", async ({ page }) => {
+test("keyboard-only: a supported topic generates and enters its demonstration", async ({
+  page,
+}) => {
   await page.goto("/");
 
-  const textarea = page.getByLabel("Describe the topic you need help with");
-  await textarea.focus();
-  await textarea.pressSequentially("nuclear chain reaction");
+  const input = page.getByRole("textbox", {
+    name: "What topic do you need help with?",
+  });
+  await input.focus();
+  await input.pressSequentially("nuclear chain reaction");
   await page.keyboard.press("Enter");
 
-  // Focus moves to the result panel heading so keyboard users land on the
-  // outcome instead of having to tab back to it.
-  const resultHeading = page.getByRole("heading", {
-    name: "We found an interactive lab for this topic.",
-  });
-  await expect(resultHeading).toBeVisible();
-  await expect(resultHeading).toBeFocused();
+  // The generative pipeline produces a verified-simulation demonstration.
+  await expect(page.getByText("Your demonstration is ready")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Verified simulation")).toBeVisible();
 
-  await page.getByRole("link", { name: "Start this lab" }).first().click();
-  // The result-panel link carries the normalized topic as a query param.
-  await page.waitForURL(/\/lab\/nuclear-chain-reaction/);
+  await page.getByRole("button", { name: "Enter demonstration" }).click();
   await expect(
-    page.getByRole("heading", { name: "Nuclear Chain Reaction" }),
+    page.getByRole("heading", { name: "Nuclear Chain Reaction", level: 1 }),
   ).toBeVisible();
-  // In the guided lab flow the prediction step is the first interactive step.
+  // In the guided flow the prediction step is the first interactive step.
   await expect(
     page.getByRole("button", { name: "Submit prediction" }),
   ).toBeVisible();
 });
 
-test("unsupported topic offers recovery and preserves the input", async ({
+test("acceptance: Newton's second law generates an experience — never the nuclear fallback", async ({
   page,
 }) => {
   await page.goto("/");
 
-  const textarea = page.getByLabel("Describe the topic you need help with");
-  await textarea.fill("photosynthesis");
-  await page.getByRole("button", { name: "Find my learning path" }).click();
+  await page
+    .getByRole("textbox", { name: "What topic do you need help with?" })
+    .fill("second law of newton");
+  await page.getByRole("button", { name: "Generate demonstration" }).click();
 
-  const unsupportedHeading = page.getByRole("heading", {
-    name: "That topic is not available as an interactive lab yet.",
-  });
-  await expect(unsupportedHeading).toBeVisible();
+  // NOT the legacy nuclear fallback: no "Start this lab", no lab redirect.
+  await expect(page.getByText("Your demonstration is ready")).toBeVisible({ timeout: 20_000 });
   await expect(
-    page.getByText("The Nuclear Chain Reaction lab is currently ready."),
+    page.getByText("Gravity & Orbits", { exact: false }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Enter demonstration" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Newton's Second Law", level: 1 }),
+  ).toBeVisible();
+  // Honest trust tier + the force/mass science the acceptance requires.
+  // One-variable mode keeps the focus control (force) and holds mass
+  // constant; the prediction gate asks about force/acceleration (the exact
+  // F/m relationship is pinned deterministically in the unit acceptance
+  // test — the hosted model's wording varies per generation).
+  await expect(page.getByLabel("Trust: Verified simulation")).toBeVisible();
+  await expect(page.getByRole("slider", { name: "Applied force" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Predict first" }),
+  ).toBeVisible();
+  await expect(page.getByRole("radio").first()).toBeVisible();
+  // No nuclear content anywhere in the generated experience.
+  await expect(
+    page.getByText("Nuclear Chain Reaction", { exact: false }),
+  ).toHaveCount(0);
+});
+
+test("the legacy nuclear hero and homepage sections are gone", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("heading", { name: "Ask for a demonstration", level: 1 }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Find a learning path" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Available lab" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Nuclear chain reactions" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: "Start this lab" }),
+  ).toHaveCount(0);
+
+  // Breadth examples are the entrance.
+  await expect(
+    page.getByRole("button", {
+      name: "What does Newton's second law say about force and mass?",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "How does photosynthesis transfer energy?" }),
+  ).toBeVisible();
+});
+
+test("ambiguous topic offers a clarifying question and preserves the input", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await page
+    .getByRole("textbox", { name: "What topic do you need help with?" })
+    .fill("orbital motion");
+  await page.getByRole("button", { name: "Generate demonstration" }).click();
+
+  // The intent layer asks one short question instead of guessing.
+  await expect(page.getByText("Your demonstration is ready")).not.toBeVisible({ timeout: 20_000 });
+  await expect(
+    page.getByRole("textbox", { name: "Your answer" }),
   ).toBeVisible();
 
-  // Editing the topic must dismiss the result panel, restore focus to the
-  // textarea, and keep the typed topic.
-  await page.getByRole("button", { name: "Edit my topic" }).click();
-  await expect(unsupportedHeading).not.toBeVisible();
-  await expect(textarea).toBeFocused();
-  await expect(textarea).toHaveValue("photosynthesis");
+  // Answering the clarify question resubmits with the appended detail and
+  // lands on a demonstration.
+  await page
+    .getByRole("textbox", { name: "Your answer" })
+    .fill("planets around the sun");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByText("Your demonstration is ready")).toBeVisible({ timeout: 20_000 });
 
-  // The recovery loop works repeatedly: extend the topic and resubmit.
-  await textarea.pressSequentially(" and light");
-  await page.keyboard.press("Enter");
-  await expect(unsupportedHeading).toBeVisible();
-  await expect(
-    page.getByText("The Nuclear Chain Reaction lab is currently ready."),
-  ).toBeVisible();
-
-  // The recovery path never surfaces an error to the learner.
+  // The path never surfaces an error to the learner.
   await expect(page.getByText(/Error|Failed|Invalid topic/i)).toHaveCount(0);
 });
 
 test.describe("reduced motion", () => {
   test.use({ contextOptions: { reducedMotion: "reduce" } });
 
-  test("homepage renders without a WebGL canvas and the topic flow works", async ({
+  test("homepage renders without a canvas and the ask flow works", async ({
     page,
   }) => {
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "What topic do you need help with?" }),
+      page.getByRole("heading", { name: "Ask for a demonstration" }),
     ).toBeVisible();
 
-    // Under reduced motion the hero is a static CSS gradient — no canvas.
+    // No animated hero canvas under reduced motion.
     await expect(page.locator("canvas")).toHaveCount(0);
 
-    const textarea = page.getByLabel("Describe the topic you need help with");
-    await expect(textarea).toBeVisible();
-    await textarea.fill("nuclear chain reaction");
+    const input = page.getByRole("textbox", {
+      name: "What topic do you need help with?",
+    });
+    await expect(input).toBeVisible();
+    await input.fill("nuclear chain reaction");
     await page.keyboard.press("Enter");
-    await expect(
-      page.getByRole("heading", {
-        name: "We found an interactive lab for this topic.",
-      }),
-    ).toBeVisible();
+    await expect(page.getByText("Your demonstration is ready")).toBeVisible({ timeout: 20_000 });
   });
 });
 
@@ -118,7 +177,7 @@ test.describe("mobile viewport", () => {
     expect(fits).toBe(true);
 
     await expect(
-      page.getByRole("heading", { name: "What topic do you need help with?" }),
+      page.getByRole("heading", { name: "Ask for a demonstration" }),
     ).toBeVisible();
 
     const menuButton = page.getByRole("button", { name: "Open menu" });
@@ -126,9 +185,9 @@ test.describe("mobile viewport", () => {
     await menuButton.click();
     await expect(page.getByRole("button", { name: "Close menu" })).toBeVisible();
 
-    await page.getByRole("link", { name: "Available lab" }).click();
-    await expect(page).toHaveURL(/#available-lab/);
-    await expect(page.locator("#available-lab")).toBeVisible();
+    await page.getByRole("link", { name: "How it works" }).click();
+    await expect(page).toHaveURL(/#how-it-works/);
+    await expect(page.locator("#how-it-works")).toBeVisible();
   });
 });
 
@@ -138,7 +197,7 @@ test("homepage auth entry opens the dialog; guest path stays auth-free", async (
   await page.goto("/");
 
   // No login/signup *pages or links* — the only auth surface is the dialog
-  // trigger in the header (AUTH-10) and the HOME-04 account-value line.
+  // trigger in the header.
   await expect(
     page.getByRole("link", { name: /log ?in|sign ?up/i }),
   ).toHaveCount(0);
@@ -153,23 +212,13 @@ test("homepage auth entry opens the dialog; guest path stays auth-free", async (
   await expect(
     page.getByRole("button", { name: "Continue with Google" }),
   ).toBeVisible();
-  await expect(
-    page.getByText(
-      "Try the lab now. Sign in whenever you want to save progress across devices.",
-    ),
-  ).toBeVisible();
 
-  // Guest dismissal keeps the topic flow working with no auth wall.
-  // NOTE: depends on the "Try without an account" close handler in
-  // sign-in-dialog.tsx (currently calls an undefined `setOpen` — owned by the
-  // platform agent; see agent-20 findings).
+  // Guest dismissal keeps the ask flow working with no auth wall.
   await page.getByRole("button", { name: "Try without an account" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page
-    .getByLabel("Describe the topic you need help with")
+    .getByRole("textbox", { name: "What topic do you need help with?" })
     .fill("nuclear chain reaction");
   await page.keyboard.press("Enter");
-  await expect(
-    page.getByRole("link", { name: "Start this lab" }).first(),
-  ).toBeVisible();
+  await expect(page.getByText("Your demonstration is ready")).toBeVisible({ timeout: 20_000 });
 });

@@ -6,12 +6,9 @@ import { test, expect } from "@playwright/test";
  * adaptation appears -> accept -> counterfactual -> replay.
  */
 test("demo smoke: predict, run, adapt, compare, replay", async ({ page }) => {
-  await page.goto("/");
-
-  await expect(
-    page.getByRole("heading", { name: "What topic do you need help with?" }),
-  ).toBeVisible();
-  await page.getByRole("link", { name: "Start this lab" }).first().click();
+  // The nuclear lab remains reachable directly (the homepage now funnels
+  // arbitrary topics through the generative ask flow instead).
+  await page.goto("/lab/nuclear-chain-reaction");
 
   await expect(
     page.getByRole("heading", { name: "Nuclear Chain Reaction" }),
