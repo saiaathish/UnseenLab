@@ -144,13 +144,17 @@ export function AskDemoForm({
     }
   }, [phase.kind]);
 
+  const shouldAnimatePlaceholder =
+    phase.kind === "idle" &&
+    !focused &&
+    value.length === 0 &&
+    !reducedMotionRequested();
+
+  // Recovered from the original hero: a typewriter placeholder that only
+  // runs while the field is empty/unfocused. All state changes occur from
+  // timer callbacks, so the effect remains a pure external subscription.
   useEffect(() => {
-    const shouldAnimate =
-      phase.kind === "idle" && !focused && value.length === 0;
-    if (!shouldAnimate || reducedMotionRequested()) {
-      setAnimatedPlaceholder(STATIC_PLACEHOLDER);
-      return;
-    }
+    if (!shouldAnimatePlaceholder) return;
 
     let cancelled = false;
     let timer: number | undefined;
@@ -189,14 +193,13 @@ export function AskDemoForm({
       }
     };
 
-    setAnimatedPlaceholder("");
     schedule(TYPE_DELAY_MS);
 
     return () => {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [focused, phase.kind, value]);
+  }, [shouldAnimatePlaceholder]);
 
   const runOffline = (query: string) => {
     let result: OfflineDemoResult;
@@ -390,7 +393,11 @@ export function AskDemoForm({
               onKeyDown={handleKeyDown}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              placeholder={animatedPlaceholder}
+              placeholder={
+                shouldAnimatePlaceholder
+                  ? animatedPlaceholder
+                  : STATIC_PLACEHOLDER
+              }
               aria-describedby={
                 validationError ? "ask-demo-validation" : undefined
               }
