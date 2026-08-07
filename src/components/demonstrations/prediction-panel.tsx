@@ -61,12 +61,15 @@ export function DemonstrationPredictionPanel({
           Prediction recorded — controls unlocked.
         </p>
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-          You predicted
+          Prediction locked in
         </p>
         <p className="mt-2 text-sm leading-5 text-muted-strong">{prediction.prompt}</p>
-        <blockquote className="mt-3 border-l-2 border-accent pl-3 text-base font-medium leading-6 text-foreground">
-          {chosenOption}
-        </blockquote>
+        <div className="mt-3">
+          <p className="text-xs font-medium text-muted">You predicted</p>
+          <blockquote className="mt-1 border-l-2 border-accent pl-3 text-base font-medium leading-6 text-foreground">
+            {chosenOption}
+          </blockquote>
+        </div>
 
         {truth.graded ? (
           revealed ? (
