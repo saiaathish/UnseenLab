@@ -72,7 +72,7 @@ export function DemonstrationObservationPanel({
         htmlFor="demo-observation-notes"
         className="mt-3 block text-xs font-medium text-muted-strong"
       >
-        Your notes <span className="font-normal text-muted">— one thing you noticed</span>
+        Your notes <span aria-hidden="true" className="font-normal text-muted">— one thing you noticed</span>
       </label>
       <textarea
         id="demo-observation-notes"
