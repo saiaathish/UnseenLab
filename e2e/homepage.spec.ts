@@ -51,8 +51,10 @@ test("acceptance: Newton's second law generates an experience — never the nucl
   ).toBeVisible();
   await expect(page.getByLabel("Trust: Verified simulation")).toBeVisible();
   await expect(page.getByRole("slider", { name: "Applied force" })).toBeVisible();
+  // The redesign's lesson rail opens on the Predict step; controls stay
+  // locked ("Predict first to unlock") until the prediction is committed.
   await expect(
-    page.getByRole("heading", { name: "Predict first" }),
+    page.getByRole("region", { name: "Prediction" }).getByRole("heading", { name: "Predict" }),
   ).toBeVisible();
   await expect(page.getByRole("radio").first()).toBeVisible();
   await expect(

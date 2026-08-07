@@ -14,7 +14,7 @@ type SaveState =
 /**
  * Save control. Guests always save to the device; signed-in learners try the
  * account first and fall back to the device with an honest notice on a 401.
- * Auth is never forced — the control works for everyone.
+ * Auth is never forced; the control works for everyone.
  */
 export function DemoSaveControl() {
   const { user, loading: sessionLoading } = useSession();
@@ -60,13 +60,13 @@ export function DemoSaveControl() {
       return;
     }
     if (result.error === "unauthorized") {
-      // Session cookie lost or rejected — never force auth, keep the work.
+      // Session cookie lost or rejected: never force auth, keep the work.
       const ok = demoStore.saveToDevice();
       setState(
         ok
           ? {
               phase: "done",
-              label: "Couldn't reach your account — saved on this device instead.",
+              label: "Couldn't reach your account. Saved on this device instead.",
             }
           : { phase: "error", label: "Couldn't reach your account or save on this device." }
       );

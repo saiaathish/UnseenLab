@@ -246,6 +246,15 @@ const threeStub = vi.hoisted(() => {
     }
     updateProjectionMatrix() {}
   }
+  class OrthographicCamera extends Object3D {
+    left = 0;
+    right = 0;
+    top = 0;
+    bottom = 0;
+    near = 0;
+    far = 0;
+    updateProjectionMatrix() {}
+  }
   class AmbientLight extends Object3D {
     constructor(_c?: unknown, _i = 1) {
       super();
@@ -311,6 +320,7 @@ const threeStub = vi.hoisted(() => {
     Group,
     Scene,
     PerspectiveCamera,
+    OrthographicCamera,
     AmbientLight,
     DirectionalLight,
     Object3D,

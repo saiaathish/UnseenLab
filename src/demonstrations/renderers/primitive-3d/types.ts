@@ -97,6 +97,25 @@ export interface PrimitiveSceneRendererOptions {
   onError?: (error: RendererError) => void;
   /** Optional smoothed frames-per-second callback (~2x per second). */
   onFps?: (fps: number) => void;
+  /**
+   * Interaction event surface (graph-like scenes only). The React stage
+   * adapter (demonstration-stage.tsx) forwards these to the page, and the
+   * lesson rail (A2) consumes them to gate interact/observe steps.
+   *
+   * - `onNodeSelect(nodeId | null)`: a node was selected (pointer click or
+   *   Enter/Space on the focused node) or the selection was cleared.
+   * - `onEdgeSelect(edgeId | null)`: an edge was selected (pointer click) or
+   *   the selection was cleared.
+   * - `onNodeManipulate(nodeId)`: a node was actually interacted with
+   *   (pointer click or keyboard activation) — fires alongside onNodeSelect;
+   *   completion conditions for lesson interact steps key off this.
+   *
+   * Callbacks fire only on selection-state changes, never per frame. Hover
+   * dimming is visual only and does not fire callbacks.
+   */
+  onNodeSelect?: (nodeId: string | null) => void;
+  onEdgeSelect?: (edgeId: string | null) => void;
+  onNodeManipulate?: (nodeId: string) => void;
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,17 @@ export type { RendererStatus } from "./types";
 export { buildSceneGraph, isSafeColor, DEFAULT_COLOR } from "./scene-graph";
 export type { BuildSceneGraphOptions } from "./scene-graph";
 export {
+  cascadeOrder,
+  deriveGraphEdges,
+  edgeCausalPath,
+  GRAPH_NODE_KINDS,
+  isGraphLikeScene,
+} from "./scene-graph";
+export type {
+  EdgeCausalPath,
+  GraphEdgePlan,
+} from "./scene-graph";
+export {
   stepOperator,
   makeNodeState,
   validateOperatorParams,

@@ -285,7 +285,9 @@ describe("offline generator — conceptual templates (Level 2)", () => {
       it("composes a scene3d from approved primitives, relationships, and animations", () => {
         expect(spec.scene3d).toBeDefined();
         const scene = spec.scene3d!;
-        expect(scene.objects.length).toBeGreaterThanOrEqual(3);
+        // particle_population has no floating title label anymore, so its
+        // minimal scene is 2 objects (field + group).
+        expect(scene.objects.length).toBeGreaterThanOrEqual(2);
         expect(scene.objects.length).toBeLessThanOrEqual(SPEC_LIMITS.maxObjects);
         expect(scene.relationships.length).toBeGreaterThanOrEqual(1);
         expect(scene.relationships.length).toBeLessThanOrEqual(SPEC_LIMITS.maxRelationships);

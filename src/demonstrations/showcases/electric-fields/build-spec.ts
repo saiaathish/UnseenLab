@@ -226,10 +226,10 @@ const OBSERVATION_PROMPTS = [
 ];
 
 const REPRESENTATIONS: DemoSpecV1["representations"] = [
-  { id: "rep-stage-3d", kind: "stage_3d", label: "3D field stage" },
-  { id: "rep-diagram", kind: "diagram", label: "2D vector-field diagram" },
-  { id: "rep-table", kind: "table", label: "Field strength at points" },
-  { id: "rep-text", kind: "text_sequence", label: "Step-by-step explanation" },
+  { id: "rep-stage-3d", kind: "stage_3d", label: "3D Model" },
+  { id: "rep-diagram", kind: "diagram", label: "Diagram" },
+  { id: "rep-table", kind: "table", label: "Table" },
+  { id: "rep-text", kind: "text_sequence", label: "Text sequence" },
 ];
 
 export function buildElectricFieldShowcase(prefs?: ShowcasePrefs): DemoSpecV1 {

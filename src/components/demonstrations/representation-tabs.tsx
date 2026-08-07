@@ -43,25 +43,6 @@ function isStageRep(rep: RepresentationSpec): boolean {
   return rep.kind === "stage_2d" || rep.kind === "stage_3d";
 }
 
-function lensLabel(rep: RepresentationSpec): string {
-  switch (rep.kind) {
-    case "stage_2d":
-    case "stage_3d":
-      return "Explore";
-    case "diagram":
-    case "causal_map":
-      return "See";
-    case "timeline":
-    case "text_sequence":
-      return "Guide";
-    case "graph":
-    case "table":
-      return "Measure";
-    default:
-      return rep.label;
-  }
-}
-
 export function orderedRepresentations(
   spec: DemoSpecV1,
   reducedMotion: boolean,
@@ -172,7 +153,7 @@ export function DemonstrationRepresentationTabs({
               aria-selected={rep.id === active.id}
               aria-controls="demo-rep-panel"
               aria-label={rep.label}
-              title={`${lensLabel(rep)} — ${rep.label}`}
+              title={rep.label}
               tabIndex={rep.id === active.id ? 0 : -1}
               onClick={() => handleChange(rep.id)}
               className={cn(
@@ -182,13 +163,10 @@ export function DemonstrationRepresentationTabs({
                   : "text-muted-strong hover:bg-surface-raised hover:text-foreground"
               )}
             >
-              {lensLabel(rep)}
+              {rep.label}
             </button>
           ))}
         </div>
-        <p className="hidden text-xs text-muted sm:block" aria-hidden="true">
-          {active.label}
-        </p>
       </div>
 
       <div role="tabpanel" id="demo-rep-panel" aria-labelledby={`demo-rep-tab-${active.id}`}>

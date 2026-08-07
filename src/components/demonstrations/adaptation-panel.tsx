@@ -1,15 +1,17 @@
 "use client";
 
-import { useState } from "react";
-
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 
 /**
  * Bounded, deterministic adaptation. Suggestions are derived from the spec
- * and the current UI state — never from open-ended model text. The learner
+ * and the current UI state, never from open-ended model text. The learner
  * always decides (Accept / Reject) and every decision is recorded in the
- * trial log. When there is nothing useful to offer, the panel renders
- * nothing at all.
+ * trial log. When there is nothing useful to offer, no suggestions are
+ * produced.
+ *
+ * Rendering lives in the lesson rail's complete step (demoted from the
+ * primary workspace); this module keeps the derivation logic and types so
+ * the recording contract is unchanged.
  */
 
 export type AdaptationAction =
@@ -115,74 +117,4 @@ export function deriveAdaptationSuggestions(
   }
 
   return suggestions.slice(0, 3);
-}
-
-interface Props {
-  suggestions: AdaptationSuggestion[];
-  onDecision: (suggestion: AdaptationSuggestion, accepted: boolean) => void;
-}
-
-export function DemonstrationAdaptationPanel({ suggestions, onDecision }: Props) {
-  const [announcement, setAnnouncement] = useState<string | null>(null);
-
-  const decide = (suggestion: AdaptationSuggestion, accepted: boolean) => {
-    setAnnouncement(
-      accepted
-        ? `Adaptation applied: ${suggestion.text}`
-        : `Adaptation dismissed: ${suggestion.text}`
-    );
-    onDecision(suggestion, accepted);
-  };
-
-  return (
-    <>
-      {suggestions.length > 0 && (
-        <section
-          aria-label="Adaptation suggestions"
-          className="flex flex-col gap-2 rounded-2xl border border-accent/25 bg-accent-soft/20 p-4 backdrop-blur-sm"
-        >
-          <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">
-            Suggested adaptation
-          </h2>
-          <p className="text-sm text-muted-strong">
-            One small next move based on where you are now.
-          </p>
-          {suggestions.map((suggestion) => (
-            <div
-              key={suggestion.id}
-              className="border-t border-accent/15 pt-3 first:border-t-0 first:pt-1"
-            >
-              <p className="text-sm leading-6">{suggestion.text}</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => decide(suggestion, true)}
-                  className="min-h-10 rounded-full bg-foreground px-4 py-2 text-sm font-semibold text-background transition hover:opacity-90"
-                >
-                  Accept
-                </button>
-                <button
-                  type="button"
-                  onClick={() => decide(suggestion, false)}
-                  className="min-h-10 rounded-full border border-border/70 px-4 py-2 text-sm font-medium transition hover:bg-surface-raised/70"
-                >
-                  Reject
-                </button>
-              </div>
-            </div>
-          ))}
-        </section>
-      )}
-      {/* Polite announcement of the learner's adaptation decision. The
-          region mounts only with text (like the prediction status) and the
-          text changes only on a decision, so it never spams; once mounted it
-          stays mounted even when the panel empties, so the final decision is
-          still announced. */}
-      {announcement !== null && (
-        <p role="status" className="sr-only">
-          {announcement}
-        </p>
-      )}
-    </>
-  );
 }

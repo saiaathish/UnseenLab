@@ -6,7 +6,7 @@ import { TRUST_LABELS, type TrustLevel } from "@/demonstrations/spec/demo-spec";
 import { cn } from "@/lib/utils";
 
 /**
- * Trust badge — shows the spec's declared trust level using the exact
+ * Trust badge: shows the spec.s declared trust level using the exact
  * TRUST_LABELS wording (never paraphrased, never stronger than the spec
  * claims). Color + icon per level; the aria-label includes the level name so
  * screen readers hear the same label sighted learners see.

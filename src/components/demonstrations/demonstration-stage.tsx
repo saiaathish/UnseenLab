@@ -46,6 +46,24 @@ export interface StageProps {
    * lumina_2d → "2d", primitive_3d/hybrid → "3d".
    */
   mode?: "2d" | "3d";
+  /**
+   * Interaction event surface (graph-like scenes only — conceptual templates
+   * rendered as canonical graphs). The PrimitiveSceneRenderer fires these on
+   * selection-state changes; the shell/page (A2) forwards them to the lesson
+   * rail. All optional: without them the stage renders and behaves exactly as
+   * before.
+   *
+   * - onNodeSelect(nodeId | null): a node was selected (pointer click or
+   *   Enter/Space on the focused node) or the selection cleared.
+   * - onEdgeSelect(edgeId | null): an edge was selected (pointer click) or
+   *   the selection cleared.
+   * - onNodeManipulate(nodeId): a node was actually interacted with (pointer
+   *   click or keyboard activation) — the rail's interaction-step completion
+   *   keys off this.
+   */
+  onNodeSelect?: (nodeId: string | null) => void;
+  onEdgeSelect?: (edgeId: string | null) => void;
+  onNodeManipulate?: (nodeId: string) => void;
 }
 
 /**
@@ -242,6 +260,9 @@ function Primitive3DStage({
   parameters,
   visualState,
   engineMapping,
+  onNodeSelect,
+  onEdgeSelect,
+  onNodeManipulate,
 }: StageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<PrimitiveSceneRenderer | null>(null);
@@ -250,6 +271,16 @@ function Primitive3DStage({
   const [mobile] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 768
   );
+  // Keep the latest interaction callbacks without recreating the renderer
+  // (same pattern as onReadoutsRef/onVisualStateRef below).
+  const onNodeSelectRef = useRef(onNodeSelect);
+  const onEdgeSelectRef = useRef(onEdgeSelect);
+  const onNodeManipulateRef = useRef(onNodeManipulate);
+  useEffect(() => {
+    onNodeSelectRef.current = onNodeSelect;
+    onEdgeSelectRef.current = onEdgeSelect;
+    onNodeManipulateRef.current = onNodeManipulate;
+  });
   const presentationSpec = useMemo(() => presentationSpecForStage(spec), [spec]);
   const guide = useMemo(() => stageGuideForSpec(spec), [spec]);
 
@@ -266,6 +297,9 @@ function Primitive3DStage({
             setWebglUnavailable(true);
           }
         },
+        onNodeSelect: (nodeId) => onNodeSelectRef.current?.(nodeId),
+        onEdgeSelect: (edgeId) => onEdgeSelectRef.current?.(edgeId),
+        onNodeManipulate: (nodeId) => onNodeManipulateRef.current?.(nodeId),
       });
       renderer.setSpec(presentationSpec, { engineMapping: engineMapping ?? null });
       rendererRef.current = renderer;
@@ -317,6 +351,8 @@ function Primitive3DStage({
         }
         readouts={readouts}
         parameters={parameters}
+        onNodeSelect={onNodeSelect}
+        onNodeManipulate={onNodeManipulate}
       />
     );
   }
@@ -452,11 +488,15 @@ function StageFallback({
   note,
   readouts,
   parameters,
+  onNodeSelect,
+  onNodeManipulate,
 }: {
   spec: DemoSpecV1;
   note: string;
   readouts: Readout[];
   parameters: Record<string, number>;
+  onNodeSelect?: (nodeId: string | null) => void;
+  onNodeManipulate?: (nodeId: string) => void;
 }) {
   return (
     <section
@@ -477,6 +517,8 @@ function StageFallback({
           kind={spec.renderer.fallbackKind}
           readouts={readouts}
           parameters={parameters}
+          onNodeSelect={onNodeSelect}
+          onNodeManipulate={onNodeManipulate}
         />
       </div>
     </section>

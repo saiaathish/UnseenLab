@@ -1,5 +1,5 @@
 /**
- * Demonstration shell UI suite.
+ * Demonstration shell UI suite (70/30 lesson workspace).
  *
  * jsdom has no canvas rasterizer and no WebGL, so the 2D runner runs against
  * its no-op fallback context and the 3D renderer reports webgl_unavailable —
@@ -7,8 +7,12 @@
  * loop is stubbed to a no-op so no per-frame state churn leaks into
  * assertions; setScene still emits the initial readouts synchronously.
  *
- * Fixtures are small valid DemoSpecV1 documents; every fixture is re-validated
- * with validateDemoSpec inside the tests before it is rendered.
+ * The suite preserves the pre-redesign intents: prediction-first gating,
+ * reveal gating on manipulation, one-variable mode, honest replay labels,
+ * honest save status, live-region announcements, the nuclear chain reaction
+ * card, the WebGL fallback, and readouts in the table view. Provenance,
+ * limitations, save status and the trial log now live in AboutThisModel (the
+ * ⓘ button), so those assertions open the dialog first.
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -318,6 +322,13 @@ function Harness({
   const [oneVariableMode, setOneVariableMode] = useState(initialOneVariable);
   const [lockedControl, setLockedControl] = useState<string | null>(null);
   const [activeRep, setActiveRep] = useState<string | null>(null);
+  const [manipulatedNodeIds, setManipulatedNodeIds] = useState<string[]>([]);
+  const [touchedControls, setTouchedControls] = useState<string[]>([]);
+  const [observationSelections, setObservationSelections] = useState<
+    Record<string, boolean>
+  >({});
+  const [observationNotes, setObservationNotes] = useState("");
+  const [observationsSaved, setObservationsSaved] = useState(false);
   const [replay, setReplay] = useState<{ trial: TrialRecord; token: number } | null>(null);
   const [, setStoreTick] = useState(0);
 
@@ -365,6 +376,9 @@ function Harness({
       onControlTouched={(id) => {
         setManipulated(true);
         setLockedControl(id);
+        setTouchedControls((prev) =>
+          prev.includes(id) ? prev : [...prev, id]
+        );
       }}
       oneVariableMode={oneVariableMode}
       lockedControl={lockedControl}
@@ -373,12 +387,23 @@ function Harness({
       onRepresentationChange={setActiveRep}
       reducedMotion={reducedMotion}
       preferredRepresentations={preferredRepresentations}
-      observationSelections={{}}
-      observationNotes=""
-      observationsSaved={false}
-      onObservationToggle={() => {}}
-      onObservationNotesChange={() => {}}
-      onSaveObservations={() => {}}
+      observationSelections={observationSelections}
+      observationNotes={observationNotes}
+      observationsSaved={observationsSaved}
+      onObservationToggle={(prompt, checked) =>
+        setObservationSelections((prev) => ({ ...prev, [prompt]: checked }))
+      }
+      onObservationNotesChange={setObservationNotes}
+      onSaveObservations={() => {
+        setObservationsSaved(true);
+        demoStore.recordTrial({
+          predictionIndex: null,
+          parameters: { ...parameters },
+          readouts: readouts.map((r) => ({ label: r.label, value: r.value })),
+          controls: { playing, speed },
+          adaptations: [],
+        });
+      }}
       adaptationSuggestions={[]}
       onAdaptationDecision={() => {}}
       trials={demoStore.getTrials()}
@@ -389,6 +414,14 @@ function Harness({
         setReplay({ trial, token: Date.now() });
       }}
       onDismissReplay={() => setReplay(null)}
+      onNodeManipulate={(nodeId) => {
+        if (predictionIndex === null) return;
+        setManipulatedNodeIds((prev) =>
+          prev.includes(nodeId) ? prev : [...prev, nodeId]
+        );
+      }}
+      manipulatedNodeIds={manipulatedNodeIds}
+      touchedControls={touchedControls}
     />
   );
 }
@@ -406,18 +439,32 @@ async function submitPrediction(
 // ---------------------------------------------------------------------------
 
 describe("DemonstrationShell", () => {
-  it("renders the title, trust badge, source badge and limitations", () => {
+  it("renders the title and trust chip; provenance is demoted into AboutThisModel", async () => {
     const spec = verifiedPendulumSpec();
     assertValidSpec(spec);
+    const user = userEvent.setup();
     render(<Harness spec={spec} />);
 
     expect(
       screen.getByRole("heading", { name: "Pendulum Motion" })
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Trust: Verified simulation")).toBeInTheDocument();
-    expect(screen.getByLabelText("Source: Offline catalog")).toBeInTheDocument();
-    expect(screen.getByText("Limitations & provenance")).toBeInTheDocument();
+
+    // Demoted, never deleted: the source badge, limitations and provenance
+    // are NOT in the primary workspace; they open via the ⓘ button.
+    expect(screen.queryByText("Offline catalog")).not.toBeInTheDocument();
+    expect(screen.queryByText("Air resistance is ignored.")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "About this model" }));
+
+    expect(screen.getByText("Offline catalog")).toBeInTheDocument();
     expect(screen.getByText("Air resistance is ignored.")).toBeInTheDocument();
+    expect(screen.getByText("test-model")).toBeInTheDocument();
+    expect(screen.getByText("Not saved")).toBeInTheDocument();
+
+    // Escape closes the dialog.
+    await user.keyboard("{Escape}");
+    expect(screen.queryByText("Air resistance is ignored.")).not.toBeInTheDocument();
   });
 
   it("keeps controls disabled until a prediction is submitted (prediction-first)", async () => {
@@ -428,7 +475,9 @@ describe("DemonstrationShell", () => {
 
     const lengthSlider = screen.getByRole("slider", { name: "Length" });
     expect(lengthSlider).toBeDisabled();
-    expect(screen.getByText("Predict first")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Predict" })
+    ).toBeInTheDocument();
 
     await submitPrediction(user, "It increases but not by double");
 
@@ -532,21 +581,23 @@ describe("DemonstrationShell", () => {
 
     await submitPrediction(user, "It increases but not by double");
 
-    // Trial log entry (inside a <details>, so open it first).
-    await user.click(screen.getByText("Trial log"));
+    // Trial log lives in AboutThisModel (demoted, not deleted).
+    await user.click(screen.getByRole("button", { name: "About this model" }));
     expect(screen.getByText("Entry 1 · Prediction")).toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: "Restore these parameters" })
     );
 
-    expect(screen.getByText("Replay — entry 1")).toBeInTheDocument();
+    // The dialog closes so the replay banner can take focus.
+    expect(screen.queryByText("Entry 1 · Prediction")).not.toBeInTheDocument();
+    expect(screen.getByText("Replay entry 1")).toBeInTheDocument();
     expect(
       screen.getByText(/Parameters restored from entry 1.*simulation restarts fresh/)
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Dismiss replay" }));
-    expect(screen.queryByText("Replay — entry 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Replay entry 1")).not.toBeInTheDocument();
   });
 
   it("gates the graded reveal on manipulation and never reveals early", async () => {
@@ -599,6 +650,7 @@ describe("DemonstrationShell", () => {
     const user = userEvent.setup();
     render(<Harness spec={spec} />);
 
+    await user.click(screen.getByRole("button", { name: "About this model" }));
     expect(screen.getByText("Not saved")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save" }));
 
@@ -630,5 +682,28 @@ describe("DemonstrationShell", () => {
     // Switching back announces again.
     await user.click(within(tabsSection).getByRole("tab", { name: "Stage" }));
     expect(liveRegion).toHaveTextContent("View: Stage");
+  });
+
+  it("lays out the 70/30 workspace: model column first, lesson rail beside it", () => {
+    const spec = verifiedPendulumSpec();
+    assertValidSpec(spec);
+    render(<Harness spec={spec} />);
+
+    const grid = document.querySelector(".grid.gap-6");
+    expect(grid).not.toBeNull();
+    expect(grid!.className).toMatch(/lg:grid-cols-\[minmax\(0,1fr\)_minmax\(320px,380px\)\]/);
+    expect(grid!.className).not.toMatch(/(^|\s)grid-cols-/);
+
+    // The lesson rail is present with the five step names.
+    const rail = screen.getByLabelText("Lesson");
+    for (const step of ["Predict", "Interact", "Observe", "Explain", "Complete"]) {
+      expect(within(rail).getAllByText(step).length).toBeGreaterThan(0);
+    }
+
+    // The primary workspace no longer shows the standalone observability
+    // cards: no trial log, no limitations, no save button in the header.
+    expect(screen.queryByText("Trial log")).not.toBeInTheDocument();
+    expect(screen.queryByText("Limitations & provenance")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 });
