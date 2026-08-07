@@ -44,7 +44,9 @@ const PENDING_STAGES: readonly string[] = [
 
 const EXAMPLES: readonly string[] = [
   "Show why planets stay in orbit.",
-  "How does air resistance change a projectile’s flight?",
+  "What does Newton's second law say about force and mass?",
+  "How does air resistance change a projectile's flight?",
+  "How does photosynthesis transfer energy?",
   "What makes a pendulum swing faster?",
   "Why do ripples cancel each other out?",
 ];
@@ -396,27 +398,29 @@ export function AskDemoForm() {
 }
 
 /**
- * The homepage section that hosts the ask-demo form. Rendered only when
- * isGenerativeDemosEnabled() is true (see src/app/page.tsx).
+ * The homepage hero that hosts the ask-demo form — the single entrance to the
+ * generative pipeline. Rendered only when isGenerativeDemosEnabled() is true
+ * (see src/app/page.tsx).
  */
 export function AskDemoSection() {
   return (
     <section
       id="ask-for-demonstration"
       aria-labelledby="ask-for-demonstration-heading"
-      className="scroll-mt-24 border-t border-white/10 py-20"
+      className="relative flex min-h-[70svh] flex-col items-center justify-center overflow-hidden px-4 py-20 text-center"
     >
-      <h2
+      <h1
         id="ask-for-demonstration-heading"
-        className="text-2xl font-semibold tracking-tight sm:text-3xl"
+        className="max-w-3xl text-3xl font-semibold tracking-tight sm:text-5xl"
       >
         Ask for a demonstration
-      </h2>
-      <p className="mt-3 max-w-2xl text-base leading-7 text-gray-400">
-        Type any concept — like “Show why planets stay in orbit.” — and we’ll
-        build an interactive demonstration you can enter, step by step.
+      </h1>
+      <p className="mt-4 max-w-2xl text-base leading-7 text-gray-400 sm:text-lg">
+        Type any STEM concept — like “What does Newton’s second law say?” — and
+        we’ll build an interactive learning experience you can enter, step by
+        step.
       </p>
-      <div className="mt-8 max-w-2xl">
+      <div className="mt-8 w-full max-w-2xl text-left">
         <AskDemoForm />
       </div>
     </section>
