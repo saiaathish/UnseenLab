@@ -98,6 +98,10 @@ const ENGINE_PARAMETERS: Record<VerifiedEngineId, CuratedParameter[]> = {
     { key: "absorber", label: "Absorber (control rod)", min: 0, max: 1, step: 0.01, value: 0.3 },
     { key: "multiplication", label: "Multiplication factor", min: 1, max: 2, step: 0.05, value: 1.5 },
   ],
+  newton_second_law: [
+    { key: "force", label: "Applied force", min: 1, max: 50, step: 1, value: 10, unit: "N" },
+    { key: "mass", label: "Mass", min: 0.5, max: 10, step: 0.5, value: 2, unit: "kg" },
+  ],
 };
 
 /**
@@ -116,6 +120,7 @@ const CONTROL_PARAMETER_KEYS: Record<VerifiedEngineId, string[]> = {
   reaction_diffusion: ["feed", "kill"],
   cellular_automaton: ["speed", "density"],
   nuclear_chain_reaction: ["absorber", "multiplication"],
+  newton_second_law: ["force", "mass"],
 };
 
 // ---------------------------------------------------------------------------
@@ -163,6 +168,11 @@ const READOUTS: Record<VerifiedEngineId, ReadoutSpec[]> = {
   nuclear_chain_reaction: [
     { key: "neutronCount", label: "Neutron count", format: "raw" },
     { key: "generation", label: "Generation", format: "raw" },
+  ],
+  newton_second_law: [
+    { key: "acceleration", label: "Acceleration", format: "fixed2" },
+    { key: "velocity", label: "Velocity", format: "fixed2" },
+    { key: "distance", label: "Distance", format: "fixed2" },
   ],
 };
 
@@ -277,6 +287,16 @@ const PREDICTIONS: Record<VerifiedEngineId, CuratedPrediction> = {
     ],
     correctIndex: 0,
   },
+  newton_second_law: {
+    prompt: "If the applied force doubles while the mass stays the same, what happens to the acceleration?",
+    options: [
+      "The acceleration doubles",
+      "The acceleration halves",
+      "The acceleration stays the same",
+      "The acceleration drops to zero",
+    ],
+    correctIndex: 0,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -294,6 +314,7 @@ const LEARNING_OBJECTIVES: Record<VerifiedEngineId, string> = {
   reaction_diffusion: "See how simple reaction and diffusion rules grow visible patterns.",
   cellular_automaton: "Explore how simple local rules produce complex emergent behavior.",
   nuclear_chain_reaction: "See how a single fission can trigger a growing chain of reactions — as a safe model, not real radiation.",
+  newton_second_law: "See how force and mass determine acceleration (a = F/m) for a single pushed object.",
 };
 
 const LIMITATIONS: Record<VerifiedEngineId, string[]> = {
@@ -327,6 +348,9 @@ const LIMITATIONS: Record<VerifiedEngineId, string[]> = {
   ],
   nuclear_chain_reaction: [
     "Statistical averages with simplified neutron physics; no real radiation or reactor hardware.",
+  ],
+  newton_second_law: [
+    "Idealized one-dimensional constant-force model: no friction, no rotation, no changing mass.",
   ],
 };
 
@@ -370,6 +394,10 @@ const OBSERVATION_PROMPTS: Record<VerifiedEngineId, string[]> = {
   nuclear_chain_reaction: [
     "Watch how one fission can trigger more fissions.",
     "Raise the absorber and observe how the neutron count changes.",
+  ],
+  newton_second_law: [
+    "Watch how the acceleration readout changes when you raise the force.",
+    "Double the mass and describe what happens to the acceleration.",
   ],
 };
 

@@ -22,6 +22,7 @@ import {
   sciencePolicy,
   validateDemoSpec,
 } from "@/demonstrations/validation";
+import { firstPassModelCheck } from "@/demonstrations/generation/model/schema";
 import { SPEC_LIMITS } from "@/demonstrations/spec/demo-spec";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 
@@ -1346,5 +1347,244 @@ describe("sanitizer scientific-field boundary", () => {
     expect(result.status).toBe("rejected");
     expect(result.reasons.some((r) => r.startsWith("invalid_type"))).toBe(true);
     expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2C — focusParameterKeys boundary (engine-owned controls selection)
+//
+// The Phase 2B architecture change (evaluation-director) lets the hosted model
+// emit ONLY `focusParameterKeys: string[]` for verified engines; deterministic
+// code materializes the full controls from the EngineControlCatalog. The
+// validation layer must accept and enforce the bounded field:
+//   - inside the simulation object only (strict schema),
+//   - 1..4 engine-owned keys (catalog membership, reason invalid_engine_key),
+//   - verified (Level 1) specs only,
+//   - never repaired — a foreign key REJECTS (no repair class exists, and none
+//     may be added without a documented repair-class decision).
+// ---------------------------------------------------------------------------
+
+/** Serializes the fixture, then injects focusParameterKeys into its
+ * simulation block — the shape of the model's raw output under Phase 2B. */
+function withFocusKeys(spec: DemoSpecV1, keys: unknown): string {
+  const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+  (raw.simulation as Record<string, unknown>).focusParameterKeys = keys;
+  return JSON.stringify(raw);
+}
+
+/** Reads focusParameterKeys back from a validated spec (raw-JSON transport). */
+function readFocusKeys(spec: DemoSpecV1): unknown {
+  return (spec.simulation as unknown as { focusParameterKeys?: unknown })
+    .focusParameterKeys;
+}
+
+describe("focusParameterKeys boundary", () => {
+  it("accepts a verified spec whose focusParameterKeys are engine-owned keys", () => {
+    const result = validateDemoSpec(
+      withFocusKeys(verifiedSimulationSpec(), ["length"])
+    );
+    expect(result.status).toBe("valid");
+    expect(result.reasons).toEqual([]);
+    expect(readFocusKeys(result.spec!)).toEqual(["length"]);
+  });
+
+  it("accepts up to 4 engine-owned keys (pendulum catalog has exactly 4)", () => {
+    const result = validateDemoSpec(
+      withFocusKeys(verifiedSimulationSpec(), [
+        "length",
+        "gravity",
+        "amplitude",
+        "damping",
+      ])
+    );
+    expect(result.status).toBe("valid");
+    expect(result.reasons).toEqual([]);
+  });
+
+  it("accepts engine-owned keys for a second engine (nuclear chain reaction)", () => {
+    const result = validateDemoSpec(
+      withFocusKeys(nuclearChainReactionSpec(), ["absorber", "multiplication"])
+    );
+    expect(result.status).toBe("valid");
+    expect(result.reasons).toEqual([]);
+  });
+
+  it("rejects a focusParameterKeys entry that is not an engine-owned key", () => {
+    const result = validateDemoSpec(
+      withFocusKeys(verifiedSimulationSpec(), ["temperature"])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("invalid_engine_key");
+  });
+
+  it("rejects a focusParameterKeys entry owned by a different engine", () => {
+    // "frequency" is a waves-engine key, not a pendulum key.
+    const result = validateDemoSpec(
+      withFocusKeys(verifiedSimulationSpec(), ["frequency"])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("invalid_engine_key");
+  });
+
+  it("rejects a focusParameterKeys entry that is not in the engine catalog at all", () => {
+    const result = validateDemoSpec(
+      withFocusKeys(verifiedSimulationSpec(), ["length", "fakeParam"])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("invalid_engine_key");
+  });
+
+  it("rejects more than 4 focusParameterKeys (bounded)", () => {
+    const result = validateDemoSpec(
+      withFocusKeys(verifiedSimulationSpec(), [
+        "length",
+        "gravity",
+        "amplitude",
+        "damping",
+        "speed",
+      ])
+    );
+    expect(result.status).toBe("rejected");
+    expect(
+      result.reasons.some((r) => r.startsWith("count_exceeded"))
+    ).toBe(true);
+  });
+
+  it("rejects a non-array focusParameterKeys (bounded)", () => {
+    const result = validateDemoSpec(
+      withFocusKeys(verifiedSimulationSpec(), "length")
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons.some((r) => r.startsWith("invalid_type"))).toBe(true);
+  });
+
+  it("rejects an empty focusParameterKeys array (min 1)", () => {
+    const result = validateDemoSpec(withFocusKeys(verifiedSimulationSpec(), []));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons.some((r) => r.startsWith("count_required"))).toBe(
+      true
+    );
+  });
+
+  it("rejects a non-string focusParameterKeys entry", () => {
+    const result = validateDemoSpec(
+      withFocusKeys(verifiedSimulationSpec(), ["length", 42])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons.some((r) => r.startsWith("invalid_type"))).toBe(true);
+  });
+
+  it("rejects an oversized focusParameterKeys entry (element bound, never repaired)", () => {
+    const result = validateDemoSpec(
+      withFocusKeys(verifiedSimulationSpec(), ["l".repeat(200)])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+  });
+
+  it("rejects focusParameterKeys on a Level 2 spec (verified-only field)", () => {
+    const spec = conceptualDemonstrationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    raw.simulation = JSON.parse(toJson(verifiedSimulationSpec()))
+      .simulation as Record<string, unknown>;
+    (raw.simulation as Record<string, unknown>).focusParameterKeys = ["length"];
+    const result = validateDemoSpec(JSON.stringify(raw));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("science_policy:level2_simulation");
+  });
+
+  it("rejects focusParameterKeys on a Level 3 spec (verified-only field)", () => {
+    const spec = explanatoryAnimationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    raw.simulation = JSON.parse(toJson(verifiedSimulationSpec()))
+      .simulation as Record<string, unknown>;
+    (raw.simulation as Record<string, unknown>).focusParameterKeys = ["length"];
+    const result = validateDemoSpec(JSON.stringify(raw));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("science_policy:level3_simulation");
+  });
+
+  it("rejects focusParameterKeys with no simulation block", () => {
+    // The field only exists inside the simulation object: anywhere else in the
+    // document is an unknown key (strict schema) — never silently dropped.
+    const spec = conceptualDemonstrationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    raw.focusParameterKeys = ["length"];
+    const result = validateDemoSpec(JSON.stringify(raw));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("unknown_key:focusparameterkeys");
+  });
+
+  it("never repairs a foreign focusParameterKeys entry (no repair path)", () => {
+    // A foreign key must REJECT — the repair allowlist has no focusParameterKeys
+    // class and must never gain one (unknown repair -> reject remains).
+    const result = validateDemoSpec(
+      withFocusKeys(verifiedSimulationSpec(), ["temperature"])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("invalid_engine_key");
+    expect(result.reasons.some((r) => r.startsWith("repaired:"))).toBe(false);
+    expect(result.spec).toBeUndefined();
+  });
+
+  it("preserves engine-owned focusParameterKeys verbatim through a numeric repair", () => {
+    // The field itself is never touched by the repair walk: a repairable
+    // numeric issue elsewhere repairs, focusParameterKeys passes through.
+    const spec = verifiedSimulationSpec();
+    spec.simulation!.parameters[0].value = 150; // clamps to max (5)
+    const result = validateDemoSpec(withFocusKeys(spec, ["length"]));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain("repaired:param_value");
+    expect(result.reasons.some((r) => r.includes("focus"))).toBe(false);
+    expect(readFocusKeys(result.spec!)).toEqual(["length"]);
+    expect(result.spec!.simulation!.parameters[0].value).toBe(5);
+  });
+
+  it("backward compatible: explicit-controls specs without focusParameterKeys still validate", () => {
+    // Phase 2C must not disturb the curated showcases or any existing spec:
+    // the field is optional and only ever augments.
+    const result = validateDemoSpec(toJson(verifiedSimulationSpec()));
+    expect(result.status).toBe("valid");
+    expect(result.reasons).toEqual([]);
+  });
+
+  it("demoSpecSchema (direct use) enforces the same boundary", () => {
+    const spec = verifiedSimulationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    (raw.simulation as Record<string, unknown>).focusParameterKeys = [
+      "length",
+    ];
+    const parsed = demoSpecSchema.parse(raw);
+    expect(
+      (parsed.simulation as unknown as { focusParameterKeys?: string[] })
+        .focusParameterKeys
+    ).toEqual(["length"]);
+
+    const bad = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    (bad.simulation as Record<string, unknown>).focusParameterKeys = [
+      "temperature",
+    ];
+    expect(() => demoSpecSchema.parse(bad)).toThrow();
+  });
+
+  it("first-pass gate admits the field so the model output reaches the validator", () => {
+    // Phase 2B pipeline: raw model output -> first-pass gate -> sanitizer.
+    // The gate must not reject the field as an unknown key (the full validator
+    // is the authority on membership and bounds it already enforces).
+    const spec = verifiedSimulationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    (raw.simulation as Record<string, unknown>).focusParameterKeys = [
+      "length",
+    ];
+    // The gate requires the model to declare itself (provenance policy).
+    (raw.provenance as Record<string, unknown>).source = "model_generated_spec";
+    const gate = firstPassModelCheck(raw);
+    expect(gate.ok).toBe(true);
+    if (!gate.ok) throw new Error("first-pass gate rejected the model-shaped spec");
+    // The full validator still enforces membership on what the gate admitted
+    // (the pipeline passes gate.value — model correctIndex already stripped).
+    const result = validateDemoSpec(gate.value);
+    expect(result.status).toBe("valid");
+    expect(readFocusKeys(result.spec!)).toEqual(["length"]);
   });
 });

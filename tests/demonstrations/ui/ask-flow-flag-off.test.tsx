@@ -1,18 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-// The hero is a heavy client component; the real page.tsx contributes no h1 of
-// its own (the sole h1 comes from the hero), so the mock mirrors the hero's h1
-// to keep the "exactly one h1" invariant of the composed page intact.
-vi.mock("@/components/ui/topic-input-hero", () => ({
-  TopicInputHero: () => (
-    <section aria-label="Find a learning path">
-      <h1>What topic do you need help with?</h1>
-      topic hero
-    </section>
-  ),
-}));
-
 // The platform header (client) renders auth state and its own SignInDialog.
 // Keep it deterministic: signed-out session, no search params, no OAuth calls.
 vi.mock("@/lib/firebase/use-session", () => ({
@@ -50,11 +38,16 @@ afterAll(() => {
 });
 
 describe("Homepage with the generative demonstration flag off", () => {
-  it("keeps the existing topic-first hero and omits the ask-demo section", () => {
+  it("omits the ask-demo section and renders the static welcome hero instead", () => {
     render(<HomeComponent />);
 
-    // The existing topic-first hero is untouched.
-    expect(screen.getByText("topic hero")).toBeInTheDocument();
+    // The page keeps exactly one h1 (the static welcome hero).
+    expect(
+      screen.getByRole("heading", {
+        name: "Adaptive interactive STEM learning",
+        level: 1,
+      }),
+    ).toBeInTheDocument();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
 
     // The flag-gated ask-demo section is absent: no heading, no form, no
@@ -64,5 +57,14 @@ describe("Homepage with the generative demonstration flag off", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByText("Generate demonstration")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+
+    // The legacy nuclear hero and the nuclear homepage sections are gone in
+    // both flag states.
+    expect(
+      screen.queryByRole("region", { name: "Find a learning path" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Available lab" }),
+    ).not.toBeInTheDocument();
   });
 });

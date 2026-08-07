@@ -37,8 +37,11 @@ Open **http://localhost:3000/research** (reachable via the subtle footer link
 
 Read the consent copy **exactly**:
 
-> **"This session records your interactions and responses for product testing.
-> You may stop at any time."**
+> **"This session is voluntary — you can stop at any time, no questions asked.
+> If you agree, we may collect anonymized notes, anonymized quotes, anonymized
+> screenshots, and your responses to help improve the product. Recording is
+> optional and only happens with your permission. This is not a diagnosis or an
+> evaluation of you, and taking part does not guarantee any learning benefit."**
 
 The participant chooses:
 
@@ -52,8 +55,8 @@ The participant chooses:
 
 With consent agreed, have the participant complete the pre form:
 
-1. The concept question (shown on screen): *"What happens to the number of free
-   neutrons over time if nothing changes?"*
+1. The concept question (shown on screen): *"What happens to the system when one
+   thing changes?"*
 2. Confidence 1–5 (expected to be low before the lab — record as given).
 3. Expected mental effort 1–5.
 4. Preferred explanation style (visual first / step by step / concise).

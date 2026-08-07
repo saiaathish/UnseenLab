@@ -28,7 +28,6 @@ interface Props {
   stage: StageProps;
 }
 
-/** Representation kind → the learner preference mode it best serves. */
 const REP_KIND_TO_MODE: Partial<Record<RepresentationSpec["kind"], RepresentationMode>> = {
   stage_2d: "animation",
   stage_3d: "animation",
@@ -44,12 +43,25 @@ function isStageRep(rep: RepresentationSpec): boolean {
   return rep.kind === "stage_2d" || rep.kind === "stage_3d";
 }
 
-/**
- * Orders the spec's representations so that:
- *  - preferred non-3D views come first when the learner prefers them, and
- *  - stage/3D views always come last under reduced motion.
- * The order is stable so the rest of the UI keeps a consistent sequence.
- */
+function lensLabel(rep: RepresentationSpec): string {
+  switch (rep.kind) {
+    case "stage_2d":
+    case "stage_3d":
+      return "Explore";
+    case "diagram":
+    case "causal_map":
+      return "See";
+    case "timeline":
+    case "text_sequence":
+      return "Guide";
+    case "graph":
+    case "table":
+      return "Measure";
+    default:
+      return rep.label;
+  }
+}
+
 export function orderedRepresentations(
   spec: DemoSpecV1,
   reducedMotion: boolean,
@@ -76,12 +88,6 @@ export function orderedRepresentations(
   return reps;
 }
 
-/**
- * Tabs over spec.representations. Stage tabs render the canvas (the stage
- * stays mounted, hidden, while another view is active so readouts keep
- * flowing); diagram/table/timeline/text_sequence render accessible views.
- * A polite live region announces ONLY tab switches.
- */
 export function DemonstrationRepresentationTabs({
   spec,
   activeId,
@@ -96,16 +102,12 @@ export function DemonstrationRepresentationTabs({
     () => orderedRepresentations(spec, reducedMotion, preferredRepresentations),
     [spec, reducedMotion, preferredRepresentations]
   );
-  const active =
-    ordered.find((rep) => rep.id === activeId) ?? ordered[0] ?? null;
-
+  const active = ordered.find((rep) => rep.id === activeId) ?? ordered[0] ?? null;
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [announcement, setAnnouncement] = useState<string | null>(null);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const focusedIndex = tabRefs.current.findIndex(
-      (node) => node === document.activeElement
-    );
+    const focusedIndex = tabRefs.current.findIndex((node) => node === document.activeElement);
     const currentIndex =
       focusedIndex >= 0 ? focusedIndex : Math.max(0, ordered.findIndex((r) => r.id === activeId));
     let nextIndex: number | null = null;
@@ -141,72 +143,55 @@ export function DemonstrationRepresentationTabs({
   };
 
   if (!active) {
-    return (
-      <p className="text-sm text-muted">
-        This demonstration declares no representations.
-      </p>
-    );
+    return <p className="text-sm text-muted">This demonstration declares no representations.</p>;
   }
 
   const stageActive = isStageRep(active);
   const hasStageRep = ordered.some(isStageRep);
-  /**
-   * Hybrid showcase specs (renderer.kind hybrid/primitive_3d + simulation)
-   * render TWO surfaces: the verified lumina-2d engine stage is kept mounted
-   * (hidden while the 3D view is active) so live readouts keep flowing into
-   * the table; the 3D stage mounts only when its tab is active — one visible
-   * canvas at a time. The coupling props thread the canonical engine state
-   * from the hidden engine stage to the 3D stage so both surfaces always
-   * agree: the hidden 2D stage emits onVisualState (lifted to the page), and
-   * the 3D stage consumes visualState + the showcase engineMapping.
-   */
-  const hybridEngineDriver =
-    !!spec.simulation && spec.renderer.kind !== "lumina_2d";
-
+  const hybridEngineDriver = !!spec.simulation && spec.renderer.kind !== "lumina_2d";
   const { onVisualState, visualState, engineMapping, ...stageBase } = stage;
 
   return (
-    <section
-      aria-label="Representations"
-      className="rounded-xl border border-border bg-surface p-4"
-    >
-      <div
-        role="tablist"
-        aria-label="View the demonstration as"
-        onKeyDown={handleKeyDown}
-        className="flex flex-wrap gap-1"
-      >
-        {ordered.map((rep, index) => (
-          <button
-            key={rep.id}
-            ref={(node) => {
-              tabRefs.current[index] = node;
-            }}
-            type="button"
-            role="tab"
-            id={`demo-rep-tab-${rep.id}`}
-            aria-selected={rep.id === active.id}
-            aria-controls="demo-rep-panel"
-            tabIndex={rep.id === active.id ? 0 : -1}
-            onClick={() => handleChange(rep.id)}
-            className={cn(
-              "min-h-11 rounded-lg px-3 py-2 text-sm font-medium",
-              rep.id === active.id
-                ? "bg-accent-strong text-white"
-                : "border border-border hover:bg-surface-raised"
-            )}
-          >
-            {rep.label}
-          </button>
-        ))}
+    <section aria-label="Representations" className="min-w-0">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div
+          role="tablist"
+          aria-label="View the demonstration as"
+          onKeyDown={handleKeyDown}
+          className="inline-flex flex-wrap gap-1 rounded-full border border-border/80 bg-surface/80 p-1 shadow-sm backdrop-blur-md"
+        >
+          {ordered.map((rep, index) => (
+            <button
+              key={rep.id}
+              ref={(node) => {
+                tabRefs.current[index] = node;
+              }}
+              type="button"
+              role="tab"
+              id={`demo-rep-tab-${rep.id}`}
+              aria-selected={rep.id === active.id}
+              aria-controls="demo-rep-panel"
+              aria-label={rep.label}
+              title={`${lensLabel(rep)} — ${rep.label}`}
+              tabIndex={rep.id === active.id ? 0 : -1}
+              onClick={() => handleChange(rep.id)}
+              className={cn(
+                "min-h-9 rounded-full px-3.5 py-1.5 text-sm font-medium transition",
+                rep.id === active.id
+                  ? "bg-foreground text-background shadow-sm"
+                  : "text-muted-strong hover:bg-surface-raised hover:text-foreground"
+              )}
+            >
+              {lensLabel(rep)}
+            </button>
+          ))}
+        </div>
+        <p className="hidden text-xs text-muted sm:block" aria-hidden="true">
+          {active.label}
+        </p>
       </div>
 
-      <div
-        role="tabpanel"
-        id="demo-rep-panel"
-        aria-labelledby={`demo-rep-tab-${active.id}`}
-        className="mt-4"
-      >
+      <div role="tabpanel" id="demo-rep-panel" aria-labelledby={`demo-rep-tab-${active.id}`}>
         {hasStageRep && !hybridEngineDriver && (
           <div hidden={!stageActive}>
             <DemonstrationStage {...stage} />
@@ -228,17 +213,17 @@ export function DemonstrationRepresentationTabs({
           </>
         )}
         {!stageActive && (
-          <NonStageView
-            spec={spec}
-            rep={active}
-            readouts={readouts}
-            parameters={parameters}
-          />
+          <div className="rounded-2xl border border-border/80 bg-surface/70 p-4 shadow-sm backdrop-blur-sm sm:p-6">
+            <NonStageView
+              spec={spec}
+              rep={active}
+              readouts={readouts}
+              parameters={parameters}
+            />
+          </div>
         )}
       </div>
 
-      {/* Announce only on tab switch; the region stays mounted but empty
-          until then so nothing is announced on first render. */}
       <p aria-live="polite" className="sr-only">
         {announcement ?? ""}
       </p>
@@ -274,41 +259,21 @@ function NonStageView({
     case "graph":
       return <GraphView spec={spec} readouts={readouts} />;
     default:
-      return (
-        <p className="text-sm text-muted">
-          This representation is not available in this environment.
-        </p>
-      );
+      return <p className="text-sm text-muted">This representation is not available in this environment.</p>;
   }
 }
 
-/**
- * Honest graph view: real live readout values only, and only for Level 1
- * specs. Level 2/3 make no quantitative claims, so no graph is invented.
- */
-function GraphView({
-  spec,
-  readouts,
-}: {
-  spec: DemoSpecV1;
-  readouts: Readout[];
-}) {
-  const isLevel1 =
-    spec.trust.level === "verified_simulation" && Boolean(spec.simulation);
+function GraphView({ spec, readouts }: { spec: DemoSpecV1; readouts: Readout[] }) {
+  const isLevel1 = spec.trust.level === "verified_simulation" && Boolean(spec.simulation);
   if (!isLevel1) {
     return (
       <p className="text-sm text-muted">
-        This demonstration makes no quantitative claims, so there is no data to
-        plot. Try the diagram or timeline view instead.
+        This demonstration makes no quantitative claims, so there is no data to plot. Try the diagram or timeline view instead.
       </p>
     );
   }
   if (readouts.length === 0) {
-    return (
-      <p className="text-sm text-muted">
-        No readouts yet — the simulation will produce values shortly.
-      </p>
-    );
+    return <p className="text-sm text-muted">No readouts yet — the simulation will produce values shortly.</p>;
   }
   const values = readouts.map((r) => {
     const parsed = Number.parseFloat(r.value);
@@ -330,9 +295,7 @@ function GraphView({
                 />
               )}
             </div>
-            <span className="w-24 shrink-0 text-right font-mono text-xs">
-              {readout.value}
-            </span>
+            <span className="w-24 shrink-0 text-right font-mono text-xs">{readout.value}</span>
           </div>
         );
       })}

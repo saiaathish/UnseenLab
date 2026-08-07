@@ -19,9 +19,11 @@ import {
   PRIMITIVE_KINDS,
   RELATIONSHIP_OPERATORS,
   SPEC_LIMITS,
+  TRUST_LABELS,
   type EngineCapability,
   type VerifiedEngineId,
 } from "@/demonstrations/spec/demo-spec";
+import type { TrustResolution } from "@/demonstrations/generation/trust/decision-table";
 
 /** Preference subset that changes spec structure (prompt-relevant only). */
 interface PromptPreferences {
@@ -51,7 +53,7 @@ const SCHEMA_SECTION = [
   "- learningObjective: 1-400 chars.",
   "- trust: { level: \"verified_simulation\" | \"conceptual_demonstration\" | \"explanatory_animation\"; label: 1-120 chars; limitations: 0-4 strings of 1-240 chars; engineId (optional): a verified engine id; engineVersion (optional): 1-32 chars }.",
   "- renderer: { kind: \"lumina_2d\" | \"primitive_3d\" | \"hybrid\"; fallbackKind: \"accessible_diagram\" | \"timeline\" | \"data_table\"; preferredAspectRatio: finite number (16/9 for 3D, 4/3 for 2D); background: \"dark\" | \"light\" }.",
-  "- simulation (optional; REQUIRED for verified_simulation): { engineId: a verified engine id; engineVersion: 1-32 chars; seed: integer 0..4294967295; parameters: 1-20 objects { key; label: 1-120; min; max; step > 0; value; unit (optional, 1-16) }; readouts: 1-20 objects { key; label: 1-120; format: \"fixed2\" | \"fixed3\" | \"percent\" | \"raw\" } }. Parameter keys MUST come from the engine's parameterKeys; readout keys MUST come from its readoutKeys; min <= max; value inside [min, max].",
+  "- simulation (optional; REQUIRED for verified_simulation): { engineId: a verified engine id; engineVersion: 1-32 chars; seed: integer 0..4294967295; parameters: 1-20 objects { key; label: 1-120; min; max; step > 0; value; unit (optional, 1-16) }; readouts: 1-20 objects { key; label: 1-120; format: \"fixed2\" | \"fixed3\" | \"percent\" | \"raw\" }; focusParameterKeys (optional, verified only): 1-4 strings, EVERY string MUST be a key in that engine's parameterKeys — your bounded control selection; the deterministic layer materializes the controls }. Parameter keys MUST come from the engine's parameterKeys; readout keys MUST come from its readoutKeys; min <= max; value inside [min, max].",
   "- scene3d (optional): { objects: 0-80 objects { id: 1-64; kind: a primitive kind; label?; position? { x, y, z }; size?; color? 1-32 chars; trailPoints? integer; particleCount? integer; children? 1-80 object ids }; relationships: 0-100 { id; type: a relationship operator; from; to; label? }; animations: 0-100 { id; target; operator: an animation operator; speed?; delayMs?; axis? \"x\" | \"y\" | \"z\"; amplitude? } }.",
   "- timeline (optional): { events: 1-30 objects { title: 1-120 chars; description: 1-800 chars; startMs >= 0; durationMs >= 0 } }.",
   "- controls: 0-6 objects { id; type: a control type; label: 1-120 chars; target: { kind: \"parameter\", ref } | { kind: \"animation\", ref } | { kind: \"scene\", ref: \"speed\" | \"paused\" | \"reset\" | \"play_pause\" }; min?; max?; step? > 0; options? 1-8 strings; defaultValue? string or number }. A parameter target.ref MUST name a simulation parameter key; an animation target.ref MUST name a scene3d animation id.",
@@ -87,23 +89,53 @@ const LIMITS_SECTION = [
   `- Explanation text max ${SPEC_LIMITS.maxExplanationChars} chars; learning objective max 400 chars.`,
 ].join("\n");
 
-/** Trust-level rules. When engines are present the model MUST produce a
- * Level 1 verified_simulation; otherwise it must choose Level 2 or Level 3. */
-function trustRulesSection(engines: EngineCapability[]): string[] {
+/** Trust-level rules. The precedence is the learner's EXPLICIT intent, never
+ * the topic name (the deterministic trust decision table applies the same
+ * rules: src/demonstrations/generation/trust/decision-table.ts):
+ * verified engine match -> Level 1; explicit staged/sequential/cyclic/
+ * over-time intent -> Level 3; explicit comparison/relationship/effect/
+ * structure intent -> Level 2; ambiguity is resolved by the deterministic
+ * router BEFORE the model (one clarification question) — the model never
+ * guesses a level. Level 1 additionally carries the Phase 2B/2C controls
+ * contract: the model emits ONLY simulation.focusParameterKeys (bounded,
+ * engine-owned) and never authors parameter controls or their metadata.
+ *
+ * `resolvedTrust` is the ONE trust function's outcome for this request
+ * (resolveTrustIntent via the intent's candidate level). When present, it is
+ * embedded as the authoritative decision — the model never re-derives the
+ * policy; the pipeline cross-check enforces the same level deterministically. */
+function trustRulesSection(
+  engines: EngineCapability[],
+  resolvedTrust?: TrustResolution,
+): string[] {
+  const decisionLine =
+    resolvedTrust !== undefined && resolvedTrust !== "clarify"
+      ? [
+          `- DETERMINISTIC TRUST DECISION — the trust layer resolved this request to ${resolvedTrust} ("${TRUST_LABELS[resolvedTrust]}"). This is authoritative: the pipeline cross-check enforces it on your output.`,
+        ]
+      : [];
   if (engines.length > 0) {
     return [
+      ...decisionLine,
       "TRUST LEVEL — the learner's request routes to a verified engine, so your spec MUST be:",
       `- Level 1 "verified_simulation" using ONE engine from the VERIFIED ENGINES list.`,
       `- trust.engineId and simulation.engineId must be the same engine; parameters and readouts only from that engine's catalog.`,
       `- prediction NEVER includes correctIndex (only curated engine code grades predictions; your spec must omit it).`,
       "- Do NOT use Level 2 or Level 3.",
+      "PARAMETER CONTROLS (focus keys, Phase 2B) — you never author parameter controls or their min/max/step/default/unit:",
+      "- Emit simulation.focusParameterKeys: your bounded, engine-owned control selection — 1 to 4 keys, EVERY key from that engine's parameterKeys. The deterministic layer validates the keys, rejects unknown ones, and materializes the full parameter controls from the curated engine control catalog (catalog bounds, labels, steps, and defaults always win).",
+      "- Include at least TWO focus keys when the learner asked for a comparison; when you omit focusParameterKeys, the engine's curated default controls apply.",
+      "- Do NOT put parameter-targeted controls in controls[] — focusParameterKeys is the ONLY parameter-control channel. controls[] may carry scene controls only (play_pause, reset, speed_control), and the deterministic layer builds the final control set.",
     ];
   }
   return [
-    "TRUST LEVEL — no verified engine matches this request, so your spec MUST be Level 2 or Level 3:",
+    ...decisionLine,
+    "TRUST LEVEL — no verified engine matches this request, so your spec MUST be Level 2 or Level 3, chosen by the learner's EXPLICIT intent, never by topic name:",
     `- Level 2 "conceptual_demonstration": qualitative only. NO simulation, NO correctIndex, NO parameter-driven controls, NO numeric claims in text. Include at least one limitation.`,
     `- Level 3 "explanatory_animation": timeline-driven narrative. NO simulation, NO correctIndex, NO parameter-driven controls; controls only play_pause / speed_control / reset.`,
-    "- Choose Level 3 for process/narrative topics (biological processes, cycles, sequences); otherwise choose Level 2.",
+    "- Level 3 when the learner explicitly asks for stages, steps, phases, a sequence, a cycle, a process walkthrough, or change over time — even for a topic that could be read as static.",
+    "- Level 2 when the learner explicitly compares, contrasts, or asks about relationships, effects, or structure — even for biological topics. Comparisons are never Level 3.",
+    "- Ambiguous requests never reach you: the deterministic trust router resolves them to ONE clarification question before the model is called. Never guess a trust level and never emit a clarify-style spec. If neither marker class applies (cannot normally happen after routing), choose Level 2.",
   ];
 }
 
@@ -146,11 +178,16 @@ function preferenceSection(prefs: PromptPreferences): string[] {
  * @param engineCatalog the verified-engine catalog the model may use — the
  *   pipeline narrows it to the intent's candidate engines; an empty object
  *   forbids Level 1 entirely.
+ * @param resolvedTrust the ONE trust function's outcome for this request
+ *   (resolveTrustIntent, via the intent's candidate level). When provided,
+ *   the trust section embeds it as the authoritative decision — the model
+ *   never re-derives the trust policy from scratch.
  */
 export function buildGenerationPrompt(
   normalizedQuery: string,
   prefs: LearnerPreferences,
   engineCatalog: Partial<Record<VerifiedEngineId, EngineCapability>>,
+  resolvedTrust?: TrustResolution,
 ): string {
   const engines = Object.values(engineCatalog);
   return [
@@ -163,7 +200,7 @@ export function buildGenerationPrompt(
     "",
     ...engineCatalogLines(engines),
     "",
-    ...trustRulesSection(engines),
+    ...trustRulesSection(engines, resolvedTrust),
     "",
     CATALOG_SECTION,
     "",

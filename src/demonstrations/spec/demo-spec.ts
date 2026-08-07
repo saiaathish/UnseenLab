@@ -39,6 +39,7 @@ export const VERIFIED_ENGINE_IDS = [
   "reaction_diffusion",
   "cellular_automaton",
   "rc_circuit",
+  "newton_second_law",
   "nuclear_chain_reaction",
 ] as const;
 
@@ -190,6 +191,17 @@ export interface VerifiedSimulationSpec {
   seed: number;
   parameters: EngineParameterSpec[];
   readouts: ReadoutSpec[];
+  /**
+   * Phase 2C: the model's bounded, engine-owned control selection. The hosted
+   * model may emit ONLY this field for verified engines — every entry must be
+   * a key in ENGINE_CATALOG[engineId].parameterKeys (validator reason
+   * `invalid_engine_key`), 1-4 entries. Deterministic code (the controls
+   * materializer) builds the full ControlSpec[] from this selection and the
+   * EngineControlCatalog; the model never invents controls. Optional so every
+   * existing curated spec (explicit controls, no focus selection) validates
+   * unchanged.
+   */
+  focusParameterKeys?: string[];
 }
 
 export interface PrimitiveObjectSpec {
@@ -519,6 +531,19 @@ export const ENGINE_CATALOG: Record<VerifiedEngineId, EngineCapability> = {
     ],
     parameterKeys: ["initialNeutrons", "absorber", "multiplication"],
     readoutKeys: ["neutronCount", "generation"],
+    supports3D: false,
+    supports2D: true,
+  },
+  newton_second_law: {
+    id: "newton_second_law",
+    title: "Newton's Second Law",
+    domain: "mechanics",
+    keywords: [
+      "newton's second law", "second law of newton", "newton second law",
+      "f = ma", "force and mass", "force and acceleration", "newtons law",
+    ],
+    parameterKeys: ["force", "mass"],
+    readoutKeys: ["acceleration", "velocity", "distance"],
     supports3D: false,
     supports2D: true,
   },

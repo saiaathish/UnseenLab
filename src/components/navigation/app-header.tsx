@@ -37,7 +37,6 @@ export function AppHeader() {
       ]
     : [
         { href: "/#how-it-works", label: "How it works" },
-        { href: "/#available-lab", label: "Available lab" },
         { href: "/#accessibility", label: "Accessibility" },
       ];
 

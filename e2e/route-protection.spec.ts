@@ -57,20 +57,12 @@ test("guest flow regression after dismissing the redirect dialog", async ({
   await page.waitForURL(/\?auth=open/);
   await expect(page.getByRole("dialog")).toBeVisible();
 
-  // Dismiss the dialog and complete the guest topic flow; the lab must open
-  // with no auth wall and no dialog.
-  // NOTE: depends on the "Try without an account" close handler in
-  // sign-in-dialog.tsx (currently calls an undefined `setOpen` — owned by the
-  // platform agent; see agent-20 findings).
+  // Dismiss the dialog; the lab must open with no auth wall and no dialog.
+  // (The homepage no longer routes topics to the lab — navigate directly.)
   await page.getByRole("button", { name: "Try without an account" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
-  await page
-    .getByLabel("Describe the topic you need help with")
-    .fill("nuclear chain reaction");
-  await page.keyboard.press("Enter");
-  await page.getByRole("link", { name: "Start this lab" }).first().click();
-  await page.waitForURL(/\/lab\/nuclear-chain-reaction/);
+  await page.goto("/lab/nuclear-chain-reaction");
 
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(

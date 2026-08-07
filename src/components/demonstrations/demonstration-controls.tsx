@@ -95,12 +95,12 @@ export function DemonstrationControls({
     return (
       <section
         aria-label="Controls"
-        className="rounded-xl border border-border bg-surface p-4"
+        className="rounded-2xl border border-border/70 bg-surface/55 px-4 py-3"
       >
-        <h2 className="text-sm font-semibold uppercase tracking-widest text-muted">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
           Controls
         </h2>
-        <p className="mt-2 text-sm text-muted">
+        <p className="mt-1 text-sm text-muted">
           This demonstration has no adjustable controls.
         </p>
       </section>
@@ -111,25 +111,30 @@ export function DemonstrationControls({
     <section
       ref={controlsRef}
       aria-label="Controls"
-      className="rounded-xl border border-border bg-surface p-4"
+      className="rounded-2xl border border-border/70 bg-surface/55 p-3 shadow-sm backdrop-blur-sm sm:p-4"
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-widest text-muted">
-          Controls
-        </h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+            Controls
+          </h2>
+          <p className="mt-0.5 text-sm text-muted-strong">
+            Change one thing and watch the model respond.
+          </p>
+        </div>
         {!enabled && (
-          <p className="text-xs font-medium text-accent">
-            Submit a prediction to unlock the controls
+          <p className="rounded-full border border-accent/30 bg-accent-soft/35 px-3 py-1 text-xs font-medium text-accent">
+            Predict first to unlock
           </p>
         )}
       </div>
 
       {spec.adaptationContext.oneVariableMode && (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-accent-soft/60 p-3">
+        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
           <div>
             <p className="text-sm font-medium">One-variable mode</p>
             <p className="text-xs leading-5 text-muted">
-              Change one thing at a time; everything else stays frozen.
+              Keep everything else still while you test one change.
             </p>
           </div>
           <Switch
@@ -140,7 +145,7 @@ export function DemonstrationControls({
         </div>
       )}
 
-      <div ref={rowsRef} className="mt-4 flex flex-col gap-3">
+      <div ref={rowsRef} className="mt-3 grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
         {spec.controls.map((control) => {
           const frozen =
             oneVariableMode &&
@@ -290,10 +295,10 @@ function ControlRow({
                   })
                 }
                 className={cn(
-                  "min-h-11 rounded-lg px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50",
+                  "min-h-10 rounded-full px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
                   selected === index
-                    ? "bg-accent-strong text-white"
-                    : "border border-border hover:bg-surface-raised"
+                    ? "bg-foreground text-background"
+                    : "border border-border/70 hover:bg-surface-raised"
                 )}
               >
                 {option}
@@ -311,7 +316,7 @@ function ControlRow({
           disabled={disabled}
           aria-pressed={playing}
           onClick={() => act(onPlayPause)}
-          className="min-h-11 rounded-lg bg-accent-strong px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-10 rounded-full bg-foreground px-4 py-2 text-sm font-semibold text-background transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {playing ? "Pause" : "Play"}
         </button>
@@ -335,10 +340,10 @@ function ControlRow({
                 aria-pressed={speed === option}
                 onClick={() => act(() => onSpeedChange(option))}
                 className={cn(
-                  "min-h-11 rounded-lg px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50",
+                  "min-h-10 rounded-full px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
                   speed === option
-                    ? "bg-accent-strong text-white"
-                    : "border border-border hover:bg-surface-raised"
+                    ? "bg-foreground text-background"
+                    : "border border-border/70 hover:bg-surface-raised"
                 )}
               >
                 {option}×
@@ -370,7 +375,7 @@ function ControlRow({
               }
             })
           }
-          className="min-h-11 rounded-lg border border-border px-4 py-2.5 text-sm font-medium hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-10 rounded-full border border-border/70 px-4 py-2 text-sm font-medium transition hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-50"
         >
           {control.label}
         </button>
@@ -392,7 +397,7 @@ function ControlRow({
   return (
     <div
       className={cn(
-        "rounded-lg border border-border bg-surface-raised p-3",
+        "rounded-xl border border-border/60 bg-surface/45 p-3",
         frozen && "opacity-60"
       )}
     >

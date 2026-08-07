@@ -96,31 +96,37 @@ export interface DemonstrationShellProps {
 /**
  * The demo page layout (70/30 workspace): the left column is the model only
  * (representation tabs + stage + a minimal controls strip), the right column
- * is the sequential lesson rail. On mobile the model comes first and the rail
- * stacks below; never a crushed three-column layout. Provenance, save status,
- * limitations, the trial log and adaptation history live behind the ⓘ button
- * (AboutThisModel); the primary workspace shows one trust chip only.
+ * is the sequential lesson rail. Product chrome stays deliberately quiet: the
+ * phenomenon is the dominant surface, prediction remains the gate, and the
+ * rail drives the lesson one step at a time. On mobile the model comes first
+ * and the rail stacks below; never a crushed three-column layout. Provenance,
+ * save status, limitations, the trial log and adaptation history live behind
+ * the ⓘ button (AboutThisModel); the primary workspace shows one trust chip
+ * only. Renderer and state contracts are unchanged.
  */
 export function DemonstrationShell(props: DemonstrationShellProps) {
   const { spec } = props;
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <Link
-            href="/"
-            className="inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline"
-          >
-            ← Back to home
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold leading-tight">
+    <div className="mx-auto w-full max-w-6xl px-3 pb-10 pt-3 sm:px-5 sm:pt-4">
+      <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3">
+        <Link
+          href="/"
+          aria-label="← Back to home"
+          className="inline-flex min-h-11 items-center gap-2 rounded-full px-2 text-sm font-medium text-muted-strong transition hover:bg-surface-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          <span aria-hidden="true">←</span>
+          <span className="hidden sm:inline">Home</span>
+        </Link>
+
+        <div className="min-w-0 pt-1 text-center">
+          <h1 className="truncate text-xl font-semibold leading-tight sm:text-2xl">
             {spec.title}
           </h1>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted">
+          <p className="mx-auto mt-1 max-w-3xl text-sm leading-5 text-muted-strong">
             {spec.learningObjective}
           </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
             <TrustBadge level={spec.trust.level} />
             <AboutThisModel
               spec={spec}
@@ -243,7 +249,7 @@ function ReplayBanner({
       ref={bannerRef}
       tabIndex={-1}
       aria-label={`Replay of trial entry ${trial.trial}`}
-      className="mt-6 rounded-xl border border-accent/40 bg-accent-soft/40 p-4"
+      className="mt-4 rounded-2xl border border-accent/35 bg-accent-soft/35 p-4"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
@@ -259,7 +265,7 @@ function ReplayBanner({
         <button
           type="button"
           onClick={onDismiss}
-          className="min-h-11 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-raised"
+          className="min-h-11 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-raised"
         >
           Dismiss replay
         </button>

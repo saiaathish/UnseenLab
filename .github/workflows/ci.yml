@@ -69,8 +69,13 @@ jobs:
       # (i.e. `next start`), which requires a build to exist. Playwright's
       # webServer does NOT build, so this job re-runs the build itself:
       # slower but self-contained (no artifact handoff between jobs).
+      # The demo UI is gated by NEXT_PUBLIC_GENERATIVE_DEMOS_ENABLED — the
+      # deterministic journey spec (e2e/demo-journey.spec.ts) requires it
+      # baked in, so this job builds with the flag on (preview parity).
       - name: Build
         run: npm run build
+        env:
+          NEXT_PUBLIC_GENERATIVE_DEMOS_ENABLED: "1"
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       - name: Run Playwright tests

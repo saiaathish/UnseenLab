@@ -28,6 +28,21 @@ import { orderedRepresentations } from "./representation-tabs";
 type BootState = "loading" | "missing" | "ready";
 
 /**
+ * Re-applies the learner's recorded prediction after a reload: the last
+ * trial that carries a predictionIndex becomes the live gate state, so a
+ * saved session returns with its prediction locked in and controls
+ * unlocked — no evidence is lost and the learner never has to re-predict
+ * what they already recorded. Sessions without a prediction stay at null
+ * (the normal prediction-first gate).
+ */
+export function restoredPredictionIndex(trials: TrialRecord[]): number | null {
+  for (let i = trials.length - 1; i >= 0; i--) {
+    if (trials[i].predictionIndex !== null) return trials[i].predictionIndex;
+  }
+  return null;
+}
+
+/**
  * Client page assembly. Owns the demo session lifecycle:
  *  1. reads demoStore.getSession() (subscribed),
  *  2. falls back to loadFromDevice(params id),
@@ -229,7 +244,9 @@ function DemoExperienceReady({
   const [visualState, setVisualState] = useState<EngineVisualState | null>(null);
   const engineMapping = useMemo(() => engineMappingForSpec(spec), [spec]);
 
-  const [predictionIndex, setPredictionIndex] = useState<number | null>(null);
+  const [predictionIndex, setPredictionIndex] = useState<number | null>(() =>
+    restoredPredictionIndex(demoStore.getTrials())
+  );
   const [manipulated, setManipulated] = useState(false);
   const [revealed, setRevealed] = useState(false);
 
