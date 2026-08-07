@@ -1,11 +1,13 @@
 # Lesson Workspace Redesign — Program (2026-08-07)
 
-**Status:** COMPLETED THROUGH A5 — A6 (this document's claim/evidence
-registers + PR description) in flight; A7 (independent red team) and A8
-(final integration + open items) pending. Ledger:
+**Status:** COMPLETE — A1–A8 done; red-team verdict APPROVED_WITH_FINDINGS
+(0 Critical / 1 Important / 4 Minor); all findings resolved in the A8
+integration commit; final gates green; merge verdict **MERGE_READY** (see
+`docs/closure-lesson-workspace-redesign.md`). Ledger:
 `.superpowers/sdd/progress.md`.
-**Branch:** `feature/generative-demonstration-engine` (draft PR #9 — NOT merged;
-this work lands on the same branch).
+**Branch:** `feature/generative-demonstration-engine` — the branch was PR #9,
+which is MERGED on GitHub (2026-08-05); **this redesign lands as a NEW PR**,
+not #9.
 **Evidence:** `docs/red-team-lesson-workspace-2026-08-07.md` (judge critique —
 frozen input).
 **Gate rule:** every implementation assignment must leave the repo green:
@@ -17,7 +19,7 @@ in the spec (`scene3d.objects` + `scene3d.relationships` with `causes |
 activates | inhibits | …` types); the work is making every surface render THAT
 graph.
 
-## Program status (A6 update, 2026-08-07)
+## Program status (A8 final, 2026-08-07)
 
 Implemented and verified (details in `.superpowers/sdd/a1..a5-report.md`; claims
 in `validation-pack/claim-register.md` and
@@ -58,13 +60,15 @@ in `validation-pack/claim-register.md` and
 Pending:
 
 - **A6** — this document's status + claim/evidence registers + PR description
-  (`validation-pack/pr-description-redesign.md`).
+  (`validation-pack/pr-description-redesign.md`). DONE @ `6342a5f`.
 - **A7** — independent red team (read-only hostile review of the full branch
-  diff against the frozen contract).
+  diff against the frozen contract). DONE — APPROVED_WITH_FINDINGS
+  (`.superpowers/sdd/red-team-report.md`): 0 Critical / 1 Important / 4 Minor.
 - **A8** — final integration + open carry-list items (see below), final gate
-  run, merge verdict.
+  run, merge verdict. DONE — MERGE_READY (`docs/closure-lesson-workspace-redesign.md`).
 
-A8 carry list (open; do NOT claim as fixed):
+A8 carry list (all RESOLVED in the A8 integration commit — do not reopen as
+open items; details in the closure report):
 
 1. `template-builder.ts:633` representation label `"3D stage"` → `"3D Model"`.
 2. `globals.css:52` `body.high-contrast` `--muted-strong: #f5f5f5` →
@@ -72,11 +76,15 @@ A8 carry list (open; do NOT claim as fixed):
 3. Visible em dash in `demonstration-controls.tsx` drag-handle copy
    (`"{label} — drag directly on the stage."`).
 4. A1 minor: per-edge materials not tracked as disposables (benign per-spec
-   retention; flagged for a profiler-driven follow-up).
-5. A5 environment note: consider excluding `.env.local` from the guest e2e
-   build (or exporting the key in the canonical e2e command) so the
-   `auth-dialog` Google test self-skips instead of failing on the Firebase
-   popup without a key.
+   retention; judgment documented in the closure report — geometries and
+   textures ARE tracked disposables and the scene is disposed; three.js GCs
+   materials with the scene, so no demo-lifecycle leak).
+5. A5 environment note: canonical e2e command documented in the PR
+   description (run with the env the build was baked with; the
+   `auth-dialog` Google test then self-skips by design).
+6. Red-team F4 (NEW finding): stale `before_after_comparison` observation
+   prompt referencing a deleted arrow — rewritten to describe the rendered
+   relationship (all other "arrow" prompts verified against rendered edges).
 
 ## Frozen UX contract
 

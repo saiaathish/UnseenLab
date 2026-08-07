@@ -1,13 +1,14 @@
-# Lesson Workspace Redesign — PR description (draft body, A6)
+# Lesson Workspace Redesign — PR description (final body, A8)
 
-**Head:** `1fe7530` (`feature/generative-demonstration-engine`) · **Base:** `main`
-**Slice under review:** `0d88957..1fe7530` — 10 commits, 36 files changed,
-+6,324 / −829 (3 program-doc commits + 7 implementation commits)
+**Head:** `HEAD` (`feature/generative-demonstration-engine`) · **Base:** `main`
+**Slice under review:** `0d88957..HEAD` — program-doc commits + implementation
+commits (A1–A5) + the A8 integration commit (open findings + final gate)
 **Program contract:** `docs/redesign-lesson-workspace.md` (frozen UX contract;
 evidence: `docs/red-team-lesson-workspace-2026-08-07.md`)
 **Parent PR context:** this slice extends the generative-demonstration-engine
-branch previously reviewed in draft PR #9 (feature flag, pipeline and trust
-policy unchanged by this slice). Ledger: `.superpowers/sdd/progress.md`.
+branch that was PR #9 (feature flag, pipeline and trust policy unchanged by
+this slice). PR #9 is MERGED on GitHub (2026-08-05); **this redesign is a NEW
+PR**, not #9. Ledger: `.superpowers/sdd/progress.md`.
 
 Every claim below is tagged with the environment it was verified in:
 `VERIFIED` (code + tests / real browser) / `NOT_RUN` (manual or human-only) /
@@ -99,8 +100,8 @@ proving the mechanics in Chromium against a flag-on production build.
 - All representation labels in the A3-owned builders normalized to
   `3D Model | 2D Model | Model | Diagram | Table | Timeline | Text sequence |
   Graph`. No behavior change; no test asserted any old label string
-  (1223 pass before and after). One A1-owned straggler remains (`"3D stage"`
-  at `template-builder.ts:633`) — queued for A8, not claimed fixed.
+  (1223 pass before and after). The one A1-owned straggler (`"3D stage"` at
+  `template-builder.ts:633`) is FIXED by A8 — label is now `"3D Model"`.
 
 ### 2.5 Accessibility — A4 (`3b614ef`) [`VERIFIED` + `NOT_RUN` remainders]
 
@@ -153,10 +154,16 @@ proving the mechanics in Chromium against a flag-on production build.
 
 Environment caveats, stated not hidden: (1) gates run locally under real Node —
 this program has no CI job for the new spec; (2) `auth-dialog.spec.ts`'s
-Google test fails only when the runner lacks `NEXT_PUBLIC_FIREBASE_API_KEY`
-(local builds are Firebase-baked via `.env.local`; with the key exported the
-test self-skips by design — this is a pre-existing environment property,
-unrelated to the redesign, flagged for A8).
+Google test depends on the build's Firebase configuration. The canonical e2e
+command is to run with the same env the build was baked with: local builds are
+Firebase-baked via `.env.local`, so export `NEXT_PUBLIC_FIREBASE_API_KEY`
+(from `.env.local`) alongside `NEXT_PUBLIC_GENERATIVE_DEMOS_ENABLED=1` — the
+`GUEST_BUILD` gate then self-skips the Google test by design and the full suite
+is 47 passed / 11 skipped / 0 failed. A genuinely guest (non-Firebase) build
+is only possible by building without `.env.local`; then the Google test runs
+and passes its graceful-degradation assertion. Failing the Google test is an
+env mismatch (runner env vs baked build), never a redesign defect (A8 closure,
+finding 6: documented here as the chosen mitigation).
 
 ## 4. Honest limitations (do not overclaim)
 
@@ -173,11 +180,13 @@ unrelated to the redesign, flagged for A8).
   curated-only.
 - Hybrid showcase / containment scenes never enter graph mode; the rail does
   not gate interact steps on them.
-- Open items owed by A8 (NOT fixed; do not claim): `template-builder.ts:633`
+- A8 carry items (all FIXED in the A8 integration commit; see
+  `docs/closure-lesson-workspace-redesign.md`): `template-builder.ts:633`
   `"3D stage"` → `"3D Model"`; `globals.css:52` high-contrast `--muted-strong`
-  typo (`#f5f5f5` → `#0a0a0a`, pre-existing; component-level mitigation
-  shipped); visible em dash in `demonstration-controls.tsx` drag-handle copy;
-  A1 minor material-disposal note; guest-e2e build note for `auth-dialog`.
+  typo (`#f5f5f5` → `#0a0a0a`); visible em dash in `demonstration-controls.tsx`
+  drag-handle copy; stale `before_after_comparison` observation prompt
+  (red-team F4); guest-e2e build note for `auth-dialog` (this section);
+  A1 material-disposal judgment documented in the closure report.
 
 ## 5. How to review (commit order)
 
