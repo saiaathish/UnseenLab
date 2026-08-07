@@ -30,6 +30,7 @@ export function DemoSummaryCard({
 
   const trustLabel = TRUST_LABELS[spec.trust.level] ?? spec.trust.label;
   const primaryLimitation = spec.trust.limitations[0];
+  const mainControls = spec.controls.slice(0, 4);
 
   const handleEnterDemo = () => {
     demoStore.startDemo(spec, source, generatedAt);
@@ -62,6 +63,12 @@ export function DemoSummaryCard({
         </span>
       </div>
 
+      <ul className="sr-only" aria-label="Main controls">
+        {mainControls.map((control) => (
+          <li key={control.id}>{control.label}</li>
+        ))}
+      </ul>
+
       {primaryLimitation ? (
         <p className="mx-auto mt-4 max-w-lg text-xs leading-5 text-gray-400">
           <span className="font-medium text-gray-300">Keep in mind:</span>{" "}
@@ -83,7 +90,7 @@ export function DemoSummaryCard({
           onClick={onStartOver}
           className="min-h-12 rounded-full px-4 py-3 text-sm font-medium text-gray-300 transition hover:bg-white/8 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60"
         >
-          Ask something else
+          Start over
         </button>
       </div>
     </div>
