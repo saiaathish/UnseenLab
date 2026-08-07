@@ -134,6 +134,14 @@ const ENGINE_ALIAS_PHRASES: Record<VerifiedEngineId, readonly string[]> = {
   reaction_diffusion: [],
   cellular_automaton: [],
   nuclear_chain_reaction: ["control rods", "neutron absorbers"],
+  newton_second_law: [
+    "newton's second law",
+    "second law of newton",
+    "newton's law",
+    "newton force mass",
+    "force mass acceleration",
+    "newtons law",
+  ],
 };
 
 export const TEMPLATE_KEYWORDS: Record<ConceptualTemplateId, readonly string[]> = {

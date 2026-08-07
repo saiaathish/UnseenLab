@@ -63,7 +63,6 @@ describe("AppHeader", () => {
 
     for (const [label, href] of [
       ["How it works", "/#how-it-works"],
-      ["Available lab", "/#available-lab"],
       ["Accessibility", "/#accessibility"],
     ] as const) {
       expect(screen.getByRole("link", { name: label })).toHaveAttribute(

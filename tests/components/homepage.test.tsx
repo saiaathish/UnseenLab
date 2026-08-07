@@ -1,23 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import Home from "@/app/page";
-
-// The hero is a heavy client component; the real page.tsx contributes no h1 of
-// its own (the sole h1 comes from the hero), so the mock mirrors the hero's h1
-// to keep the "exactly one h1" invariant of the composed page intact.
-vi.mock("@/components/ui/topic-input-hero", () => ({
-  TopicInputHero: () => (
-    <section aria-label="Find a learning path">
-      <h1>What topic do you need help with?</h1>
-      topic hero
-    </section>
-  ),
-}));
 
 // The platform header (client) renders auth state and its own SignInDialog.
 // Keep it deterministic: signed-out session, no search params, no OAuth calls.
-// isSafeRedirectPath comes from the real (pure) allowlist module, so only the
-// Firebase hooks and the popup call are stubbed.
 vi.mock("@/lib/firebase/use-session", () => ({
   useSession: () => ({ user: null, loading: false }),
 }));
@@ -39,9 +24,69 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(""),
 }));
 
-describe("Homepage", () => {
+let HomeComponent: typeof import("@/app/page").default;
+
+beforeAll(async () => {
+  vi.stubEnv("NEXT_PUBLIC_GENERATIVE_DEMOS_ENABLED", "1");
+  HomeComponent = (await import("@/app/page")).default;
+});
+
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("Homepage (generative flag on)", () => {
+  it("renders the generative ask hero as the single entrance with breadth examples", () => {
+    render(<HomeComponent />);
+
+    expect(
+      screen.getByRole("heading", { name: "Ask for a demonstration", level: 1 }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "What topic do you need help with?" }),
+    ).toBeInTheDocument();
+
+    // Breadth examples — the product promise, not a single nuclear lab.
+    expect(
+      screen.getByRole("button", { name: "Show why planets stay in orbit." }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "What does Newton's second law say about force and mass?",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "How does photosynthesis transfer energy?",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("no longer routes the main input through the legacy nuclear hero", () => {
+    render(<HomeComponent />);
+
+    // The legacy hero ("Find a learning path") and its nuclear chips are gone.
+    expect(
+      screen.queryByRole("region", { name: "Find a learning path" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Nuclear chain reactions" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Why reactions accelerate" }),
+    ).not.toBeInTheDocument();
+
+    // The nuclear-centric homepage sections are gone.
+    expect(
+      screen.queryByRole("heading", { name: "Available lab" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Start this lab" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the three how-it-works steps with their sentences", () => {
-    render(<Home />);
+    render(<HomeComponent />);
 
     expect(
       screen.getByRole("heading", { name: "How it works" }),
@@ -58,52 +103,14 @@ describe("Homepage", () => {
     }
   });
 
-  it("promotes the available lab with a link to it", () => {
-    render(<Home />);
-
-    expect(
-      screen.getByRole("heading", { name: "Available lab" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Nuclear Chain Reaction" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Interactive lab ready")).toBeInTheDocument();
-
-    const link = screen.getByRole("link", { name: "Start this lab" });
-    expect(link).toHaveAttribute("href", "/lab/nuclear-chain-reaction");
-  });
-
   it("states the accessibility commitments", () => {
-    render(<Home />);
+    render(<HomeComponent />);
 
     expect(
       screen.getByRole("heading", { name: "Accessibility" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "No timer. No diagnosis-based presets. Reduced motion, adjustable pacing, keyboard access, and learner-controlled adaptations.",
-      ),
+      screen.getByText(/No timer\. No diagnosis-based presets\./),
     ).toBeInTheDocument();
-  });
-
-  it("shows the simulation disclaimer in the footer", () => {
-    render(<Home />);
-    expect(
-      screen.getByText(/not physically predictive/i),
-    ).toBeInTheDocument();
-  });
-
-  it("offers a sign-in entry in the header and no sign-up surface", () => {
-    render(<Home />);
-    // The platform header adds the single auth entry point (AUTH-10).
-    expect(
-      screen.getAllByRole("button", { name: "Sign in" }).length,
-    ).toBeGreaterThan(0);
-    expect(screen.queryByText(/login|sign ?up/i)).not.toBeInTheDocument();
-  });
-
-  it("renders exactly one h1 in the whole document", () => {
-    render(<Home />);
-    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 });

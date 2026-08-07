@@ -13,7 +13,7 @@ beforeEach(() => {
 });
 
 const CONSENT_COPY =
-  "This session records your interactions and responses for product testing. You may stop at any time.";
+  "This session is voluntary — you can stop at any time, no questions asked. If you agree, we may collect anonymized notes, anonymized quotes, anonymized screenshots, and your responses to help improve the product. Recording is optional and only happens with your permission. This is not a diagnosis or an evaluation of you, and taking part does not guarantee any learning benefit.";
 
 async function agreeAndStart(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Agree and begin" }));

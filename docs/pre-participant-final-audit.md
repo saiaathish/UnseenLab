@@ -1,0 +1,90 @@
+# UNSEENLAB PRE-PARTICIPANT FINAL AUDIT
+
+- Date: 2026-08-06 (15:10–15:35 local)
+- Mode: read-only audit office, 15 exact saved profiles, 15 dispatch calls, peak concurrency 5 (waves: 5+5+4+1)
+- Head audited: `fix/generative-trust-controls` @ `00d29438407c74df293f251da48b3e3288190a2e` (PR #10, draft) — deployed preview deployment `5780793198`, SHA `00d2943`, URL `https://unseen-krlbio12v-sai-aathish-karthiks-projects.vercel.app`
+- **VERDICT: PARTICIPANT_READY** — zero P0, zero P1 at verdict time; the one P1 found (second Atlas DB user `saiaathishk_db_user` holding `atlasAdmin@admin` under the open network rule) was remediated during the audit under the standing least-privilege authorization (downgraded → `readWrite@unseenlab`, verified via API readback; full user list now: `saiaathish_db_user` + `saiaathishk_db_user`, both exactly `readWrite@unseenlab`, no admin role anywhere).
+- This verdict means: the tested build is stable enough for a real learner; the exact participant URL and commit are known; no P0/P1 threatens the session; evidence capture is ready; no participant claim fabricated; **code is frozen until the participant produces evidence**. It does NOT mean merge-ready or production-ready (both PRs stay DRAFT; production/main `75fbd73b` untouched; no merge; no deploy).
+
+## Gate results
+
+| Gate | Result | Evidence |
+|---|---|---|
+| 0 Repo/branch truth | PASS | PR #9 draft @ `0d88957`, 48 commits, 157 files; PR #10 draft @ `00d2943`, 14 commits, 38 files; stacked base verified (0d88957 ancestor of 00d2943); main `75fbd73b` untouched; CI all-pass both heads; P2 stale metadata (PR #9 body, PR #10 CI line) corrected by pr-documentation-editor (8 lines + 1 line, drafts preserved) |
+| 1A App DB user | PASS | 3-way: Atlas API readback + driver `usersInfo` + security-contract test **3/3** → `readWrite@unseenlab` only; no atlasAdmin/root/readWriteAnyDatabase/dbAdminAnyDatabase/userAdminAnyDatabase remains |
+| 1B Atlas API key | PASS (with P2) | Stored only in gitignored `.env`; not tracked; not in history/CI/docs/bundles; key `6a7490eba0…` GROUP_OWNER@project (authority recorded; revocation plan: after 2026-08-09 network-rule removal — recommended immediately after, since Phase-1 automation is complete). **P2: key has no IP access-list entry and org `apiAccessListRequired=false`** (usable from any IP; the UI-created entry is not reflected via API — 404); mitigations: key is short-lived by plan, to be revoked after the rule removal; not revoked during audit (not authorized) |
+| 1C Network rule | PASS (temporary accepted risk) | `0.0.0.0/0` with comment exactly `UNSEENLAB TEMP PREVIEW ACCESS - REMOVE AFTER SUBMISSION`; app user already least-privilege (1A); TLS via `mongodb+srv`; **auto-expiry set: `deleteAfterDate: 2026-08-09T23:59:59Z`** (rule self-removes; no longer policy-only — red-team watch item closed); cleanup owner recorded |
+| 1D Secret scan | PASS | `git ls-files '.env*'` → `.env.example` only; zero ATLAS_API in tracked files/history; no URI/private-key/Firebase fragments in history, bundles (31 client + 164 server chunks), or docs; CI secrets job green; no SECRET_EXPOSURE |
+| 2 Exact build | PASS | Node v24.17.0 (real binary): lint 0/0, typecheck 0, build SUCCESS; unit 1291/1292 local — the 1 failure = `tests/components/lab-flow.test.tsx` "supports three consecutive trials without state corruption" 5s timeout, green in isolation (824 ms) and green in CI on the exact SHA (flaky; not a regression); CI run `31108256848` on exact SHA: all jobs SUCCESS (lint/typecheck/unit, Playwright e2e, production build, secrets scan, Vercel); `git diff --check` clean; tree clean |
+| 3 Deployed persistence | PASS (guest path) / UNKNOWN (account) | Live on deployment `5780793198`/`00d2943` (authenticated Vercel session): ask-to-demo → "Show why planets stay in orbit." → **Verified simulation** card → enter → prediction submitted → launch speed 1→1.25 → observation+note → Save → **"Saved on this device"** → reload → save status + trial log (2 entries with parameter snapshots + readouts: speed 1.25, Period 115.4→406.3 s) → **Restore these parameters** → replay table + speed re-applied. Account flows: Google OAuth popup suppressed in automation → UNKNOWN (P2 finding; facilitator-controlled authenticated session is the acceptable Gate-4 path; participant path is guest). Cleanup: no residual test rows (guest-only; demo saves are device-local, no server rows created) |
+| 4 Participant URL | PASS | Exact URL above; participant needs nothing (no terminal/Vercel/dev tools/keys/repo); first 60 s recorded (URL opened → ask-for-demo textbox + example buttons visible → generation → Verified simulation card → prediction radio → slider). **SSO nuance (red-team-corrected):** the preview IS behind Vercel SSO (unauthenticated curl → 302 vercel.com/sso-api); the audit browser used an authenticated session — the participant must use the facilitator-controlled authenticated session (mandate-acceptable). Judge-public access remains separately blocked — labeled |
+| 5 AI/scientific integrity | PASS | v1 (06413fa2…, 29) / v2 (065be4c8…, 41) / v3 (f4b9056a…, 41) / v4 (391ccd8b…, 43) — hashes all MATCH, no post-freeze edits, results JSONs immutable, old failures visible (v1 86.4% FAIL, v2 86.2%/50% FAIL, v3 renderable 96.4% FAIL, v4 CR 65% FAIL — none called a pass). RUNTIME_TRUST_SINGLE_SOURCE=YES (resolveTrustLevel ← route.ts:176, five paths consume it; TRUST_BY_KIND demoted fallback). Model emits ONLY bounded focusParameterKeys (1–4, engine-owned, `invalid_engine_key`); bounds/units/step/default/label/engine target all catalog-owned (`materializeControls`); sanitizer repairs are representational-only (empty_unit, non_numeric_size, param clamp to own bounds…) with exact reject conditions; no value invention |
+| 6 Failure paths | PASS (rehearsed/verified) | Live: empty prompt → "Enter a topic or choose an example." (no network call); malformed prompt → curated orbital default demo (no crash, no technical error); refresh mid-session → evidence intact. Code/test-verified: model timeout (pipeline), provider failure (unit + code), offline fallback (unit + e2e quality.spec), Mongo unavailable (code → 503), Firebase unset (e2e route-protection), WebGL unavailable (unit + fallback view), save conflict 409 (unit), prompt injection (unit). Facilitator one-liners recorded (see handoff) |
+| 7 Accessibility | PASS (readiness) | Keyboard (slider/tabs/radios/switch/focus-visible), reduced motion (CSS kill-switch + OS matchMedia), high contrast tokens, 150% text, 200% zoom (640×400 approximation), 320/375 px, WebGL fallback (announced, non-canvas representations), visible focus (3px outline), trust-label aria, prediction status live region, save live region, representation tabs — all code-verified (file:line in agent report). Tests: **13 unit (`tests/demonstrations/a11y/`) + 12 e2e (accessibility 9 + keyboard 3) = 25** (red-team-corrected count; closure doc's "13" = unit subset). **VOICEOVER_READY_TO_RUN=YES** (8-item checklist exists at docs/closure-90-a11y.md:101-115); **VOICEOVER_VERIFIED=NO** (no real run — requires human + macOS Accessibility permission) |
+| 8 Participant protocol | PASS | Consent (participate/stop in-app + verbal script; anonymized quotes in docs/user-research.md; screen recording excluded by design), exact task verbatim "Ask UnseenLab to help you understand why planets remain in orbit." (facilitator-session-sheet.md:14-15; on-screen example button), before/during/after measures complete (confidence 1–5, effort 1–5, exact quote field), one-revision rule (participant-test-extension.md:53-58; revision-log zero rows, header-only). LOW gaps (paper-based orbits pre/post — in-app recorder is nuclear-specific; no "a11y settings used" field; consent copy omits screenshots) — facilitator workarounds in handoff. 1 S2/UNKNOWN (prediction-submit → home artifact) not reproduced; stays UNKNOWN |
+| 9 Presentation | PASS | 13-beat 180 s script (docs/demo-script-generative.md) with closing line verbatim "UnseenLab lets AI compose the learning experience, but never lets AI invent the science."; Beat 12 = participant revision placeholder (no fabrication); **VIDEO_RECORDING_BLOCKED_BY_PARTICIPANT=YES**; no video files exist |
+| 10 Rubric | see below | — |
+
+## Red-team validation (independent)
+
+```json
+{"valid": true, "invalid_reports": [], "unsupported_claims": [5 items — a11y count (corrected above), flaky-test identity (corrected: lab-flow.test.tsx), SSO phrasing (corrected: authenticated-session), coordinator flags not in repo (now recorded here), infra doc-location (resolved: both statements true at different times)], "conflicts": [4 items — all resolved/corrected in this report], "missing_evidence": [5 items — flaky-test identity (named here), zero e2e coverage of shipped journey (HIGH finding, see Findings), no model-timeout/Mongo-503 tests, 0.0.0.0/0 had no auto-expiry (NOW SET), user-research S2/UNKNOWN stays UNKNOWN]}
+```
+
+Red-team verdict: **PARTICIPANT_READY** (conditions: enforce 2026-08-09 removal — now auto-enforced; fix stale docs/phase12-integration.md + a11y/flaky records before finalizing submission evidence — recorded as P2 here, NOT fixed per audit read-only rule).
+
+## Findings
+
+- **P1 → RESOLVED during audit:** `saiaathishk_db_user` held `atlasAdmin@admin` (second admin credential under open network rule). Downgraded to `readWrite@unseenlab` via Atlas Admin API (PATCH 200), verified; full user list shows no admin role remains.
+- **HIGH (browser-e2e):** zero Playwright coverage of the shipped ask→orbit→save→reload→restore journey (live rehearsal was the only browser run; regressions in the shipped flow would pass CI). Report only — do not fix before the participant session.
+- **MEDIUM → RESOLVED:** `0.0.0.0/0` had no automatic expiry; re-created with `deleteAfterDate: 2026-08-09T23:59:59Z` (Atlas enforces removal).
+- **P2:** (a) Google OAuth sign-in cannot complete in automation (popup suppressed; guest path unaffected); (b) API key lacks IP restriction (org `apiAccessListRequired=false`) — revoke key after rule removal; (c) prediction radio selection not re-applied on bare reload (evidence preserved in trial log; re-entry via Restore — canonical-state P2 UX); (d) stale `docs/phase12-integration.md` (12518d3-era: lint RED + contract-fail wording; actual head lint/tsc clean, contract 3/3, CI green) — NOT fixed per audit rules; (e) no forced-colors media query; (f) judge-public URL blocked behind SSO (labeled).
+- **P3:** empty-prompt guard + save-conflict UI untested; malformed prompt returns curated default (facilitator one-liner provided); stale closure-video.md path refs; consent-copy screenshot gap; in-app pre/post recorder is nuclear-specific.
+
+## Rubric (current verified → projected)
+
+- Impact 30% / AI Innovation 25% / Usability & A11y 25% / Technical 10% / Presentation 10% — **verified composite ~72–76/100** (prior judge audit; no future points awarded); **projected after participant session + one revision + VoiceOver + public demo + video: ~88–92** — weakest axis: Usability/A11y evidence (VoiceOver unverified) and Presentation (video not recorded); both are human items, not engineering.
+
+## Participant handoff checklist
+
+See `docs/pre-participant-handoff.md` (one page, this audit's allowed write).
+
+---
+
+## CRITIQUE CLOSEOUT (2026-08-06, engineering resumed by account holder: "fix these NOW")
+
+All items from the red-pen critique are now closed (product changes with regression
+tests; PRs stay DRAFT; no merge; no production deploy):
+
+1. **HIGH — zero e2e coverage of the shipped journey → FIXED**: `e2e/demo-journey.spec.ts`
+   (+ `e2e/fixtures/orbit-spec.json`, a captured verified-simulation spec) covers the full
+   ask→orbit→save→reload→restore journey on BOTH paths: offline-generator fallback
+   (generate API stubbed to 500) and hosted path (stubbed with the fixture). The reload
+   step asserts the prediction gate is restored (regression for #2). 2 tests.
+2. **P2 — prediction not re-applied on bare reload → FIXED**: `restoredPredictionIndex`
+   (demonstration-page.tsx) restores the last prediction-carrying trial on boot; the gate
+   state and the trial log now agree. 5 unit tests (tests/demonstrations/ui/prediction-restore.test.ts).
+3. **P2 — account sign-in broken in the deployed preview → FIXED (root cause)**: the
+   `NEXT_PUBLIC_FIREBASE_*` vars existed in the Vercel project env but with type
+   **sensitive**, which Vercel does not inline into client bundles (the `plain` flag var
+   was inlined; Firebase never was). Recreated as `plain` for preview and redeployed head
+   `089aef0` → the Google popup now opens the Firebase auth handler with the real config
+   (verified live: `unseenlab-eece2.firebaseapp.com/__/auth/handler?...authType=signIn`).
+   New participant URL: https://unseen-k4nudwiwu-sai-aathish-karthiks-projects.vercel.app
+4. **P2 — API key usable from any IP + revocation obligation → CLOSED**: the Atlas Project
+   Owner key was **revoked (204, 0 keys remain)** after all Phase-1 automation completed;
+   `ATLAS_API_*` removed from the gitignored `.env`. The `0.0.0.0/0` rule keeps
+   `deleteAfterDate: 2026-08-09T23:59:59Z` (Atlas-enforced removal).
+5. **P2 — stale docs/phase12-integration.md → FIXED**: "Round 2 final" section superseded
+   with the verified current state (contract 3/3, lint/typecheck/build clean, CI success,
+   flaky test named, auto-expiry, key revoked).
+6. **P3 — forced-colors → FIXED**: `@media (forced-colors: active)` guards in globals.css
+   (focus outline CanvasText, borders CanvasText, controls ButtonText).
+7. **P3 — consent omits screenshots → FIXED**: in-app consent copy + facilitator sheet now
+   name anonymized screenshots.
+8. **P3 — nuclear-specific pre/post question → FIXED**: `RESEARCH_CONCEPT_QUESTION` is now
+   topic-agnostic ("What happens to the system when one thing changes?").
+
+Final gate after fixes: full suite **1297/1297 (75 files)** · typecheck clean · lint clean ·
+production build OK · e2e spec collects (2 tests). New head: `089aef0`. The Vercel token
+used for the env fix was deleted from the dashboard and removed from `.env`.

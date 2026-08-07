@@ -29,8 +29,13 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { interpret } from "@/demonstrations/generation/intent/route";
-import type { InterpretResult } from "@/demonstrations/generation/intent/route";
+import {
+  interpret,
+  markTrustFallbackExclusion,
+  resolveTrustIntent,
+  type InterpretResult,
+} from "@/demonstrations/generation/intent/route";
+import { normalizeRequest } from "@/demonstrations/generation/intent/normalize";
 import type { IntentSpec } from "@/demonstrations/generation/intent/types";
 import { generateOfflineDemo } from "@/demonstrations/generation/offline/generator";
 import type { OfflineDemoResult } from "@/demonstrations/generation/offline/generator";
@@ -469,5 +474,62 @@ describe("BENCHMARK: generative demonstration engine", () => {
     expect(second.spec.id).toBe(first.spec.id);
     expect(second.spec.generationId).toBe(first.spec.generationId);
     expect(second.spec.simulation?.seed).toBe(first.spec.simulation?.seed);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Trust wiring conformance — the benchmark gold helper uses the ONE trust
+// function (judge-upgrade Round 2): every offline spec carries the table's
+// level where a curated artifact exists; where the table says Level 3 but
+// only a Level 2 template exists, the row is a MARKED fallback exclusion
+// (documented divergence, never a silent retarget). Hand-authored goldTrust
+// values must agree with resolveTrustIntent or be marked exclusions.
+// ---------------------------------------------------------------------------
+
+describe("BENCHMARK: trust wiring conformance — one trust function across call sites", () => {
+  const { rows } = scoreAll();
+
+  it("every spec row's offline trust equals the intent's candidate trust, or is a marked fallback exclusion", () => {
+    for (const r of rows) {
+      if (r.spec === undefined) continue;
+      const intent = interpret(r.row.query, prefs);
+      if ("status" in intent) continue; // category rows never produce a spec
+      if (r.spec.trust.level === intent.candidate_trust_level) continue;
+      // The only allowed divergence: table Level 3, curated Level 2 template
+      // — documented and marked, never silent.
+      expect(
+        markTrustFallbackExclusion(r.row.query),
+        `row ${r.row.id} "${r.row.query}": offline ${r.spec.trust.level} vs candidate ${intent.candidate_trust_level}`,
+      ).toBe(true);
+      expect(r.spec.trust.level).toBe("conceptual_demonstration");
+    }
+  });
+
+  it("every hand-authored goldTrust agrees with resolveTrustIntent, the sanity fallback, or a marked exclusion", () => {
+    for (const r of rows) {
+      if (r.row.goldTrust === undefined) continue;
+      const intent = interpret(r.row.query, prefs);
+      if ("status" in intent) continue; // e.g. measured no-path misses
+      const req = normalizeRequest(r.row.query, prefs);
+      const engineMatch =
+        intent.candidate_engine_ids.length > 0 ? intent.candidate_engine_ids[0] : null;
+      const table = resolveTrustIntent(req, engineMatch);
+      if (table === r.row.goldTrust) continue;
+      if (table === "clarify") {
+        // Markerless request routed to a curated artifact: the artifact's
+        // level is the documented sanity fallback (e.g. "Show me mitosis").
+        expect(r.row.goldTrust, `row ${r.row.id}`).toBe(intent.candidate_trust_level);
+        continue;
+      }
+      // goldTrust !== table: allowed ONLY as a documented fallback exclusion
+      // (the offline path emits the curated Level 2 template; the gold's L2
+      // is the OFFLINE measurement — the table's L3 is a hosted-path
+      // expectation, excluded from trust accuracy and reported separately).
+      expect(
+        markTrustFallbackExclusion(r.row.query),
+        `row ${r.row.id} "${r.row.query}": goldTrust ${r.row.goldTrust} vs table ${table}`,
+      ).toBe(true);
+      expect(r.row.goldTrust).toBe(r.spec?.trust.level ?? intent.candidate_trust_level);
+    }
   });
 });

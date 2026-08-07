@@ -13,6 +13,7 @@ import { createPendulum, PENDULUM_META } from "./pendulum";
 import { createCircuit, CIRCUIT_META } from "./circuit";
 import { createReactionDiffusion, REACTION_META } from "./reaction-diffusion";
 import { createCellularAutomaton, CA_META } from "./cellular-automaton";
+import { createNewtonSecondLaw, NEWTON_META } from "./newton-second-law";
 
 export interface EngineFactoryEntry {
   factory: () => SimulationModule;
@@ -29,4 +30,5 @@ export const engineRegistry: Record<string, EngineFactoryEntry> = {
   rc_circuit: { factory: createCircuit, meta: CIRCUIT_META },
   reaction_diffusion: { factory: createReactionDiffusion, meta: REACTION_META },
   cellular_automaton: { factory: createCellularAutomaton, meta: CA_META },
+  newton_second_law: { factory: createNewtonSecondLaw, meta: NEWTON_META },
 };

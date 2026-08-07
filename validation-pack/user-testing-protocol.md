@@ -24,6 +24,7 @@ This is **not a clinical study**. It produces design direction for one learner, 
 - Anonymous interaction notes (what was clicked, when, in what order).
 - Anonymous quotes from the participant.
 - The participant's own answers and confidence/effort ratings.
+- Anonymized screenshots of the session — only if the participant agrees; recording is optional.
 - A description of design changes made as a result.
 
 **What may NEVER be recorded:**
@@ -36,7 +37,7 @@ This is **not a clinical study**. It produces design direction for one learner, 
 **Stop rule.** The facilitator says at the start: "You are in charge. Say stop and we stop — no explanation needed, nothing is lost." If the participant looks uncomfortable, tired, or distracted for more than ~30 seconds, the facilitator offers a break or ends the session. The participant's comfort always outranks the protocol.
 
 **Consent (verbal, recorded as Y/N on the session sheet).** Before anything else, the participant is asked, and his answer is logged:
-"Do you agree that I watch you use the app, take anonymous notes about what you do, and later describe changes to the app that came from your feedback — without ever using your name? You can stop at any time, and you don't have to answer any question you don't want to. Is that OK?"
+"This session is voluntary — you can stop at any time, no questions asked. If you agree, I may take anonymized notes, anonymized quotes, and anonymized screenshots of what happens, and your answers, to help improve the app. Recording is optional and only happens with your permission. This is not a diagnosis or an evaluation of you, and taking part does not guarantee any learning benefit. Is that OK?"
 
 ---
 
@@ -44,7 +45,7 @@ This is **not a clinical study**. It produces design direction for one learner, 
 
 Facilitator says, plainly:
 
-> "This is a design session, not a test of you. The app is the thing being tried out — you are the designer giving feedback. I'll ask you a few questions before, you'll use the app on your own for a few minutes, then I'll ask you a few questions after. You can stop whenever you like. Nothing you say will be connected to your name. Ready?"
+> "This is a design session, not a diagnosis or a test of you. The app is the thing being tried out — you are the designer giving feedback. It is entirely voluntary, and you can stop at any time, for any reason. If you are OK with it, I will keep anonymized notes, anonymized quotes, and anonymized screenshots of what happens, and your answers to my questions. Recording is optional and only happens with your permission. Nothing you say will be connected to your name. One honest note: taking part does not guarantee any learning benefit. Ready?"
 
 Record on the session sheet:
 - Consent recorded (Y/N) and what was agreed.
@@ -56,6 +57,13 @@ Optional context question (record if he answers, skip if he doesn't want to): "I
 ---
 
 ## Part B — Baseline (3 min, 3 conceptual questions)
+
+> **Scope**: Part B/D below are the **nuclear-chain-reaction lab research** questions
+> (asked when the session runs the `/lab/nuclear-chain-reaction?research=1` flow).
+> For the **generative orbit session** ("Ask UnseenLab to help you understand why
+> planets remain in orbit."), do NOT administer B1–B3; use the orbit pre/post form
+> in `facilitator-session-sheet.md` §2/§4 with the topic-agnostic concept question:
+> "What happens to the system when one thing changes?"
 
 Purpose: a coarse pre/post read on whether the app shifts understanding of chain reactions. Three short conceptual questions, asked **orally** (no app open). For each: record the answer (verbatim), confidence 1–5, and mental effort 1–5 (how hard the question felt to think about). There are no right answers; the facilitator never corrects.
 
