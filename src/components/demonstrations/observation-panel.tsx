@@ -33,7 +33,8 @@ export function DemonstrationObservationPanel({
       className="rounded-2xl border border-border/70 bg-surface/60 p-4 backdrop-blur-sm"
     >
       <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        Notice
+        <span className="sr-only">Observations</span>
+        <span aria-hidden="true">Notice</span>
       </h2>
       <p className="mt-1 text-sm text-muted-strong">
         What changed when you tested your idea?
