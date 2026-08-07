@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { SimRunner } from "@/demonstrations/renderers/lumina-2d/runner";
 import type {
@@ -9,6 +9,11 @@ import type {
   Readout,
 } from "@/demonstrations/renderers/lumina-2d/types";
 import { PrimitiveSceneRenderer } from "@/demonstrations/renderers/primitive-3d";
+import {
+  presentationSpecForStage,
+  stageGuideForSpec,
+  type StageGuide,
+} from "@/demonstrations/renderers/primitive-3d/presentation";
 import type { EngineMapping } from "@/demonstrations/renderers/primitive-3d/types";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 
@@ -243,9 +248,10 @@ function Primitive3DStage({
   const [webglUnavailable, setWebglUnavailable] = useState(false);
   const [startError, setStartError] = useState(false);
   const [mobile] = useState(
-    () =>
-      typeof window !== "undefined" && window.innerWidth < 768
+    () => typeof window !== "undefined" && window.innerWidth < 768
   );
+  const presentationSpec = useMemo(() => presentationSpecForStage(spec), [spec]);
+  const guide = useMemo(() => stageGuideForSpec(spec), [spec]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -261,7 +267,7 @@ function Primitive3DStage({
           }
         },
       });
-      renderer.setSpec(spec, { engineMapping: engineMapping ?? null });
+      renderer.setSpec(presentationSpec, { engineMapping: engineMapping ?? null });
       rendererRef.current = renderer;
     } catch {
       renderer?.dispose();
@@ -315,23 +321,125 @@ function Primitive3DStage({
     );
   }
 
+  const conceptual = spec.trust.level === "conceptual_demonstration";
+
   return (
     <div>
-      <p className="sr-only">
+      <p className="sr-only" id={`stage-help-${spec.id}`}>
         Interactive stage: {spec.title}. {spec.learningObjective}
+        {!reducedMotion
+          ? " Drag to rotate the model and use the mouse wheel or trackpad to zoom."
+          : " Motion is reduced; use the Diagram or Guided steps representation for a static explanation."}
       </p>
       <div
-        className="w-full overflow-hidden rounded-xl border border-border bg-surface"
+        className="relative w-full overflow-hidden rounded-xl border border-border bg-[#080d16] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
         style={{ aspectRatio: `${spec.renderer.preferredAspectRatio}` }}
       >
         <canvas
           ref={canvasRef}
           aria-label={`${spec.title} 3D stage canvas`}
-          className="block h-full w-full"
+          aria-describedby={`stage-help-${spec.id}`}
+          className="block h-full w-full cursor-grab active:cursor-grabbing"
         />
+
+        {conceptual ? (
+          <>
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/45 to-transparent"
+            />
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/55 to-transparent"
+            />
+
+            <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap items-center gap-2 sm:left-4 sm:top-4">
+              <span className="rounded-full border border-white/10 bg-black/35 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/80 backdrop-blur-sm">
+                Interactive model
+              </span>
+              {guide.relationships.length > 0 ? (
+                <span className="hidden rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-[11px] text-white/65 backdrop-blur-sm sm:inline-flex">
+                  {guide.relationships.length} visible relationship
+                  {guide.relationships.length === 1 ? "" : "s"}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="absolute right-3 top-3 flex items-center gap-2 sm:right-4 sm:top-4">
+              <span className="pointer-events-none hidden rounded-full border border-white/10 bg-black/30 px-2.5 py-1 text-[11px] text-white/65 backdrop-blur-sm md:inline-flex">
+                {reducedMotion ? "Static view" : "Drag to rotate · Scroll to zoom"}
+              </span>
+              {!reducedMotion ? (
+                <button
+                  type="button"
+                  onClick={() => rendererRef.current?.resetView()}
+                  className="rounded-full border border-white/15 bg-black/40 px-2.5 py-1 text-[11px] font-medium text-white/85 backdrop-blur-sm transition hover:bg-black/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                >
+                  Reset view
+                </button>
+              ) : null}
+            </div>
+
+            <EntityLegend guide={guide} />
+          </>
+        ) : null}
       </div>
+
+      {conceptual ? <RelationshipGuide guide={guide} /> : null}
       <ReadoutDisplay readouts={readouts} />
     </div>
+  );
+}
+
+function EntityLegend({ guide }: { guide: StageGuide }) {
+  if (guide.entities.length === 0) return null;
+  return (
+    <div
+      aria-label="Model entities"
+      className="pointer-events-none absolute inset-x-3 bottom-3 flex flex-wrap gap-1.5 sm:inset-x-4 sm:bottom-4"
+    >
+      {guide.entities.map((entity) => (
+        <span
+          key={entity.id}
+          className="inline-flex min-h-7 items-center gap-1.5 rounded-full border border-white/10 bg-black/45 px-2.5 py-1 text-[11px] font-medium text-white/85 backdrop-blur-sm"
+        >
+          <span
+            aria-hidden="true"
+            className="h-2 w-2 rounded-full ring-1 ring-white/25"
+            style={{ backgroundColor: entity.color }}
+          />
+          {entity.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RelationshipGuide({ guide }: { guide: StageGuide }) {
+  if (guide.relationships.length === 0) return null;
+  return (
+    <section
+      aria-label="Model relationships"
+      className="mt-3 rounded-lg border border-border bg-surface-raised/70 px-3 py-2.5"
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs leading-5">
+        <span className="font-semibold uppercase tracking-[0.14em] text-muted">
+          Relationships
+        </span>
+        {guide.relationships.map((relationship) => (
+          <span
+            key={relationship.id}
+            className="rounded-md bg-surface px-2 py-1 text-foreground"
+          >
+            {relationship.from}{" "}
+            <span className="font-medium text-accent-strong">
+              {relationship.label}
+            </span>{" "}
+            {relationship.to}
+          </span>
+        ))}
+      </div>
+    </section>
   );
 }
 
