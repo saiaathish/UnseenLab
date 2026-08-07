@@ -44,6 +44,25 @@ function isStageRep(rep: RepresentationSpec): boolean {
   return rep.kind === "stage_2d" || rep.kind === "stage_3d";
 }
 
+function lensLabel(rep: RepresentationSpec): string {
+  switch (rep.kind) {
+    case "stage_2d":
+    case "stage_3d":
+      return "Explore";
+    case "diagram":
+    case "causal_map":
+      return "See";
+    case "timeline":
+    case "text_sequence":
+      return "Guide";
+    case "graph":
+    case "table":
+      return "Measure";
+    default:
+      return rep.label;
+  }
+}
+
 /**
  * Orders the spec's representations so that:
  *  - preferred non-3D views come first when the learner prefers them, and
@@ -166,46 +185,48 @@ export function DemonstrationRepresentationTabs({
   const { onVisualState, visualState, engineMapping, ...stageBase } = stage;
 
   return (
-    <section
-      aria-label="Representations"
-      className="rounded-xl border border-border bg-surface p-4"
-    >
-      <div
-        role="tablist"
-        aria-label="View the demonstration as"
-        onKeyDown={handleKeyDown}
-        className="flex flex-wrap gap-1"
-      >
-        {ordered.map((rep, index) => (
-          <button
-            key={rep.id}
-            ref={(node) => {
-              tabRefs.current[index] = node;
-            }}
-            type="button"
-            role="tab"
-            id={`demo-rep-tab-${rep.id}`}
-            aria-selected={rep.id === active.id}
-            aria-controls="demo-rep-panel"
-            tabIndex={rep.id === active.id ? 0 : -1}
-            onClick={() => handleChange(rep.id)}
-            className={cn(
-              "min-h-11 rounded-lg px-3 py-2 text-sm font-medium",
-              rep.id === active.id
-                ? "bg-accent-strong text-white"
-                : "border border-border hover:bg-surface-raised"
-            )}
-          >
-            {rep.label}
-          </button>
-        ))}
+    <section aria-label="Representations" className="min-w-0">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div
+          role="tablist"
+          aria-label="View the demonstration as"
+          onKeyDown={handleKeyDown}
+          className="inline-flex flex-wrap gap-1 rounded-full border border-border/80 bg-surface/80 p-1 shadow-sm backdrop-blur-md"
+        >
+          {ordered.map((rep, index) => (
+            <button
+              key={rep.id}
+              ref={(node) => {
+                tabRefs.current[index] = node;
+              }}
+              type="button"
+              role="tab"
+              id={`demo-rep-tab-${rep.id}`}
+              aria-selected={rep.id === active.id}
+              aria-controls="demo-rep-panel"
+              aria-label={`${lensLabel(rep)} view: ${rep.label}`}
+              tabIndex={rep.id === active.id ? 0 : -1}
+              onClick={() => handleChange(rep.id)}
+              className={cn(
+                "min-h-9 rounded-full px-3.5 py-1.5 text-sm font-medium transition",
+                rep.id === active.id
+                  ? "bg-foreground text-background shadow-sm"
+                  : "text-muted-strong hover:bg-surface-raised hover:text-foreground"
+              )}
+            >
+              {lensLabel(rep)}
+            </button>
+          ))}
+        </div>
+        <p className="hidden text-xs text-muted sm:block" aria-hidden="true">
+          {active.label}
+        </p>
       </div>
 
       <div
         role="tabpanel"
         id="demo-rep-panel"
         aria-labelledby={`demo-rep-tab-${active.id}`}
-        className="mt-4"
       >
         {hasStageRep && !hybridEngineDriver && (
           <div hidden={!stageActive}>
@@ -228,12 +249,14 @@ export function DemonstrationRepresentationTabs({
           </>
         )}
         {!stageActive && (
-          <NonStageView
-            spec={spec}
-            rep={active}
-            readouts={readouts}
-            parameters={parameters}
-          />
+          <div className="rounded-2xl border border-border/80 bg-surface/70 p-4 shadow-sm backdrop-blur-sm sm:p-6">
+            <NonStageView
+              spec={spec}
+              rep={active}
+              readouts={readouts}
+              parameters={parameters}
+            />
+          </div>
         )}
       </div>
 
