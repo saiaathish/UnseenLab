@@ -528,18 +528,18 @@ describe("demonstration shell accessibility", () => {
     expect(screen.getByText("Your prediction was correct.")).toBeInTheDocument();
     expect(screen.getByText("Verified answer")).toBeInTheDocument();
 
-    // -- continue: the rail's interact step was satisfied by the slider move -
+    // -- continue: the rail's interact step was satisfied by the slider move
+    // during the manipulate phase, so the rail hands focus to the
+    // already-enabled Continue the moment the step is shown ----------------
     await user.tab(); // Continue
     expect(screen.getByRole("button", { name: "Continue" })).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(screen.getByRole("heading", { name: "Interact" })).toBeInTheDocument();
     expect(screen.getByText("Move the Length slider.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveFocus();
 
     // -- observe: checkbox, then Continue -------------------------------------
-    await user.tab(); // Back
-    await user.tab(); // Continue (interact completed)
-    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
-    await user.keyboard("{Enter}");
+    await user.keyboard("{Enter}"); // fast-forward over the completed step
     expect(screen.getByRole("heading", { name: "Observe" })).toBeInTheDocument();
     await user.tab(); // observation checkbox
     await user.keyboard(" "); // check it

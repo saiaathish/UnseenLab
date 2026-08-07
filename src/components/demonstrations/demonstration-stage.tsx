@@ -345,6 +345,8 @@ function Primitive3DStage({
         }
         readouts={readouts}
         parameters={parameters}
+        onNodeSelect={onNodeSelect}
+        onNodeManipulate={onNodeManipulate}
       />
     );
   }
@@ -378,11 +380,15 @@ function StageFallback({
   note,
   readouts,
   parameters,
+  onNodeSelect,
+  onNodeManipulate,
 }: {
   spec: DemoSpecV1;
   note: string;
   readouts: Readout[];
   parameters: Record<string, number>;
+  onNodeSelect?: (nodeId: string | null) => void;
+  onNodeManipulate?: (nodeId: string) => void;
 }) {
   return (
     <section
@@ -403,6 +409,8 @@ function StageFallback({
           kind={spec.renderer.fallbackKind}
           readouts={readouts}
           parameters={parameters}
+          onNodeSelect={onNodeSelect}
+          onNodeManipulate={onNodeManipulate}
         />
       </div>
     </section>

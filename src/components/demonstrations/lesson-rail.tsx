@@ -353,19 +353,6 @@ export function LessonRail(props: LessonRailProps) {
   const [explainText, setExplainText] = useState("");
   const [announcement, setAnnouncement] = useState("");
 
-  // Focus + polite announcement on step change (skipped on first render so a
-  // page load never yanks focus into the rail).
-  const headingRef = useRef<HTMLHeadingElement | null>(null);
-  const firstRender = useRef(true);
-  useEffect(() => {
-    if (firstRender.current) {
-      firstRender.current = false;
-      return;
-    }
-    headingRef.current?.focus();
-    setAnnouncement(`Lesson step: ${STEP_TITLES[currentStep]}`);
-  }, [currentStep]);
-
   // -- completion conditions -------------------------------------------------
 
   const stepConditionMet = (step: LessonStepId): boolean => {
@@ -403,6 +390,37 @@ export function LessonRail(props: LessonRailProps) {
 
   const canContinue = (step: LessonStepId): boolean =>
     completedSteps[step] === true || stepConditionMet(step);
+
+  // Focus + polite announcement on step change (skipped on first render so a
+  // page load never yanks focus into the rail).
+  //
+  // The next action gets focus: Continue when the newly shown step is already
+  // completable (completed steps never relock, so Back then re-advance can be
+  // fast-forwarded), otherwise the step heading. A disabled Continue must
+  // never receive focus. The gating value is mirrored into a ref by a
+  // render-frequency effect (refs are never touched during render); the focus
+  // effect below is declared after it, so on a step change it reads the
+  // freshly shown step's gating without re-running on every completion-state
+  // change, which would steal focus mid-step.
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const continueRef = useRef<HTMLButtonElement | null>(null);
+  const firstRender = useRef(true);
+  const continueEnabledRef = useRef(false);
+  useEffect(() => {
+    continueEnabledRef.current = canContinue(currentStep);
+  });
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    if (currentStep !== "complete" && continueEnabledRef.current) {
+      continueRef.current?.focus();
+    } else {
+      headingRef.current?.focus();
+    }
+    setAnnouncement(`Lesson step: ${STEP_TITLES[currentStep]}`);
+  }, [currentStep]);
 
   // -- navigation ------------------------------------------------------------
 
@@ -447,8 +465,8 @@ export function LessonRail(props: LessonRailProps) {
                 isCurrent
                   ? "text-accent"
                   : isDone
-                    ? "text-muted"
-                    : "text-muted/60"
+                    ? "text-foreground"
+                    : "text-muted"
               )}
             >
               {isDone && (
@@ -537,6 +555,7 @@ export function LessonRail(props: LessonRailProps) {
         )}
         {currentStep !== "complete" && (
           <button
+            ref={continueRef}
             type="button"
             onClick={handleAdvance}
             disabled={!canContinue(currentStep)}
@@ -546,7 +565,13 @@ export function LessonRail(props: LessonRailProps) {
           </button>
         )}
       </div>
-
+      {/* The gate is never silent: when Continue is disabled, the reason is
+          stated in text (opacity alone is not a perceivable disabled state). */}
+      {currentStep !== "complete" && !canContinue(currentStep) && (
+        <p className="mt-3 text-xs leading-5 text-muted">
+          Complete this step to continue.
+        </p>
+      )}
     </section>
   );
 }
@@ -569,7 +594,7 @@ function StepHeading({
       <h2
         ref={headingRef}
         tabIndex={-1}
-        className="text-lg font-semibold leading-tight outline-none"
+        className="text-lg font-semibold leading-tight outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
       >
         {title}
       </h2>
@@ -779,6 +804,18 @@ function InteractStep({
   onSawIt: () => void;
   headingRef: React.Ref<HTMLHeadingElement>;
 }) {
+  // The completion status ("Interaction recorded.") mounts only when the
+  // interaction lands while this step is displayed. When the step is
+  // re-visited already complete (Back then re-advance over a completed step),
+  // the status must NOT mount: the step-transition announcement alone conveys
+  // the state, and a second simultaneous region change would double-announce.
+  const [completionVisible, setCompletionVisible] = useState(false);
+  const wasCompleteRef = useRef(complete);
+  useEffect(() => {
+    if (complete && !wasCompleteRef.current) setCompletionVisible(true);
+    wasCompleteRef.current = complete;
+  }, [complete]);
+
   return (
     <section aria-label="Interact">
       <StepHeading
@@ -802,7 +839,7 @@ function InteractStep({
           I saw it
         </button>
       )}
-      {complete && (
+      {completionVisible && (
         <p role="status" className="mt-3 text-sm font-medium text-ok">
           {plan.mode === "timeline" ? "Animation watched." : "Interaction recorded."}
         </p>
@@ -1039,7 +1076,7 @@ function CompleteStep({
         headingRef={headingRef}
         intro="You finished this lesson. Here is what you did."
       />
-      <ul className="mt-3 flex list-inside list-disc flex-col gap-1.5 text-sm text-muted-strong">
+      <ul className="mt-3 flex list-inside list-disc flex-col gap-1.5 text-sm text-muted">
         {recap.map((item) => (
           <li key={item}>{item}</li>
         ))}

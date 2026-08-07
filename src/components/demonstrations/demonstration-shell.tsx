@@ -117,7 +117,7 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
           <h1 className="mt-1 text-2xl font-semibold leading-tight">
             {spec.title}
           </h1>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-strong">
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted">
             {spec.learningObjective}
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -250,7 +250,7 @@ function ReplayBanner({
           <h2 className="text-sm font-semibold uppercase tracking-widest text-accent">
             Replay entry {trial.trial}
           </h2>
-          <p className="mt-1 text-sm leading-6 text-muted-strong">
+          <p className="mt-1 text-sm leading-6 text-muted">
             Parameters restored from entry {trial.trial}: {paramList || "none"}.
             The simulation restarts fresh with these settings; past simulation
             state (positions, time) is not restored.
@@ -287,7 +287,7 @@ function ReplayBanner({
             <tbody>
               {trial.readouts.map((recorded) => (
                 <tr key={recorded.label} className="border-b border-border/60 last:border-0">
-                  <td className="py-2 pr-4 text-muted-strong">{recorded.label}</td>
+                  <td className="py-2 pr-4 text-muted">{recorded.label}</td>
                   <td className="py-2 pr-4 font-mono">{recorded.value}</td>
                   <td className="py-2 font-mono">
                     {liveByLabel.get(recorded.label) ?? "n/a"}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Dialog,
@@ -49,6 +49,30 @@ export function AboutThisModel({
   onReplayTrial,
 }: AboutThisModelProps) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const wasOpenRef = useRef(false);
+
+  // Focus management per the WAI-ARIA dialog pattern: focus moves INTO the
+  // dialog when it opens and returns to the trigger on every close path
+  // (Escape, overlay, the X button, or replay). base-ui manages both too, but
+  // its initial focus waits for the enter transition to settle; an explicit
+  // focus makes the contract deterministic in every environment (including
+  // reduced-motion, where the transition is disabled). The popup mounts one
+  // commit after open flips, so the focus lands on the next macrotask. The
+  // replay path also mounts a banner that takes focus; it sits later in the
+  // DOM, so its focus effect wins over this one.
+  useEffect(() => {
+    if (open) {
+      const timer = window.setTimeout(() => {
+        document.querySelector<HTMLElement>('[role="dialog"]')?.focus();
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    if (wasOpenRef.current) {
+      triggerRef.current?.focus();
+    }
+    wasOpenRef.current = open;
+  }, [open]);
 
   const handleReplay = (trial: TrialRecord) => {
     // Close first so the replay banner (which takes focus) never fights the
@@ -60,11 +84,12 @@ export function AboutThisModel({
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         aria-label="About this model"
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
-        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-border bg-surface-raised px-1.5 text-sm font-semibold text-muted-strong hover:bg-surface"
+        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-border bg-surface-raised px-1.5 text-sm font-semibold text-muted hover:bg-surface"
       >
         <span aria-hidden="true">ⓘ</span>
       </button>
@@ -142,7 +167,7 @@ export function AboutThisModel({
                 Limitations
               </h3>
               {spec.trust.limitations.length > 0 ? (
-                <ul className="mt-2 flex list-inside list-disc flex-col gap-1.5 text-sm text-muted-strong">
+                <ul className="mt-2 flex list-inside list-disc flex-col gap-1.5 text-sm text-muted">
                   {spec.trust.limitations.map((limitation) => (
                     <li key={limitation}>{limitation}</li>
                   ))}
@@ -277,7 +302,7 @@ function AdaptationHistorySection({ trials }: { trials: TrialRecord[] }) {
           No adaptation decisions recorded.
         </p>
       ) : (
-        <ul className="mt-2 flex flex-col gap-1.5 text-sm text-muted-strong">
+        <ul className="mt-2 flex flex-col gap-1.5 text-sm text-muted">
           {decisions.map((decision) => (
             <li
               key={`${decision.accepted}-${decision.suggestion}`}

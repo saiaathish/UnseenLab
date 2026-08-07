@@ -12,6 +12,8 @@
  *  - representation-tabs.tsx   (diagram / table / timeline / text_sequence)
  */
 
+import { useState } from "react";
+
 import type {
   DemoSpecV1,
   FallbackKind,
@@ -19,12 +21,32 @@ import type {
   TimelineSpec,
 } from "@/demonstrations/spec/demo-spec";
 import type { Readout } from "@/demonstrations/renderers/lumina-2d/types";
+// Pure derivation helpers (no Three.js, no DOM): the rail already imports
+// these from the scene-graph submodule, so jsdom suites stay safe.
+import {
+  buildSceneGraph,
+  cascadeOrder,
+  GRAPH_NODE_KINDS,
+  isGraphLikeScene,
+} from "@/demonstrations/renderers/primitive-3d/scene-graph";
+import { engineMappingForSpec } from "@/demonstrations/showcases/coupling";
+import { cn } from "@/lib/utils";
 
 export interface AccessibleRepresentationProps {
   spec: DemoSpecV1;
   kind: FallbackKind;
   readouts: Readout[];
   parameters: Record<string, number>;
+  /**
+   * Canonical interaction surface (graph scenes only, mirroring the 3D
+   * renderer's A1 event contract). When provided and the scene is graph-like
+   * with no engine coupling, the accessible diagram becomes the manipulation
+   * surface: node shapes are real buttons that fire the same events the
+   * renderer fires, so lesson interact steps complete honestly even when
+   * WebGL is unavailable. Without callbacks the diagram stays read-only.
+   */
+  onNodeSelect?: (nodeId: string | null) => void;
+  onNodeManipulate?: (nodeId: string) => void;
 }
 
 /** Dispatcher used by the stage fallback. */
@@ -33,6 +55,8 @@ export function AccessibleRepresentation({
   kind,
   readouts,
   parameters,
+  onNodeSelect,
+  onNodeManipulate,
 }: AccessibleRepresentationProps) {
   if (kind === "timeline" && spec.timeline) {
     return <TimelineView timeline={spec.timeline} />;
@@ -41,7 +65,13 @@ export function AccessibleRepresentation({
     return <DataTableView spec={spec} readouts={readouts} parameters={parameters} />;
   }
   if (kind === "accessible_diagram") {
-    return <AccessibleDiagram spec={spec} />;
+    return (
+      <AccessibleDiagram
+        spec={spec}
+        onNodeSelect={onNodeSelect}
+        onNodeManipulate={onNodeManipulate}
+      />
+    );
   }
   return <TextSequenceView spec={spec} />;
 }
@@ -119,47 +149,148 @@ function DiagramShape({
   shape,
   color,
   label,
+  interactive,
+  selected,
+  highlighted,
+  onActivate,
+  onClear,
 }: {
   x: number;
   y: number;
   shape: "circle" | "rect" | "diamond";
   color: string;
   label: string;
+  interactive?: boolean;
+  selected?: boolean;
+  highlighted?: boolean;
+  onActivate?: () => void;
+  onClear?: () => void;
 }) {
-  if (shape === "circle") {
-    return (
-      <g>
-        <circle cx={x} cy={y} r={26} fill={color} fillOpacity={0.25} stroke={color} strokeWidth={2} />
-        <text x={x} y={y + 4} textAnchor="middle" fontSize="12" fill="currentColor">
-          {label}
-        </text>
-      </g>
-    );
-  }
-  if (shape === "diamond") {
-    return (
-      <g>
-        <rect x={x - 26} y={y - 26} width={52} height={52} rx={6} transform={`rotate(45 ${x} ${y})`} fill={color} fillOpacity={0.25} stroke={color} strokeWidth={2} />
-        <text x={x} y={y + 4} textAnchor="middle" fontSize="11" fill="currentColor">
-          {label}
-        </text>
-      </g>
-    );
-  }
-  return (
-    <g>
-      <rect x={x - 30} y={y - 20} width={60} height={40} rx={6} fill={color} fillOpacity={0.25} stroke={color} strokeWidth={2} />
-      <text x={x} y={y + 4} textAnchor="middle" fontSize="12" fill="currentColor">
+  const strokeWidth = selected ? 4 : highlighted ? 3 : 2;
+  const fillOpacity = selected ? 0.4 : highlighted ? 0.35 : 0.25;
+  const body = (
+    <>
+      {shape === "circle" ? (
+        <circle
+          cx={x}
+          cy={y}
+          r={26}
+          fill={color}
+          fillOpacity={fillOpacity}
+          stroke={color}
+          strokeWidth={strokeWidth}
+        />
+      ) : shape === "diamond" ? (
+        <rect
+          x={x - 26}
+          y={y - 26}
+          width={52}
+          height={52}
+          rx={6}
+          transform={`rotate(45 ${x} ${y})`}
+          fill={color}
+          fillOpacity={fillOpacity}
+          stroke={color}
+          strokeWidth={strokeWidth}
+        />
+      ) : (
+        <rect
+          x={x - 30}
+          y={y - 20}
+          width={60}
+          height={40}
+          rx={6}
+          fill={color}
+          fillOpacity={fillOpacity}
+          stroke={color}
+          strokeWidth={strokeWidth}
+        />
+      )}
+      <text
+        x={x}
+        y={y + 4}
+        textAnchor="middle"
+        fontSize={shape === "diamond" ? 11 : 12}
+        fill="currentColor"
+      >
         {label}
       </text>
+    </>
+  );
+
+  if (!interactive) {
+    return <g>{body}</g>;
+  }
+
+  // Interactive node (graph scenes only): a real button with the same event
+  // surface the 3D renderer fires (select on change, manipulate on every
+  // activation, Escape clears). The selected state is conveyed by
+  // aria-pressed as well as the stroke, never by color alone.
+  return (
+    <g
+      role="button"
+      tabIndex={0}
+      aria-label={label}
+      aria-pressed={selected ?? false}
+      onClick={onActivate}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onActivate?.();
+        } else if (event.key === "Escape") {
+          onClear?.();
+        }
+      }}
+      className={cn(
+        "cursor-pointer",
+        "focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+      )}
+    >
+      {body}
     </g>
   );
 }
 
 /** Objects as labeled shapes with relationship arrows — no canvas needed. */
-export function AccessibleDiagram({ spec }: { spec: DemoSpecV1 }) {
+export function AccessibleDiagram({
+  spec,
+  onNodeSelect,
+  onNodeManipulate,
+}: {
+  spec: DemoSpecV1;
+  onNodeSelect?: (nodeId: string | null) => void;
+  onNodeManipulate?: (nodeId: string) => void;
+}) {
   const objects = spec.scene3d?.objects ?? [];
   const relationships = spec.scene3d?.relationships ?? [];
+
+  // A1 graph-mode rule: only graph-like scenes with NO engine coupling fire
+  // node callbacks (hybrid showcases never do). Without callbacks the
+  // diagram stays a read-only view.
+  const graph = spec.scene3d ? buildSceneGraph(spec).graph : null;
+  const interactive = Boolean(
+    graph &&
+      engineMappingForSpec(spec) === null &&
+      isGraphLikeScene(graph) &&
+      (onNodeSelect !== undefined || onNodeManipulate !== undefined)
+  );
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const cascade =
+    selectedId && graph ? cascadeOrder(graph.relationships, selectedId) : [];
+
+  const activateNode = (nodeId: string) => {
+    setSelectedId(nodeId);
+    if (selectedId !== nodeId) onNodeSelect?.(nodeId);
+    // Every activation counts as a manipulation, matching the renderer
+    // (re-activating the selected node still fires onNodeManipulate).
+    onNodeManipulate?.(nodeId);
+  };
+
+  const clearSelection = () => {
+    if (selectedId === null) return;
+    setSelectedId(null);
+    onNodeSelect?.(null);
+  };
 
   if (objects.length === 0) {
     return (
@@ -251,12 +382,27 @@ export function AccessibleDiagram({ spec }: { spec: DemoSpecV1 }) {
             shape={shapeForKind(o.kind)}
             color={o.color ?? "#0f766e"}
             label={o.label ?? o.kind}
+            interactive={interactive && GRAPH_NODE_KINDS.has(o.kind)}
+            selected={interactive && selectedId === o.id}
+            highlighted={interactive && cascade.includes(o.id) && o.id !== selectedId}
+            onActivate={
+              interactive && GRAPH_NODE_KINDS.has(o.kind)
+                ? () => activateNode(o.id)
+                : undefined
+            }
+            onClear={
+              interactive && GRAPH_NODE_KINDS.has(o.kind)
+                ? () => clearSelection()
+                : undefined
+            }
           />
         ))}
       </svg>
       <figcaption className="mt-2 text-sm text-muted">
         {summary} Lines and arrowheads show the declared relationships between
         the parts; a bar marks an inhibition.
+        {interactive &&
+          " You can select each node on the diagram; the linked effects respond."}
       </figcaption>
     </figure>
   );
@@ -294,10 +440,10 @@ export function TimelineView({ timeline }: { timeline: TimelineSpec }) {
                 {event.title}
               </p>
               <p className="text-xs text-muted">
-                {formatTime(event.startMs)}–{formatTime(endMs)}
+                {formatTime(event.startMs)} to {formatTime(endMs)}
               </p>
             </div>
-            <p className="mt-1 text-sm leading-6 text-muted-strong">
+            <p className="mt-1 text-sm leading-6 text-muted">
               {event.description}
             </p>
             <div
@@ -358,7 +504,7 @@ export function DataTableView({
       const value = parameters[control.target.ref];
       paramRows.push({
         label: control.label,
-        value: value !== undefined ? String(value) : "—",
+        value: value !== undefined ? String(value) : "n/a",
       });
     }
   }
@@ -412,7 +558,7 @@ function DataTable({
           ) : (
             rows.map((row) => (
               <tr key={row.label} className="border-b border-border/60 last:border-0">
-                <td className="py-2 pr-4 text-muted-strong">{row.label}</td>
+                <td className="py-2 pr-4 text-muted">{row.label}</td>
                 <td className="py-2 font-mono">{row.value}</td>
               </tr>
             ))
@@ -452,7 +598,7 @@ export function TextSequenceView({ spec }: { spec: DemoSpecV1 }) {
           <p className="text-xs font-semibold uppercase tracking-widest text-muted">
             Step {index + 1} · {step.heading}
           </p>
-          <p className="mt-1 text-sm leading-6 text-muted-strong">{step.body}</p>
+          <p className="mt-1 text-sm leading-6 text-muted">{step.body}</p>
         </li>
       ))}
     </ol>
