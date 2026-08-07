@@ -16,26 +16,14 @@ interface Props {
   prediction: PredictionSpec;
   truth: PredictionTruth;
   trustLevel: TrustLevel;
-  /** True once the learner's prediction has been recorded. */
   submitted: boolean;
   predictionIndex: number | null;
-  /** True after the learner has changed at least one control. */
   manipulated: boolean;
   revealed: boolean;
   onSubmit: (index: number) => void;
   onReveal: () => void;
 }
 
-/**
- * Prediction-first flow:
- *  1. The learner must submit a prediction before the controls unlock.
- *  2. After submission the prediction is locked in.
- *  3. For curated verified simulations (predictionTruth(spec).graded) a
- *     "Reveal" action appears — but only after the learner has manipulated
- *     and observed, never before. It shows correct vs chosen honestly.
- *  4. For conceptual/level-3 specs nothing is ever graded: the panel prompts
- *     "Compare with what you observed".
- */
 export function DemonstrationPredictionPanel({
   prediction,
   truth,
@@ -48,8 +36,7 @@ export function DemonstrationPredictionPanel({
   onReveal,
 }: Props) {
   const [choice, setChoice] = useState<number | null>(null);
-  const chosenOption =
-    predictionIndex !== null ? prediction.options[predictionIndex] : null;
+  const chosenOption = predictionIndex !== null ? prediction.options[predictionIndex] : null;
 
   if (submitted && chosenOption) {
     return (
@@ -73,7 +60,11 @@ export function DemonstrationPredictionPanel({
 
         {truth.graded ? (
           revealed ? (
-            <GradedResult prediction={prediction} correctIndex={truth.correctIndex!} chosen={predictionIndex!} />
+            <GradedResult
+              prediction={prediction}
+              correctIndex={truth.correctIndex!}
+              chosen={predictionIndex!}
+            />
           ) : (
             <div className="mt-4 border-t border-border/60 pt-3">
               <button
@@ -93,7 +84,7 @@ export function DemonstrationPredictionPanel({
           )
         ) : (
           <div className="mt-4 border-t border-border/60 pt-3">
-            <p className="text-sm font-medium">Now test it in the model</p>
+            <p className="text-sm font-medium">Compare with what you observed</p>
             <p className="mt-1 text-xs leading-5 text-muted">
               This {TRUST_LABELS[trustLevel].toLowerCase()} is not graded. Change
               the model, notice what happens, then compare the result with your
@@ -175,10 +166,8 @@ function GradedResult({
   const correct = prediction.options[correctIndex];
   const chosenOption = prediction.options[chosen];
   const isCorrect = correctIndex === chosen;
-
-  // The Reveal button is replaced by this result; take focus so keyboard
-  // users stay on the outcome instead of being dropped to <body>.
   const resultRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     resultRef.current?.focus();
   }, []);
@@ -189,14 +178,14 @@ function GradedResult({
       tabIndex={-1}
       className="mt-4 border-t border-border/60 pt-3"
     >
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+        Verified answer
+      </p>
       <p
         role="status"
-        className={cn(
-          "text-sm font-semibold",
-          isCorrect ? "text-ok" : "text-danger"
-        )}
+        className={cn("mt-2 text-sm font-semibold", isCorrect ? "text-ok" : "text-danger")}
       >
-        {isCorrect ? "Your prediction matched the verified result." : "Your prediction differed from the verified result."}
+        {isCorrect ? "Your prediction was correct." : "Your prediction was not correct."}
       </p>
       <dl className="mt-3 flex flex-col gap-2 text-sm">
         <div className="flex items-baseline justify-between gap-3">
