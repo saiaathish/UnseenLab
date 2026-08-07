@@ -23,7 +23,13 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useMemo, useState } from "react";
 
@@ -307,6 +313,13 @@ function Harness({
   const [oneVariableMode, setOneVariableMode] = useState(false);
   const [lockedControl, setLockedControl] = useState<string | null>(null);
   const [activeRep, setActiveRep] = useState<string | null>(null);
+  const [manipulatedNodeIds, setManipulatedNodeIds] = useState<string[]>([]);
+  const [touchedControls, setTouchedControls] = useState<string[]>([]);
+  const [observationSelections, setObservationSelections] = useState<
+    Record<string, boolean>
+  >({});
+  const [observationNotes, setObservationNotes] = useState("");
+  const [observationsSaved, setObservationsSaved] = useState(false);
   const [adaptationDecisions, setAdaptationDecisions] = useState<Record<string, boolean>>({});
   const [replay, setReplay] = useState<{ trial: TrialRecord; token: number } | null>(null);
   const [, setStoreTick] = useState(0);
@@ -379,6 +392,9 @@ function Harness({
       onControlTouched={(id) => {
         setManipulated(true);
         setLockedControl(id);
+        setTouchedControls((prev) =>
+          prev.includes(id) ? prev : [...prev, id]
+        );
       }}
       oneVariableMode={oneVariableMode}
       lockedControl={lockedControl}
@@ -387,12 +403,14 @@ function Harness({
       onRepresentationChange={setActiveRep}
       reducedMotion={reducedMotion}
       preferredRepresentations={preferredRepresentations}
-      observationSelections={{}}
-      observationNotes=""
-      observationsSaved={false}
-      onObservationToggle={() => {}}
-      onObservationNotesChange={() => {}}
-      onSaveObservations={() => {}}
+      observationSelections={observationSelections}
+      observationNotes={observationNotes}
+      observationsSaved={observationsSaved}
+      onObservationToggle={(prompt, checked) =>
+        setObservationSelections((prev) => ({ ...prev, [prompt]: checked }))
+      }
+      onObservationNotesChange={setObservationNotes}
+      onSaveObservations={() => setObservationsSaved(true)}
       adaptationSuggestions={predictionIndex !== null ? visibleSuggestions : []}
       onAdaptationDecision={(suggestion, accepted) => {
         setAdaptationDecisions((prev) => ({ ...prev, [suggestion.id]: accepted }));
@@ -406,6 +424,14 @@ function Harness({
         setReplay({ trial, token: Date.now() });
       }}
       onDismissReplay={() => setReplay(null)}
+      onNodeManipulate={(nodeId) => {
+        if (predictionIndex === null) return;
+        setManipulatedNodeIds((prev) =>
+          prev.includes(nodeId) ? prev : [...prev, nodeId]
+        );
+      }}
+      manipulatedNodeIds={manipulatedNodeIds}
+      touchedControls={touchedControls}
     />
   );
 }
@@ -446,7 +472,7 @@ async function submitPredictionKeyboard(
 // ---------------------------------------------------------------------------
 
 describe("demonstration shell accessibility", () => {
-  it("completes predict → manipulate → observe → compare → adapt by keyboard inside the accessible representation", async () => {
+  it("completes predict → manipulate → observe → explain → adapt by keyboard inside the accessible representation", async () => {
     const spec = verifiedPendulumSpec();
     assertValidSpec(spec);
     const user = userEvent.setup();
@@ -489,12 +515,7 @@ describe("demonstration shell accessibility", () => {
       expect(within(table).getByText(/^1\.3/)).toBeInTheDocument();
     });
 
-    // -- observe: live readout appears in the table --------------------------
-    await waitFor(() => {
-      expect(within(table).getByText("Period")).toBeInTheDocument();
-    });
-
-    // -- compare: Tab order continues controls → reveal → observations -------
+    // -- compare: Tab order continues controls → reveal -----------------------
     await user.tab(); // Amplitude slider
     expect(screen.getByRole("slider", { name: "Amplitude" })).toHaveFocus();
     await user.tab(); // Play/Pause (playing → "Pause")
@@ -507,10 +528,39 @@ describe("demonstration shell accessibility", () => {
     expect(screen.getByText("Your prediction was correct.")).toBeInTheDocument();
     expect(screen.getByText("Verified answer")).toBeInTheDocument();
 
-    // -- adapt: Tab to the first Accept and take it ---------------------------
+    // -- continue: the rail's interact step was satisfied by the slider move -
+    await user.tab(); // Continue
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("heading", { name: "Interact" })).toBeInTheDocument();
+    expect(screen.getByText("Move the Length slider.")).toBeInTheDocument();
+
+    // -- observe: checkbox, then Continue -------------------------------------
+    await user.tab(); // Back
+    await user.tab(); // Continue (interact completed)
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("heading", { name: "Observe" })).toBeInTheDocument();
     await user.tab(); // observation checkbox
+    await user.keyboard(" "); // check it
     await user.tab(); // notes textarea
-    await user.tab(); // save observations
+    await user.tab(); // Back
+    await user.tab(); // Continue (observe completed)
+    await user.keyboard("{Enter}");
+
+    // -- explain: type a self-assessment (never graded) -----------------------
+    expect(screen.getByRole("heading", { name: "Explain" })).toBeInTheDocument();
+    await user.tab(); // explanation textarea
+    await user.type(
+      screen.getByRole("textbox", { name: "Your explanation" }),
+      "The period grew when the length grew."
+    );
+    await user.tab(); // Back
+    await user.tab(); // Continue (explain completed)
+    await user.keyboard("{Enter}");
+
+    // -- adapt: the first Accept on the complete step -------------------------
+    expect(screen.getByRole("heading", { name: "Complete" })).toBeInTheDocument();
     await user.tab(); // first adaptation Accept
     const acceptButtons = screen.getAllByRole("button", { name: "Accept" });
     expect(acceptButtons[0]).toHaveFocus();
@@ -602,11 +652,11 @@ describe("demonstration shell accessibility", () => {
     expect(changedOnSubmit).toHaveLength(1);
     expect(changedOnSubmit[0]).toContain("Prediction recorded");
 
-    // The prediction panel carries the status region.
+    // The predict step carries the status region.
     const predictionSection = screen.getByLabelText("Prediction");
     expect(
       within(predictionSection).getByRole("status")
-    ).toHaveTextContent("Prediction recorded — controls unlocked.");
+    ).toHaveTextContent("Prediction recorded. Controls unlocked.");
 
     // Tab switch announces only the tab region.
     const beforeTab = politeRegions(container);
@@ -623,8 +673,24 @@ describe("demonstration shell accessibility", () => {
     const user = userEvent.setup();
     const { container } = render(<Harness spec={spec} />);
 
-    // Suggestions appear once the prediction gate is passed.
+    // Walk the whole lesson to the complete step, where the demoted
+    // adaptation suggestions live (they never appear in the workspace
+    // before the lesson is finished).
     await submitPredictionKeyboard(user, "It increases but not by double");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.change(screen.getByRole("slider", { name: "Length" }), {
+      target: { value: "3" },
+    });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(
+      screen.getByLabelText("Record the period for two lengths.")
+    );
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Your explanation" }),
+      "The period grew with length."
+    );
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => {
       expect(screen.getAllByRole("button", { name: "Accept" }).length).toBeGreaterThan(0);
     });
@@ -681,34 +747,23 @@ describe("demonstration shell accessibility", () => {
     expect(screen.getByRole("slider", { name: "Length" })).toBeInTheDocument();
     expect(screen.getByRole("slider", { name: "Amplitude" })).toBeInTheDocument();
 
-    // Play/pause, switch, radios, submit. (Harness starts playing, so the
-    // play/pause control reads "Pause".)
+    // Play/pause, switch, radios, submit, rail navigation. (Harness starts
+    // playing, so the play/pause control reads "Pause".)
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "One-variable mode" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "It doubles" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Submit prediction" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "About this model" })).toBeInTheDocument();
 
-    // Notes textarea + save.
-    expect(screen.getByRole("textbox", { name: "Your notes" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Save observations to my trial log" })
-    ).toBeInTheDocument();
-
-    // Trust badge, source badge, back link, details summaries.
+    // Trust chip + back link.
     expect(screen.getByLabelText("Trust: Verified simulation")).toBeInTheDocument();
-    expect(screen.getByLabelText("Source: Offline catalog")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "← Back to home" })).toBeInTheDocument();
-    expect(screen.getByText("Trial log")).toBeInTheDocument();
-    expect(screen.getByText("Limitations & provenance")).toBeInTheDocument();
 
     await submitPredictionKeyboard(user, "It increases but not by double");
     expect(
       screen.getByRole("button", { name: "Reveal the verified answer" })
     ).toBeInTheDocument();
-
-    // Adaptation buttons carry text names (Accept / Reject).
-    expect(screen.getAllByRole("button", { name: "Accept" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: "Reject" }).length).toBeGreaterThan(0);
 
     // No focusable control in the shell may lack an accessible name
     // (implicit label associations and aria-label both count). Hidden

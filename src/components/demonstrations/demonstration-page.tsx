@@ -33,7 +33,7 @@ type BootState = "loading" | "missing" | "ready";
  *  2. falls back to loadFromDevice(params id),
  *  3. otherwise redirects home with a notice,
  * and wires the trial log (demoStore.getTrials) + replay (restoring
- * parameter state from a past entry — honestly labeled, never claiming to
+ * parameter state from a past entry: honestly labeled, never claiming to
  * restore simulation state).
  */
 export function DemonstrationPage({ demoId }: { demoId: string }) {
@@ -60,7 +60,7 @@ export function DemonstrationPage({ demoId }: { demoId: string }) {
       if (loaded) return;
       // Second browser / fresh device: a signed-in learner's account copy is
       // the fallback (GET /api/demonstrations/<id>, owner-scoped server-side).
-      // Guests have no account — the 401 restores nothing and the page falls
+      // Guests have no account: the 401 restores nothing and the page falls
       // through to "missing".
       const restored = await demoStore.loadFromCloud(demoId);
       if (cancelled) return;
@@ -287,6 +287,24 @@ function DemoExperienceReady({
   const handleControlTouched = (controlId: string) => {
     setManipulated(true);
     setLockedControl(controlId);
+    setTouchedControls((prev) =>
+      prev.includes(controlId) ? prev : [...prev, controlId]
+    );
+  };
+
+  // -- canonical interaction surface (graph scenes) ---------------------------
+  // The rail's interact step completes when the referenced node is actually
+  // manipulated. Manipulations before the prediction is committed are not
+  // recorded: a learner clicking around during the predict step must still
+  // perform the interact step's real interaction after committing.
+  const [manipulatedNodeIds, setManipulatedNodeIds] = useState<string[]>([]);
+  const [touchedControls, setTouchedControls] = useState<string[]>([]);
+
+  const handleNodeManipulate = (nodeId: string) => {
+    if (predictionIndex === null) return;
+    setManipulatedNodeIds((prev) =>
+      prev.includes(nodeId) ? prev : [...prev, nodeId]
+    );
   };
 
   // -- observations ----------------------------------------------------------
@@ -402,6 +420,9 @@ function DemoExperienceReady({
       replay={replay}
       onReplayTrial={handleReplayTrial}
       onDismissReplay={handleDismissReplay}
+      onNodeManipulate={handleNodeManipulate}
+      manipulatedNodeIds={manipulatedNodeIds}
+      touchedControls={touchedControls}
     />
   );
 }
