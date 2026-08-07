@@ -36,11 +36,14 @@ afterAll(() => {
 });
 
 describe("Homepage (generative flag on)", () => {
-  it("renders the generative ask hero as the single entrance with breadth examples", () => {
+  it("renders the restored landing hero as the single generative entrance with breadth examples", () => {
     render(<HomeComponent />);
 
     expect(
-      screen.getByRole("heading", { name: "Ask for a demonstration", level: 1 }),
+      screen.getByRole("heading", {
+        name: "What topic do you need help with?",
+        level: 1,
+      }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("textbox", { name: "What topic do you need help with?" }),

@@ -81,7 +81,7 @@ test("the legacy nuclear hero and homepage sections are gone", async ({ page }) 
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "Ask for a demonstration", level: 1 }),
+    page.getByRole("heading", { name: "What topic do you need help with?", level: 1 }),
   ).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Find a learning path" }),
@@ -143,7 +143,7 @@ test.describe("reduced motion", () => {
   }) => {
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "Ask for a demonstration" }),
+      page.getByRole("heading", { name: "What topic do you need help with?" }),
     ).toBeVisible();
 
     // No animated hero canvas under reduced motion.
@@ -177,7 +177,7 @@ test.describe("mobile viewport", () => {
     expect(fits).toBe(true);
 
     await expect(
-      page.getByRole("heading", { name: "Ask for a demonstration" }),
+      page.getByRole("heading", { name: "What topic do you need help with?" }),
     ).toBeVisible();
 
     const menuButton = page.getByRole("button", { name: "Open menu" });

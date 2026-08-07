@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AppHeader } from "@/components/navigation/app-header";
-import { AskDemoSection } from "@/components/demonstrations/ask-demo-form";
+import { LandingHero } from "@/components/ui/landing-hero";
 import { isGenerativeDemosEnabled } from "@/demonstrations/feature-flag";
 import { simulationDisclaimer } from "@/domain/experiments";
 
@@ -29,7 +29,7 @@ export default function Home() {
     <main id="main-content" className="bg-[#070b14] text-white">
       <AppHeader />
       {generativeDemosEnabled ? (
-        <AskDemoSection />
+        <LandingHero />
       ) : (
         <section
           aria-label="Welcome"

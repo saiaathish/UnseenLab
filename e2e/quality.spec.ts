@@ -71,7 +71,7 @@ test("console: home loads without error-level messages", async ({ page }) => {
   const messages = collectConsole(page);
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Ask for a demonstration" }),
+    page.getByRole("heading", { name: "What topic do you need help with?" }),
   ).toBeVisible();
   await settle(page);
   assertNoErrors(messages, "home");
@@ -223,14 +223,14 @@ test("evidence pack: six QA screenshots", async ({ page }) => {
   // S01 home, desktop.
   await shot("S01-home-1440.png", "/", 1440, 900, async (p) => {
     await expect(
-      p.getByRole("heading", { name: "Ask for a demonstration" }),
+      p.getByRole("heading", { name: "What topic do you need help with?" }),
     ).toBeVisible();
   });
 
   // S02 home, 320x568.
   await shot("S02-home-320.png", "/", 320, 568, async (p) => {
     await expect(
-      p.getByRole("heading", { name: "Ask for a demonstration" }),
+      p.getByRole("heading", { name: "What topic do you need help with?" }),
     ).toBeVisible();
   });
 
