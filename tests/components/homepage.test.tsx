@@ -1,8 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-// The platform header (client) renders auth state and its own SignInDialog.
-// Keep it deterministic: signed-out session, no search params, no OAuth calls.
 vi.mock("@/lib/firebase/use-session", () => ({
   useSession: () => ({ user: null, loading: false }),
 }));
@@ -36,7 +34,7 @@ afterAll(() => {
 });
 
 describe("Homepage (generative flag on)", () => {
-  it("renders the restored landing hero as the single generative entrance with breadth examples", () => {
+  it("renders the immersive landing hero as the single generative entrance", () => {
     render(<HomeComponent />);
 
     expect(
@@ -46,45 +44,40 @@ describe("Homepage (generative flag on)", () => {
       }),
     ).toBeInTheDocument();
     expect(
+      screen.getByText(
+        "Describe the idea that feels unclear. We’ll guide you to the closest interactive learning experience.",
+      ),
+    ).toBeInTheDocument();
+    expect(
       screen.getByRole("textbox", { name: "What topic do you need help with?" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Find my learning path" }),
+    ).toBeInTheDocument();
 
-    // Breadth examples — the product promise, not a single nuclear lab.
     expect(
-      screen.getByRole("button", { name: "Show why planets stay in orbit." }),
+      screen.getByRole("button", { name: "Nuclear chain reactions" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", {
-        name: "What does Newton's second law say about force and mass?",
-      }),
+      screen.getByRole("button", { name: "Why reactions accelerate" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", {
-        name: "How does photosynthesis transfer energy?",
-      }),
+      screen.getByRole("button", { name: "How absorbers change reactions" }),
     ).toBeInTheDocument();
   });
 
-  it("no longer routes the main input through the legacy nuclear hero", () => {
+  it("keeps the old visual vocabulary without restoring the legacy router", () => {
     render(<HomeComponent />);
 
-    // The legacy hero ("Find a learning path") and its nuclear chips are gone.
-    expect(
-      screen.queryByRole("region", { name: "Find a learning path" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Nuclear chain reactions" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Why reactions accelerate" }),
-    ).not.toBeInTheDocument();
-
-    // The nuclear-centric homepage sections are gone.
     expect(
       screen.queryByRole("heading", { name: "Available lab" }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("link", { name: "Start this lab" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Or try an example:")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Generate demonstration" }),
     ).not.toBeInTheDocument();
   });
 
