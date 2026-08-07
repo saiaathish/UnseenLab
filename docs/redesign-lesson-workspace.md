@@ -1,6 +1,9 @@
 # Lesson Workspace Redesign — Program (2026-08-07)
 
-**Status:** IN EXECUTION, consecutive firm dispatch.
+**Status:** COMPLETED THROUGH A5 — A6 (this document's claim/evidence
+registers + PR description) in flight; A7 (independent red team) and A8
+(final integration + open items) pending. Ledger:
+`.superpowers/sdd/progress.md`.
 **Branch:** `feature/generative-demonstration-engine` (draft PR #9 — NOT merged;
 this work lands on the same branch).
 **Evidence:** `docs/red-team-lesson-workspace-2026-08-07.md` (judge critique —
@@ -13,6 +16,67 @@ NOT change unless a change is unavoidable — the canonical graph already exists
 in the spec (`scene3d.objects` + `scene3d.relationships` with `causes |
 activates | inhibits | …` types); the work is making every surface render THAT
 graph.
+
+## Program status (A6 update, 2026-08-07)
+
+Implemented and verified (details in `.superpowers/sdd/a1..a5-report.md`; claims
+in `validation-pack/claim-register.md` and
+`validation-pack/evidence-claims-register.md`):
+
+- **A1 — canonical graph invariant** @ `3f5d14a`: templates emit nodes +
+  relationships only; 3D derives edges (arrowhead at destination, `—|` bar for
+  inhibits, camera-facing labels, near-orthographic default, clamped rotation);
+  node/edge selection with causal-path dim; change-only event surface
+  `onNodeSelect`/`onEdgeSelect`/`onNodeManipulate` (graph scenes only); 2D SVG
+  parity with the same inhibit bar; energy packets only on edge paths.
+- **Infra — green suite** @ `cf88729` + `b52f289`: ESM vitest config (Vite 8
+  native loader), zod v4 interop, jsdom 30 storage shim. Suite: 73 files /
+  1230 tests, 0 failed under real Node (`/opt/homebrew/opt/node/bin` — the
+  default PATH `node` is a Bun shim that breaks mongodb/bson; run gates with
+  real Node on PATH).
+- **A2 — 70/30 workspace + lesson rail** @ `3c5f630`: model left / rail right,
+  single fluid column below `lg`; predict → interact → observe → explain →
+  complete; Continue gated on real completion; Back always available;
+  completed steps persist (never relock); provenance demoted behind one trust
+  chip + `ⓘ` (AboutThisModel), nothing deleted; deleted
+  prediction-panel/observation-panel/demo-limitations components.
+- **A3 — representation labels** @ `5ca316c`: normalized to the Model/Diagram
+  family (`3D Model | 2D Model | Model | Diagram | Table | Timeline | Text
+  sequence | Graph`); one A1-owned label still pending (see A8 carry list).
+- **A4 — a11y audit + fixes** @ `3b614ef`: keyboard journey, focus after step
+  advance, dialog focus management, one polite announcement per step
+  transition, completed steps not color-only, accessible interact completion
+  path (WebGL-unavailable), reduced motion, contrast; new
+  `lesson-rail-a11y.test.tsx` (+7 tests); real-Chromium keyboard/focus/
+  viewport pass (320–1280 px).
+- **A5 — browser e2e** @ `1fe7530`: `e2e/demo-lesson-rail.spec.ts` (8 tests,
+  real Chromium, flag-on build): layout, gating, interaction completion via
+  real pointer clicks, persisted completion, provenance demotion; full e2e
+  47 passed / 11 skipped / 0 failed (build's own Firebase env);
+  `node browser-verify.mjs` ALL PASS.
+
+Pending:
+
+- **A6** — this document's status + claim/evidence registers + PR description
+  (`validation-pack/pr-description-redesign.md`).
+- **A7** — independent red team (read-only hostile review of the full branch
+  diff against the frozen contract).
+- **A8** — final integration + open carry-list items (see below), final gate
+  run, merge verdict.
+
+A8 carry list (open; do NOT claim as fixed):
+
+1. `template-builder.ts:633` representation label `"3D stage"` → `"3D Model"`.
+2. `globals.css:52` `body.high-contrast` `--muted-strong: #f5f5f5` →
+   `#0a0a0a` (pre-existing typo; component-level mitigation shipped in A4).
+3. Visible em dash in `demonstration-controls.tsx` drag-handle copy
+   (`"{label} — drag directly on the stage."`).
+4. A1 minor: per-edge materials not tracked as disposables (benign per-spec
+   retention; flagged for a profiler-driven follow-up).
+5. A5 environment note: consider excluding `.env.local` from the guest e2e
+   build (or exporting the key in the canonical e2e command) so the
+   `auth-dialog` Google test self-skips instead of failing on the Firebase
+   popup without a key.
 
 ## Frozen UX contract
 
