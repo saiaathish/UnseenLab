@@ -74,11 +74,13 @@ async function seedDemo(
     route.fulfill({ status: 500, contentType: "application/json", body: "{}" }),
   );
   await page.goto("/");
+  // The flag-on homepage hero (LandingHero) carries the section aria-label
+  // "Ask for a demonstration" and the form CTA "Find my learning path".
   await expect(
-    page.getByRole("heading", { name: "Ask for a demonstration" }),
+    page.getByRole("region", { name: "Ask for a demonstration" }),
   ).toBeVisible();
   await page.getByLabel("What topic do you need help with?").fill(query);
-  await page.getByRole("button", { name: "Generate demonstration" }).click();
+  await page.getByRole("button", { name: "Find my learning path" }).click();
   await expect(
     page.getByRole("button", { name: "Enter demonstration" }),
   ).toBeVisible({ timeout: 15_000 });
