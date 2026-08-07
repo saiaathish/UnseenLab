@@ -5,6 +5,8 @@ import {
   generateDemo,
   type GenerateDemoResult,
 } from "@/demonstrations/generation/model/pipeline";
+import { UNSUPPORTED_NOTICE } from "@/demonstrations/generation/intent/route";
+import { generateGenericConceptDemo } from "@/demonstrations/generation/generic-fallback";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,8 +27,16 @@ export const dynamic = "force-dynamic";
  * - 400 { error: "invalid_input" }, 413 { error: "too_large" },
  *   429 { error: "rate_limited" } — hard errors.
  *
- * The API key lives only in the pipeline's model config (LLM_API_KEY) and is
- * never returned or logged. No learner text is ever logged.
+ * Breadth behavior:
+ * - Known routed topics keep the normal verified/template/timeline pipeline.
+ * - A safe English topic with no curated route gets one bounded generic
+ *   conceptual-generation pass instead of the old "Not currently supported"
+ *   dead end. That fallback is hard-capped at conceptual trust and can never
+ *   claim a verified simulation.
+ * - Unsafe, injection, non-English, and empty-input outcomes remain unchanged.
+ *
+ * The API key lives only in the pipeline/generic model config (LLM_API_KEY)
+ * and is never returned or logged. No learner text is ever logged.
  */
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -116,10 +126,34 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "invalid_input" }, { status: 400 });
   }
 
-  const result: GenerateDemoResult = await generateDemo(
+  let result: GenerateDemoResult = await generateDemo(
     parsed.data.query,
     parsed.data.preferences,
   );
+
+  // The deterministic router deliberately returns this exact notice only for
+  // safe, nonempty English requests that simply lack a curated route. Expand
+  // those requests into a bounded qualitative demonstration. Do NOT catch the
+  // other unsupported envelopes: language, prompt-injection, and empty-input
+  // guards keep their original behavior.
+  if (
+    "data" in result &&
+    result.data.outcome === "unsupported" &&
+    result.data.reason === UNSUPPORTED_NOTICE
+  ) {
+    const generic = await generateGenericConceptDemo(
+      parsed.data.query,
+      parsed.data.preferences,
+    );
+    result = {
+      data: {
+        outcome: "spec",
+        spec: generic.spec,
+        source: generic.source,
+        reason: generic.reason,
+      },
+    };
+  }
 
   if ("data" in result) {
     console.info("[generate] completed", {
