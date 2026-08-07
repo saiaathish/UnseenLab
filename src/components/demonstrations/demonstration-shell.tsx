@@ -99,7 +99,7 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
       <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3">
         <Link
           href="/"
-          aria-label="Back to home"
+          aria-label="← Back to home"
           className="inline-flex min-h-11 items-center gap-2 rounded-full px-2 text-sm font-medium text-muted-strong transition hover:bg-surface-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           <span aria-hidden="true">←</span>
