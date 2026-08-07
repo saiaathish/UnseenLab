@@ -19,11 +19,20 @@ import type {
 } from "@/demonstrations/spec/demo-spec";
 import type { EngineFieldVector, EngineVisualState } from "@/demonstrations/renderers/lumina-2d/types";
 import { FrameStatsSampler } from "@/demonstrations/performance/frame-stats";
-import { buildSceneGraph } from "./scene-graph";
+import {
+  buildSceneGraph,
+  cascadeOrder,
+  deriveGraphEdges,
+  edgeCausalPath,
+  GRAPH_NODE_KINDS,
+  isGraphLikeScene,
+} from "./scene-graph";
+import type { GraphEdgePlan } from "./scene-graph";
 import {
   disposeMaterials,
   makeLabelTexture,
   materialFor,
+  MAX_EMISSIVE_INTENSITY,
 } from "./materials";
 import {
   makeNodeState,
@@ -48,6 +57,20 @@ export const DPR_CAP_MOBILE = 1.5;
 const FPS_INTERVAL = 0.5; // seconds between onFps emissions
 const AUTO_ORBIT_RATE = 0.06; // rad/s gentle idle orbit
 const EDGE_TYPES = new Set(["flows_to", "transfers_to"]);
+
+// Canonical-graph (graph-like scene) constants -------------------------------
+// Graph scenes are rendered as an alternate projection of the same canonical
+// graph the 2D diagram resolves: edges derive from scene3d.relationships,
+// arrowheads attach to the destination, inhibits ends in a bar, and the
+// camera is near-orthographic with heavily restricted rotation so the graph
+// never degenerates into spaghetti.
+const GRAPH_VIEW_DIR = new THREE.Vector3(0, 0.55, 1).normalize(); // +z, slight tilt
+const GRAPH_AZIMUTH_BAND = 0.45; // rad of allowed azimuth swing around default
+const GRAPH_POLAR_BAND = 0.18; // rad of allowed polar tilt around default
+const Y_UP = new THREE.Vector3(0, 1, 0);
+const HIGHLIGHT_TINT = new THREE.Color("#ffe9a8"); // "lights up" color
+const CASCADE_STEP_MS = 260; // per-hop delay of the downstream cascade
+const CASCADE_FADE_MS = 180; // fade-in duration of each cascade step
 
 /** Pure dt clamp — exported for direct unit testing (mirrors lumina-2d). */
 export function clampDt(dt: number, max: number = MAX_DT): number {
@@ -124,6 +147,8 @@ interface OwnedMaterial {
   material: THREE.Material;
   animateOpacity: boolean;
   animateColor: boolean;
+  /** Base color for selection highlight lerp (graph scenes only). */
+  baseColor?: string;
 }
 
 interface RuntimeNode {
@@ -163,11 +188,21 @@ interface RuntimeNode {
 }
 
 interface RuntimeEdge {
+  /** The derived edge (canonical graph). Legacy flow edges carry a minimal
+   * plan (no arrowhead/label) and are only drawn for non-graph scenes. */
+  plan: GraphEdgePlan;
   from: RuntimeNode;
   to: RuntimeNode;
-  geometry: THREE.BufferGeometry;
-  attribute: THREE.BufferAttribute;
-  line: THREE.Line;
+  group: THREE.Group;
+  shaft: {
+    geometry: THREE.BufferGeometry;
+    attribute: THREE.BufferAttribute;
+    line: THREE.Line;
+    material: THREE.Material;
+    baseColor: string;
+  };
+  head: { mesh: THREE.Mesh; material: THREE.Material; baseColor: string } | null;
+  label: THREE.Sprite | null;
 }
 
 interface OrbitState {
@@ -266,7 +301,7 @@ export class PrimitiveSceneRenderer {
 
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
-  private camera: THREE.PerspectiveCamera | null = null;
+  private camera: THREE.Camera | null = null;
 
   private graph: SceneGraph | null = null;
   private spec: DemoSpecV1 | null = null;
@@ -277,6 +312,34 @@ export class PrimitiveSceneRenderer {
   private edges: RuntimeEdge[] = [];
   private animationsByTarget = new Map<string, SceneGraphAnimation[]>();
   private disposables: Array<{ dispose(): void }> = [];
+
+  // Canonical-graph mode (graph-like scenes) -------------------------------
+  /** True when the current scene is a canonical graph (nodes + typed
+   * relationships) and the renderer derives edges + interaction from it. */
+  private graphMode = false;
+  /** Derived edges for the current graph scene (graphMode only). */
+  private edgePlans: GraphEdgePlan[] = [];
+  /** Selection/hover state — drives highlight/dim and the event surface. */
+  private selectedNodeId: string | null = null;
+  private selectedEdgeId: string | null = null;
+  private hoverEdgeId: string | null = null;
+  /** Keyboard focus (arrow keys on the focused canvas). */
+  private focusNodeId: string | null = null;
+  /** BFS downstream order from the selected node (cascade). */
+  private cascadeNodes: string[] = [];
+  private cascadeStart = 0;
+  /** Causal path of the selected/hovered edge (nodes and edges). */
+  private edgePathNodes = new Set<string>();
+  private edgePathEdges = new Set<string>();
+  /** Object → node/edge id registries for pointer picking (graphMode). */
+  private pickTargets = new Map<THREE.Object3D, string>();
+  private pickEdges = new Map<THREE.Object3D, string>();
+  private raycaster: THREE.Raycaster | null = null;
+  /** Orthographic frustum base half-height (graph scenes; scaled by zoom). */
+  private orthoBaseHalf = 5;
+  private cameraAspect = 1;
+  private pointerDown = { x: 0, y: 0 };
+  private pointerMoved = 0;
 
   /** Object-id → engine body/grid mapping (hybrid showcases; set per spec). */
   private engineMapping: EngineMapping | null = null;
@@ -440,6 +503,14 @@ export class PrimitiveSceneRenderer {
     this.disposeScene(true);
     this.graph = graph;
     this.nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
+    // Canonical graph mode: no engine coupling AND node-style objects
+    // connected by typed relationships. Engine-coupled hybrid showcases keep
+    // their dedicated orbital/field/wave rendering untouched; containment
+    // scenes (groups/particle fields/boxes) keep their objects as-is.
+    const hasMapping =
+      this.engineMapping !== null && Object.keys(this.engineMapping).length > 0;
+    this.graphMode = !hasMapping && isGraphLikeScene(graph);
+    this.resetSelection();
     this.animationsByTarget = new Map<string, SceneGraphAnimation[]>();
     for (const anim of graph.animations) {
       const list = this.animationsByTarget.get(anim.target) ?? [];
@@ -484,6 +555,8 @@ export class PrimitiveSceneRenderer {
 
     this.runtime = new Map();
     this.roots = [];
+    this.pickTargets.clear();
+    this.pickEdges.clear();
     const childSet = new Set<string>();
     for (const n of graph.nodes) for (const c of n.children) childSet.add(c);
     for (const node of graph.nodes) {
@@ -493,14 +566,29 @@ export class PrimitiveSceneRenderer {
       }
     }
 
-    // Relationship edges (flows_to / transfers_to) drawn as lines.
+    // Edges: graph-like scenes derive them from scene3d.relationships (the
+    // canonical graph — arrowhead at the destination, bar for inhibits, label
+    // mid-edge); other scenes keep the legacy plain flows_to/transfers_to
+    // lines so hybrid showcases render exactly as before.
+    this.edgePlans = this.graphMode ? deriveGraphEdges(graph) : [];
     this.edges = [];
-    for (const rel of graph.relationships) {
-      if (!EDGE_TYPES.has(rel.type)) continue;
-      const from = this.runtime.get(rel.from);
-      const to = this.runtime.get(rel.to);
-      if (from && to) this.buildEdge(from, to, rel);
+    if (this.graphMode) {
+      for (const plan of this.edgePlans) {
+        const from = this.runtime.get(plan.fromId);
+        const to = this.runtime.get(plan.toId);
+        if (from && to) this.buildGraphEdge(from, to, plan);
+      }
+    } else {
+      for (const rel of graph.relationships) {
+        if (!EDGE_TYPES.has(rel.type)) continue;
+        const from = this.runtime.get(rel.from);
+        const to = this.runtime.get(rel.to);
+        if (from && to) this.buildFlowEdge(from, to, rel);
+      }
     }
+
+    // Keyboard interaction: graph nodes are reachable via the focused canvas.
+    this.canvas.tabIndex = this.graphMode ? 0 : this.canvas.tabIndex;
 
     this.frameCamera(graph);
   }
@@ -520,6 +608,18 @@ export class PrimitiveSceneRenderer {
     if (node.kind !== "group") this.buildVisual(rn, node, holder);
     if (node.kind !== "label" && node.label !== undefined) {
       this.buildLabelSprite(rn, node, holder);
+    }
+    if (this.graphMode && node.kind !== "group") {
+      // Pointer picking: the holder and every mesh it owns hit-test as the
+      // node (meshes are named by node id so keyboard/raycast resolution is
+      // deterministic).
+      this.pickTargets.set(holder, node.id);
+      for (const child of holder.children) {
+        if (child instanceof THREE.Mesh) {
+          child.name = node.id;
+          this.pickTargets.set(child, node.id);
+        }
+      }
     }
     for (const childId of node.children) {
       const childNode = this.nodeById.get(childId);
@@ -788,12 +888,13 @@ export class PrimitiveSceneRenderer {
     }
 
     // Per-node material clones when opacity or color is animated, so shared
-    // cached materials are never mutated.
+    // cached materials are never mutated. Graph scenes clone every material
+    // so selection dimming/highlighting can run per node.
     const anims = this.animationsByTarget.get(node.id) ?? [];
     const animateOpacity = anims.some((a) => OPACITY_ANIMATORS.has(a.operator));
     const animateColor = anims.some((a) => COLOR_ANIMATORS.has(a.operator));
-    if (animateOpacity || animateColor) {
-      this.cloneMaterials(holder, rn, animateOpacity, animateColor);
+    if (animateOpacity || animateColor || this.graphMode) {
+      this.cloneMaterials(holder, rn, animateOpacity || this.graphMode, animateColor);
     }
   }
 
@@ -814,7 +915,12 @@ export class PrimitiveSceneRenderer {
       if (!material) continue;
       const clone = material.clone();
       clone.transparent = animateOpacity;
-      rn.owned.push({ material: clone, animateOpacity, animateColor });
+      rn.owned.push({
+        material: clone,
+        animateOpacity,
+        animateColor,
+        baseColor: rn.graph.color,
+      });
       this.trackDisposable(clone);
       if (Array.isArray(mesh.material)) {
         mesh.material = [clone];
@@ -842,27 +948,149 @@ export class PrimitiveSceneRenderer {
     sprite.scale.set(Math.min(node.size, 2) * 2.2, Math.min(node.size, 2) * 0.5, 1);
     holder.add(sprite);
     this.trackDisposable(texture);
+    if (this.graphMode) {
+      // Labels stay locked above their nodes and always face the camera
+      // (sprites). In graph scenes they participate in selection dimming.
+      rn.owned.push({
+        material,
+        animateOpacity: true,
+        animateColor: false,
+        baseColor: undefined,
+      });
+    }
   }
 
-  private buildEdge(
+  /**
+   * Build a derived graph edge: shaft line from → to, arrowhead cone at the
+   * DESTINATION (or a `—|` bar for inhibits), and the relationship label
+   * mid-edge. All materials are per-edge clones so dim/highlight never touch
+   * the shared cache.
+   */
+  private buildGraphEdge(
+    from: RuntimeNode,
+    to: RuntimeNode,
+    plan: GraphEdgePlan
+  ): void {
+    const group = new THREE.Group();
+    group.name = `edge:${plan.id}`;
+
+    const geo = new THREE.BufferGeometry();
+    const attribute = new THREE.BufferAttribute(new Float32Array(6), 3);
+    attribute.setXYZ(0, from.graph.position.x, from.graph.position.y, from.graph.position.z);
+    attribute.setXYZ(1, to.graph.position.x, to.graph.position.y, to.graph.position.z);
+    geo.setAttribute("position", attribute);
+    const lineMaterial = materialFor("line", from.graph.color).clone();
+    lineMaterial.transparent = true;
+    const line = new THREE.Line(geo, lineMaterial);
+    group.add(line);
+    this.trackDisposable(geo);
+
+    const toColor = to.graph.color;
+    let head: RuntimeEdge["head"] = null;
+    if (plan.inhibits) {
+      const barGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.4, 8);
+      const material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(toColor),
+      });
+      material.transparent = true;
+      const bar = new THREE.Mesh(barGeo, material);
+      group.add(bar);
+      head = { mesh: bar, material, baseColor: toColor };
+      this.trackDisposable(barGeo);
+    } else {
+      const tipGeo = new THREE.ConeGeometry(0.15, 0.36, 10);
+      const material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(toColor),
+      });
+      material.transparent = true;
+      const tip = new THREE.Mesh(tipGeo, material);
+      group.add(tip);
+      head = { mesh: tip, material, baseColor: toColor };
+      this.trackDisposable(tipGeo);
+    }
+
+    let label: THREE.Sprite | null = null;
+    const labelText = plan.label;
+    if (labelText) {
+      const texture = makeLabelTexture(labelText, {
+        dark: this.graph?.background === "dark",
+      });
+      const material = new THREE.SpriteMaterial({
+        map: texture,
+        depthTest: false,
+        transparent: true,
+      });
+      const sprite = new THREE.Sprite(material);
+      sprite.scale.set(1.9, 0.42, 1);
+      group.add(sprite);
+      this.trackDisposable(texture);
+      label = sprite;
+    }
+
+    this.scene?.add(group);
+    this.edges.push({
+      plan,
+      from,
+      to,
+      group,
+      shaft: {
+        geometry: geo,
+        attribute,
+        line,
+        material: lineMaterial,
+        baseColor: from.graph.color,
+      },
+      head,
+      label,
+    });
+    this.pickEdges.set(group, plan.id);
+  }
+
+  /** Legacy plain edge (flows_to / transfers_to only, non-graph scenes). */
+  private buildFlowEdge(
     from: RuntimeNode,
     to: RuntimeNode,
     rel: SceneGraphRelationship
   ): void {
+    const group = new THREE.Group();
+    group.name = `edge:${rel.id}`;
     const geo = new THREE.BufferGeometry();
     const attribute = new THREE.BufferAttribute(new Float32Array(6), 3);
     attribute.setXYZ(0, from.graph.position.x, from.graph.position.y, from.graph.position.z);
     attribute.setXYZ(1, to.graph.position.x, to.graph.position.y, to.graph.position.z);
     geo.setAttribute("position", attribute);
     const line = new THREE.Line(geo, materialFor("line", from.graph.color));
-    line.name = `edge:${rel.id}`;
-    this.scene?.add(line);
-    this.edges.push({ from, to, geometry: geo, attribute, line });
+    group.add(line);
+    this.scene?.add(group);
     this.trackDisposable(geo);
+    this.edges.push({
+      plan: {
+        id: rel.id,
+        type: rel.type,
+        label: rel.label ?? rel.type,
+        fromId: rel.from,
+        toId: rel.to,
+        from: from.graph.position,
+        to: to.graph.position,
+        inhibits: false,
+      },
+      from,
+      to,
+      group,
+      shaft: {
+        geometry: geo,
+        attribute,
+        line,
+        material: materialFor("line", from.graph.color),
+        baseColor: from.graph.color,
+      },
+      head: null,
+      label: null,
+    });
   }
 
   private frameCamera(graph: SceneGraph): void {
-    const camera = this.camera;
+    let camera = this.camera;
     if (!camera) return;
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -884,6 +1112,36 @@ export class PrimitiveSceneRenderer {
       ? Math.hypot(maxX - minX, maxY - minY, maxZ - minZ)
       : 0;
     const distance = clampNum(diagonal * 2.2, 4, 120);
+
+    if (this.graphMode) {
+      // Near-orthographic default for canonical graphs: the graph lives in a
+      // plane, so a flat projection keeps it readable and never turns it into
+      // spaghetti. Rotation is clamped to a narrow band around the default.
+      if (!(camera instanceof THREE.OrthographicCamera)) {
+        this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 2000);
+        camera = this.camera;
+      }
+      this.orthoBaseHalf = Math.max(diagonal * 0.72, 1.4);
+      const dir = GRAPH_VIEW_DIR;
+      const pos = center.clone().addScaledVector(dir, distance);
+      camera.position.copy(pos);
+      camera.up.set(0, 1, 0);
+      camera.lookAt(center);
+      this.orbit.target.copy(center);
+      this.orbit.distance = distance;
+      this.orbit.defaultDistance = distance;
+      this.orbit.defaultAzimuth = Math.atan2(dir.x, dir.z);
+      this.orbit.defaultPolar = Math.acos(dir.y / dir.length());
+      this.orbit.azimuth = this.orbit.defaultAzimuth;
+      this.orbit.polar = this.orbit.defaultPolar;
+      this.orbit.userControlled = false;
+      return;
+    }
+
+    if (!(camera instanceof THREE.PerspectiveCamera)) {
+      this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
+      camera = this.camera;
+    }
     const dir = new THREE.Vector3(1, 0.65, 1.35).normalize();
     const pos = center.clone().addScaledVector(dir, distance);
     camera.position.copy(pos);
@@ -967,7 +1225,8 @@ export class PrimitiveSceneRenderer {
     this.canvas.style.height = `${h}px`;
     this.renderer?.setPixelRatio(dpr);
     this.renderer?.setSize(w, h, false);
-    if (this.camera) {
+    this.cameraAspect = w / h;
+    if (this.camera instanceof THREE.PerspectiveCamera) {
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
     }
@@ -1021,7 +1280,8 @@ export class PrimitiveSceneRenderer {
     for (const rn of this.runtime.values()) this.applyTransforms(rn);
     for (const rn of this.runtime.values()) this.updateKind(rn, dt);
     for (const edge of this.edges) this.updateEdge(edge);
-    if (!this.options.reducedMotion && !this.orbit.userControlled) {
+    if (this.graphMode) this.applySelectionVisuals();
+    if (!this.options.reducedMotion && !this.orbit.userControlled && !this.graphMode) {
       this.orbit.azimuth += AUTO_ORBIT_RATE * dt;
     }
     this.applyCamera();
@@ -1300,9 +1560,54 @@ export class PrimitiveSceneRenderer {
     const to = new THREE.Vector3();
     edge.from.group.getWorldPosition(from);
     edge.to.group.getWorldPosition(to);
-    edge.attribute.setXYZ(0, from.x, from.y, from.z);
-    edge.attribute.setXYZ(1, to.x, to.y, to.z);
-    edge.attribute.needsUpdate = true;
+    edge.shaft.attribute.setXYZ(0, from.x, from.y, from.z);
+    edge.shaft.attribute.setXYZ(1, to.x, to.y, to.z);
+    edge.shaft.attribute.needsUpdate = true;
+
+    const head = edge.head;
+    if (!head) return;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const dz = to.z - from.z;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const uz = dz / len;
+    // Head anchors at the DESTINATION node, just outside its radius.
+    const nodeRadius = Math.max(0.25, edge.to.graph.size * 0.5);
+    const inset = nodeRadius + 0.22;
+    head.mesh.position.set(
+      to.x - ux * inset,
+      to.y - uy * inset,
+      to.z - uz * inset
+    );
+    if (edge.plan.inhibits) {
+      // `—|` bar: perpendicular to the edge direction at the destination.
+      let px = -uy;
+      let py = ux;
+      let pz = 0;
+      const plen = Math.hypot(px, py, pz);
+      if (plen < 1e-6) {
+        // Edge runs along z (no in-plane perpendicular): fall back to x-z.
+        px = 0;
+        py = -uz;
+        pz = uy;
+      } else {
+        px /= plen;
+        py /= plen;
+        pz /= plen;
+      }
+      head.mesh.quaternion.setFromUnitVectors(Y_UP, new THREE.Vector3(px, py, pz));
+    } else {
+      head.mesh.quaternion.setFromUnitVectors(Y_UP, new THREE.Vector3(ux, uy, uz));
+    }
+    if (edge.label) {
+      edge.label.position.set(
+        (from.x + to.x) / 2,
+        (from.y + to.y) / 2 + 0.5,
+        (from.z + to.z) / 2
+      );
+    }
   }
 
   private applyCamera(): void {
@@ -1317,13 +1622,27 @@ export class PrimitiveSceneRenderer {
       target.z + distance * sp * Math.cos(azimuth)
     );
     camera.lookAt(target);
+    if (camera instanceof THREE.OrthographicCamera) {
+      // Zoom = frustum scaling; distance is the zoom factor (larger = out).
+      const halfH = this.orthoBaseHalf * (distance / this.orbit.defaultDistance);
+      const halfW = halfH * this.cameraAspect;
+      camera.left = -halfW;
+      camera.right = halfW;
+      camera.top = halfH;
+      camera.bottom = -halfH;
+      camera.updateProjectionMatrix();
+    }
   }
 
   // -------------------------------------------------------------------------
-  // Pointer input (minimal custom orbit: drag rotate, wheel zoom)
+  // Pointer input (minimal custom orbit: drag rotate, wheel zoom) + graph
+  // interaction (node/edge selection, hover dim, keyboard focus)
   // -------------------------------------------------------------------------
 
   private onPointerDown(e: PointerEvent): void {
+    this.pointerDown = { x: e.clientX, y: e.clientY };
+    this.pointerMoved = 0;
+    // Clicks still work under reduced motion; only dragging is disabled.
     if (this.options.reducedMotion || !this.camera) return;
     this.dragging = true;
     this.orbit.userControlled = true;
@@ -1338,16 +1657,28 @@ export class PrimitiveSceneRenderer {
   }
 
   private onPointerMove(e: PointerEvent): void {
-    if (!this.dragging) return;
-    const dx = e.clientX - this.lastPointer.x;
-    const dy = e.clientY - this.lastPointer.y;
-    this.lastPointer = { x: e.clientX, y: e.clientY };
-    this.orbit.azimuth -= dx * 0.005;
-    this.orbit.polar = clampNum(this.orbit.polar - dy * 0.005, 0.05, Math.PI - 0.05);
+    if (this.dragging) {
+      const dx = e.clientX - this.lastPointer.x;
+      const dy = e.clientY - this.lastPointer.y;
+      this.lastPointer = { x: e.clientX, y: e.clientY };
+      this.pointerMoved += Math.abs(dx) + Math.abs(dy);
+      this.orbit.azimuth -= dx * 0.005;
+      this.orbit.polar = clampNum(this.orbit.polar - dy * 0.005, 0.05, Math.PI - 0.05);
+      if (this.graphMode) this.clampGraphOrbit();
+      return;
+    }
+    // Edge hover: dim everything outside the hovered edge's causal path
+    // (visual only — no callbacks; ignored while a selection is active).
+    if (this.graphMode && this.selectedNodeId === null && this.selectedEdgeId === null) {
+      this.hoverPick(e.clientX, e.clientY);
+    }
   }
 
-  private onPointerUp(): void {
+  private onPointerUp(e: PointerEvent): void {
     this.dragging = false;
+    if (this.pointerMoved < 6) {
+      this.pickAt(e.clientX, e.clientY);
+    }
   }
 
   private onWheel(e: WheelEvent): void {
@@ -1361,6 +1692,339 @@ export class PrimitiveSceneRenderer {
     );
   }
 
+  /** Graph scenes: rotation is heavily restricted so the graph never turns
+   * into spaghetti — a narrow azimuth swing and a small tilt band. */
+  private clampGraphOrbit(): void {
+    this.orbit.azimuth = clampNum(
+      this.orbit.azimuth,
+      this.orbit.defaultAzimuth - GRAPH_AZIMUTH_BAND,
+      this.orbit.defaultAzimuth + GRAPH_AZIMUTH_BAND
+    );
+    this.orbit.polar = clampNum(
+      this.orbit.polar,
+      this.orbit.defaultPolar - GRAPH_POLAR_BAND,
+      this.orbit.defaultPolar + GRAPH_POLAR_BAND
+    );
+  }
+
+  private ndcFromClient(clientX: number, clientY: number): { x: number; y: number } | null {
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    return {
+      x: ((clientX - rect.left) / rect.width) * 2 - 1,
+      y: -((clientY - rect.top) / rect.height) * 2 + 1,
+    };
+  }
+
+  private raycastHits(
+    ndcX: number,
+    ndcY: number
+  ): THREE.Intersection[] {
+    const camera = this.camera;
+    const scene = this.scene;
+    if (!camera || !scene) return [];
+    if (!this.raycaster) this.raycaster = new THREE.Raycaster();
+    this.raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+    return this.raycaster.intersectObjects(scene.children, true);
+  }
+
+  /** Resolve a raycast hit to a node id by walking up to a registered
+   * pickable (or a node-named mesh — mesh names equal node ids in graph
+   * scenes, which also keeps stub-based tests deterministic). */
+  private resolveNodePick(object: THREE.Object3D): string | null {
+    let o: THREE.Object3D | null = object;
+    while (o) {
+      const id = this.pickTargets.get(o);
+      if (id) return id;
+      if (o.name && this.nodeById.has(o.name)) return o.name;
+      o = o.parent ?? null;
+    }
+    return null;
+  }
+
+  private resolveEdgePick(object: THREE.Object3D): string | null {
+    let o: THREE.Object3D | null = object;
+    while (o) {
+      const id = this.pickEdges.get(o);
+      if (id) return id;
+      if (o.name && o.name.startsWith("edge:")) return o.name.slice(5);
+      o = o.parent ?? null;
+    }
+    return null;
+  }
+
+  private pickAt(clientX: number, clientY: number): void {
+    if (!this.graphMode) return;
+    const ndc = this.ndcFromClient(clientX, clientY);
+    if (!ndc) return;
+    for (const hit of this.raycastHits(ndc.x, ndc.y)) {
+      const nodeId = this.resolveNodePick(hit.object);
+      if (nodeId) {
+        this.selectNode(nodeId, true);
+        return;
+      }
+      const edgeId = this.resolveEdgePick(hit.object);
+      if (edgeId) {
+        this.selectEdge(edgeId);
+        return;
+      }
+    }
+    this.clearSelection();
+  }
+
+  private hoverPick(clientX: number, clientY: number): void {
+    if (!this.graphMode) return;
+    const ndc = this.ndcFromClient(clientX, clientY);
+    if (!ndc) return;
+    let found: string | null = null;
+    for (const hit of this.raycastHits(ndc.x, ndc.y)) {
+      const edgeId = this.resolveEdgePick(hit.object);
+      if (edgeId) {
+        found = edgeId;
+        break;
+      }
+    }
+    if (found !== this.hoverEdgeId) {
+      this.hoverEdgeId = found;
+      this.rebuildEdgePath(found);
+    }
+  }
+
+  private rebuildEdgePath(edgeId: string | null): void {
+    const path = edgeId
+      ? edgeCausalPath(this.graph?.relationships ?? [], edgeId)
+      : null;
+    this.edgePathNodes = new Set(path?.nodes ?? []);
+    this.edgePathEdges = new Set(path?.edges ?? []);
+  }
+
+  private resetSelection(): void {
+    this.selectedNodeId = null;
+    this.selectedEdgeId = null;
+    this.hoverEdgeId = null;
+    this.focusNodeId = null;
+    this.cascadeNodes = [];
+    this.edgePathNodes = new Set();
+    this.edgePathEdges = new Set();
+  }
+
+  /** Select a node: highlight it, light up its outgoing edges, then cascade
+   * downstream (a brief wave, not a physics sim). Fires the event surface. */
+  private selectNode(nodeId: string, manipulated: boolean): void {
+    const changed = this.selectedNodeId !== nodeId || this.selectedEdgeId !== null;
+    const hadEdge = this.selectedEdgeId !== null;
+    this.selectedNodeId = nodeId;
+    this.selectedEdgeId = null;
+    this.hoverEdgeId = null;
+    this.cascadeNodes = cascadeOrder(this.graph?.relationships ?? [], nodeId);
+    this.cascadeStart = this.now();
+    if (hadEdge) this.options.onEdgeSelect?.(null);
+    if (changed) this.options.onNodeSelect?.(nodeId);
+    if (manipulated) this.options.onNodeManipulate?.(nodeId);
+    this.announceNodeFocus(nodeId);
+  }
+
+  /** Select an edge: dim everything outside its causal path. */
+  private selectEdge(edgeId: string): void {
+    if (this.selectedEdgeId === edgeId) return;
+    const hadNode = this.selectedNodeId !== null;
+    this.selectedNodeId = null;
+    this.selectedEdgeId = edgeId;
+    this.hoverEdgeId = null;
+    this.cascadeNodes = [];
+    this.rebuildEdgePath(edgeId);
+    if (hadNode) this.options.onNodeSelect?.(null);
+    this.options.onEdgeSelect?.(edgeId);
+  }
+
+  private clearSelection(): void {
+    const hadNode = this.selectedNodeId !== null;
+    const hadEdge = this.selectedEdgeId !== null;
+    this.selectedNodeId = null;
+    this.selectedEdgeId = null;
+    this.hoverEdgeId = null;
+    this.edgePathNodes = new Set();
+    this.edgePathEdges = new Set();
+    if (hadNode) this.options.onNodeSelect?.(null);
+    if (hadEdge) this.options.onEdgeSelect?.(null);
+  }
+
+  // -------------------------------------------------------------------------
+  // Keyboard interaction (graph scenes): nodes are focusable, Enter/Space
+  // selects — same event surface as pointer clicks.
+  // -------------------------------------------------------------------------
+
+  private firstGraphNodeId(): string | null {
+    const nodes = this.graph?.nodes ?? [];
+    for (const n of nodes) {
+      if (GRAPH_NODE_KINDS.has(n.kind)) return n.id;
+    }
+    return null;
+  }
+
+  private onFocus(): void {
+    if (!this.graphMode) return;
+    if (!this.focusNodeId) {
+      const first = this.firstGraphNodeId();
+      if (first) {
+        this.focusNodeId = first;
+        this.announceNodeFocus(first);
+      }
+    }
+  }
+
+  private onKeyDown(e: KeyboardEvent): void {
+    if (!this.graphMode) return;
+    if (e.key === "Escape") {
+      this.clearSelection();
+      return;
+    }
+    const nodes = this.graph?.nodes ?? [];
+    const graphNodes = nodes.filter((n) => GRAPH_NODE_KINDS.has(n.kind));
+    if (graphNodes.length === 0) return;
+    let idx = graphNodes.findIndex((n) => n.id === this.focusNodeId);
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      idx = (idx + 1) % graphNodes.length;
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      idx = (idx - 1 + graphNodes.length) % graphNodes.length;
+    } else if (e.key === "Enter" || e.key === " ") {
+      if (this.focusNodeId) this.selectNode(this.focusNodeId, true);
+      e.preventDefault();
+      return;
+    } else {
+      return;
+    }
+    this.focusNodeId = graphNodes[idx].id;
+    this.announceNodeFocus(this.focusNodeId);
+    e.preventDefault();
+  }
+
+  /** Reflect the focused/selected node in the canvas's accessible name. */
+  private announceNodeFocus(nodeId: string): void {
+    if (!this.graphMode) return;
+    const node = this.nodeById.get(nodeId);
+    const label = node?.label ?? nodeId;
+    const selected = this.selectedNodeId === nodeId ? " Selected." : "";
+    this.canvas.setAttribute(
+      "aria-label",
+      `${label}.${selected} Use arrow keys to move focus, Enter to select.`
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Selection visuals (graph scenes): highlight/dim per node and edge
+  // -------------------------------------------------------------------------
+
+  private now(): number {
+    return typeof performance !== "undefined" ? performance.now() : Date.now();
+  }
+
+  /** Per-node dim (0 = normal, 1 = dimmed) and highlight (0..1) factors. */
+  private nodeVisual(nodeId: string): { dim: number; highlight: number } {
+    let dim = 0;
+    const dimSource =
+      this.selectedEdgeId ?? (this.selectedNodeId === null ? this.hoverEdgeId : null);
+    if (dimSource) dim = this.edgePathNodes.has(nodeId) ? 0 : 1;
+
+    let highlight = 0;
+    if (this.selectedNodeId === nodeId) {
+      highlight = 1;
+    } else if (this.focusNodeId === nodeId && this.selectedNodeId === null) {
+      highlight = 0.3; // keyboard focus ring
+    }
+    if (this.selectedNodeId && this.cascadeNodes.length > 1) {
+      const depth = this.cascadeNodes.indexOf(nodeId);
+      if (depth > 0) {
+        if (this.options.reducedMotion) {
+          // Discrete analogue: downstream responds at once, no animation.
+          highlight = Math.max(highlight, 0.9);
+        } else {
+          const t = this.now() - (this.cascadeStart + depth * CASCADE_STEP_MS);
+          highlight = Math.max(highlight, clampNum(t / CASCADE_FADE_MS, 0, 1));
+        }
+      }
+    }
+    return { dim, highlight };
+  }
+
+  /** Per-edge dim/highlight. Outgoing edges of the selected node light up;
+   * for an edge selection everything outside the causal path dims. */
+  private edgeVisual(edge: RuntimeEdge): { dim: number; highlight: number } {
+    const id = edge.plan.id;
+    let dim = 0;
+    let highlight = 0;
+    if (this.selectedEdgeId) {
+      const onPath = this.edgePathEdges.has(id);
+      dim = onPath ? 0 : 1;
+      highlight = id === this.selectedEdgeId ? 1 : onPath ? 0.4 : 0;
+    } else if (this.selectedNodeId) {
+      if (edge.plan.fromId === this.selectedNodeId) highlight = 1;
+    } else if (this.hoverEdgeId) {
+      const onPath = this.edgePathEdges.has(id);
+      dim = onPath ? 0 : 1;
+      highlight = id === this.hoverEdgeId ? 0.7 : 0;
+    }
+    return { dim, highlight };
+  }
+
+  private applyEdgeHighlight(
+    material: THREE.Material,
+    baseColor: string,
+    highlight: number
+  ): void {
+    const m = material as THREE.Material & { color: THREE.Color };
+    m.color.set(baseColor).lerp(HIGHLIGHT_TINT, highlight * 0.7);
+  }
+
+  private applySelectionVisuals(): void {
+    if (!this.graphMode) return;
+    for (const rn of this.runtime.values()) {
+      if (rn.graph.kind === "group") continue;
+      const { dim, highlight } = this.nodeVisual(rn.graph.id);
+      const baseOpacity = rn.state.opacity;
+      const opacity = baseOpacity * (1 - dim * 0.65);
+      for (const owned of rn.owned) {
+        owned.material.opacity = opacity;
+        owned.material.transparent = opacity < 1;
+        if (owned.baseColor) {
+          const m = owned.material as THREE.MeshStandardMaterial & {
+            color: THREE.Color;
+            emissiveIntensity: number;
+          };
+          m.color.set(owned.baseColor).lerp(HIGHLIGHT_TINT, highlight * 0.55);
+          if (typeof m.emissiveIntensity === "number") {
+            // Never above the materials.ts bound.
+            m.emissiveIntensity = Math.min(
+              MAX_EMISSIVE_INTENSITY,
+              0.5 + highlight * 0.1
+            );
+          }
+        }
+      }
+      rn.group.scale.setScalar(rn.state.scale * (1 + highlight * 0.12));
+    }
+    for (const edge of this.edges) {
+      const { dim, highlight } = this.edgeVisual(edge);
+      const opacity = 1 - dim * 0.78;
+      edge.shaft.material.opacity = opacity;
+      edge.shaft.material.transparent = true;
+      this.applyEdgeHighlight(edge.shaft.material, edge.shaft.baseColor, highlight);
+      if (edge.head) {
+        edge.head.material.opacity = opacity;
+        this.applyEdgeHighlight(edge.head.material, edge.head.baseColor, highlight);
+      }
+      if (edge.label) {
+        (edge.label.material as THREE.SpriteMaterial).opacity = opacity;
+      }
+    }
+  }
+
+  /** Whether the current scene is a canonical graph (nodes + typed
+   * relationships) rendered with derived edges and interaction. */
+  getGraphMode(): boolean {
+    return this.graphMode;
+  }
+
   // -------------------------------------------------------------------------
   // Lifecycle: events, visibility, context loss, disposal
   // -------------------------------------------------------------------------
@@ -1371,8 +2035,10 @@ export class PrimitiveSceneRenderer {
   private readonly boundContextRestored = () => this.onContextRestored();
   private readonly boundPointerDown = (e: PointerEvent) => this.onPointerDown(e);
   private readonly boundPointerMove = (e: PointerEvent) => this.onPointerMove(e);
-  private readonly boundPointerUp = () => this.onPointerUp();
+  private readonly boundPointerUp = (e: PointerEvent) => this.onPointerUp(e);
   private readonly boundWheel = (e: WheelEvent) => this.onWheel(e);
+  private readonly boundKeyDown = (e: KeyboardEvent) => this.onKeyDown(e);
+  private readonly boundFocus = () => this.onFocus();
 
   private attachEvents(): void {
     document.addEventListener("visibilitychange", this.boundVisibility);
@@ -1384,6 +2050,8 @@ export class PrimitiveSceneRenderer {
     this.canvas.addEventListener("pointerleave", this.boundPointerUp);
     this.canvas.addEventListener("wheel", this.boundWheel, { passive: false });
     this.canvas.addEventListener("contextmenu", this.boundContextMenu);
+    this.canvas.addEventListener("keydown", this.boundKeyDown);
+    this.canvas.addEventListener("focus", this.boundFocus);
   }
 
   private removeEvents(): void {
@@ -1396,6 +2064,8 @@ export class PrimitiveSceneRenderer {
     this.canvas.removeEventListener("pointerleave", this.boundPointerUp);
     this.canvas.removeEventListener("wheel", this.boundWheel);
     this.canvas.removeEventListener("contextmenu", this.boundContextMenu);
+    this.canvas.removeEventListener("keydown", this.boundKeyDown);
+    this.canvas.removeEventListener("focus", this.boundFocus);
   }
 
   private readonly boundContextMenu = (e: Event) => e.preventDefault();
@@ -1430,6 +2100,8 @@ export class PrimitiveSceneRenderer {
     this.runtime = new Map();
     this.roots = [];
     this.edges = [];
+    this.pickTargets.clear();
+    this.pickEdges.clear();
     this.scene = null;
     if (!keepCamera) this.camera = null;
     disposeMaterials();

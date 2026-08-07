@@ -91,6 +91,18 @@ function scalePosition(
   };
 }
 
+/**
+ * Objects that are NOT part of the canonical graph and must never be drawn as
+ * diagram shapes. Arrows/process edges are edges, never objects; standalone
+ * labels are captions, never nodes. Filtered defensively: templates no longer
+ * emit them, but older/malformed specs may.
+ */
+const NON_GRAPH_KINDS: ReadonlySet<PrimitiveObjectSpec["kind"]> = new Set([
+  "arrow",
+  "process_edge",
+  "label",
+]);
+
 function shapeForKind(kind: PrimitiveObjectSpec["kind"]): "circle" | "rect" | "diamond" {
   if (kind === "sphere" || kind === "particle_field" || kind === "energy_packet" || kind === "process_node") {
     return "circle";
@@ -157,7 +169,9 @@ export function AccessibleDiagram({ spec }: { spec: DemoSpecV1 }) {
     );
   }
 
-  const roots = objects.filter((o) => o.kind !== "group");
+  const roots = objects.filter(
+    (o) => o.kind !== "group" && !NON_GRAPH_KINDS.has(o.kind)
+  );
   const positions = roots.map((o, i) => objectPosition(o, i, roots.length));
   const scaled = roots.map((o, i) => scalePosition(positions[i], positions));
   const byId = new Map(roots.map((o, i) => [o.id, scaled[i]]));
@@ -193,8 +207,9 @@ export function AccessibleDiagram({ spec }: { spec: DemoSpecV1 }) {
           const ey = to.y - uy * 34;
           const mx = (sx + ex) / 2;
           const my = (sy + ey) / 2 - 12;
+          const inhibits = rel.type === "inhibits";
           return (
-            <g key={rel.id}>
+            <g key={rel.id} data-edge-type={rel.type}>
               <line
                 x1={sx}
                 y1={sy}
@@ -204,11 +219,24 @@ export function AccessibleDiagram({ spec }: { spec: DemoSpecV1 }) {
                 strokeOpacity={0.7}
                 strokeWidth={2}
               />
-              <polygon
-                points={`${ex},${ey} ${ex - ux * 10 - uy * 5},${ey - uy * 10 + ux * 5} ${ex - ux * 10 + uy * 5},${ey - uy * 10 - ux * 5}`}
-                fill="currentColor"
-                fillOpacity={0.7}
-              />
+              {inhibits ? (
+                // `—|` bar at the destination, perpendicular to the edge.
+                <line
+                  x1={ex - uy * 11}
+                  y1={ey + ux * 11}
+                  x2={ex + uy * 11}
+                  y2={ey - ux * 11}
+                  stroke="currentColor"
+                  strokeOpacity={0.85}
+                  strokeWidth={3.5}
+                />
+              ) : (
+                <polygon
+                  points={`${ex},${ey} ${ex - ux * 10 - uy * 5},${ey - uy * 10 + ux * 5} ${ex - ux * 10 + uy * 5},${ey - uy * 10 - ux * 5}`}
+                  fill="currentColor"
+                  fillOpacity={0.7}
+                />
+              )}
               <text x={mx} y={my} textAnchor="middle" fontSize="11" fill="currentColor" opacity={0.8}>
                 {rel.label ?? rel.type}
               </text>
@@ -227,7 +255,8 @@ export function AccessibleDiagram({ spec }: { spec: DemoSpecV1 }) {
         ))}
       </svg>
       <figcaption className="mt-2 text-sm text-muted">
-        {summary} Arrows show the declared relationships between the parts.
+        {summary} Lines and arrowheads show the declared relationships between
+        the parts; a bar marks an inhibition.
       </figcaption>
     </figure>
   );

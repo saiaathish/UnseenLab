@@ -6,6 +6,14 @@
  * RELATIONSHIP_OPERATORS. No simulation, no correctIndex — predictions are
  * reasoning questions, never graded.
  *
+ * Canonical graph invariant: the scene graph IS the semantic mirror — nodes
+ * are scene objects (labels attach to nodes, never standalone floating
+ * objects) and edges are `scene3d.relationships` (typed). The templates
+ * therefore never emit standalone `arrow` / `process_edge` objects or
+ * detached scene-title `label` objects: every surface (2D diagram, 3D stage,
+ * lesson rail) resolves the same canonical graph. `energy_packet` objects are
+ * kept only when they travel along a relationship edge path.
+ *
  * Level 3: a curated timeline of educationally accurate events. No
  * simulation, no readouts anywhere, no correctIndex.
  */
@@ -114,10 +122,9 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
       obj("pn1", "process_node", { label: "Step 1", position: { x: -3, y: 0, z: 0 }, size: 1 }),
       obj("pn2", "process_node", { label: "Step 2", position: { x: 0, y: 0, z: 0 }, size: 1 }),
       obj("pn3", "process_node", { label: "Step 3", position: { x: 3, y: 0, z: 0 }, size: 1 }),
-      obj("pe1", "process_edge", { position: { x: -1.5, y: 0, z: 0 } }),
-      obj("pe2", "process_edge", { position: { x: 1.5, y: 0, z: 0 } }),
+      // Travels along the r1 (pn1 → pn2) edge path; edges themselves derive
+      // from relationships (canonical graph), never from objects.
       obj("ep1", "energy_packet", { position: { x: -3, y: 0, z: 0 }, size: 0.3 }),
-      obj("lb1", "label", { label: "Process flow", position: { x: 0, y: 2.2, z: 0 } }),
     ],
     relationships: [
       rel("r1", "flows_to", "pn1", "pn2"),
@@ -125,8 +132,6 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
     ],
     animations: [
       anim("a1", "ep1", "translate", { axis: "x", speed: 1.5 }),
-      anim("a2", "pe1", "pulse"),
-      anim("a3", "pe2", "pulse"),
     ],
     limitations: ["Steps are shown in sequence; in real processes, steps can overlap in time."],
     prediction: {
@@ -148,16 +153,14 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
     objects: [
       obj("src", "process_node", { label: "Source", position: { x: -3, y: 0, z: 0 }, size: 1 }),
       obj("sink", "process_node", { label: "Sink", position: { x: 3, y: 0, z: 0 }, size: 1 }),
+      // Both packets travel along the r1 (src → sink) edge path.
       obj("ep1", "energy_packet", { position: { x: -1.5, y: 0, z: 0 }, size: 0.3 }),
       obj("ep2", "energy_packet", { position: { x: 1.5, y: 0, z: 0 }, size: 0.3 }),
-      obj("ar1", "arrow", { position: { x: 0, y: 0, z: 0 } }),
-      obj("lb1", "label", { label: "Energy transfer", position: { x: 0, y: 2.2, z: 0 } }),
     ],
     relationships: [rel("r1", "transfers_to", "src", "sink")],
     animations: [
       anim("a1", "ep1", "translate", { axis: "x", speed: 1.2 }),
       anim("a2", "ep2", "translate", { axis: "x", speed: 1.2, delayMs: 800 }),
-      anim("a3", "ar1", "pulse"),
     ],
     limitations: ["Energy is shown as packets; real energy transfers are continuous."],
     prediction: {
@@ -181,21 +184,13 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
       obj("b", "process_node", { label: "Effect B", position: { x: 0, y: 1, z: 0 }, size: 1 }),
       obj("c", "process_node", { label: "Effect C", position: { x: 0, y: -1, z: 0 }, size: 1 }),
       obj("d", "process_node", { label: "Inhibited D", position: { x: 3, y: -1, z: 0 }, size: 1 }),
-      obj("ar1", "arrow", { position: { x: -1.5, y: 1, z: 0 } }),
-      obj("ar2", "arrow", { position: { x: 0, y: 0, z: 0 } }),
-      obj("ar3", "arrow", { position: { x: 1.5, y: -1, z: 0 } }),
-      obj("lb1", "label", { label: "Cause and effect", position: { x: 0, y: 2.4, z: 0 } }),
     ],
     relationships: [
       rel("r1", "causes", "a", "b"),
       rel("r2", "activates", "b", "c"),
       rel("r3", "inhibits", "c", "d"),
     ],
-    animations: [
-      anim("a1", "ar1", "pulse"),
-      anim("a2", "ar2", "pulse"),
-      anim("a3", "ar3", "pulse"),
-    ],
+    animations: [],
     limitations: ["Real systems usually have many more connections than the few shown here."],
     prediction: {
       prompt: "If Cause A is removed, which effects do you expect to change?",
@@ -216,7 +211,6 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
     objects: [
       obj("pf1", "particle_field", { position: { x: 0, y: 0, z: 0 }, size: 2, particleCount: 200 }),
       obj("g1", "group", { children: ["pf1"] }),
-      obj("lb1", "label", { label: "Population", position: { x: 0, y: 2.2, z: 0 } }),
     ],
     relationships: [rel("r1", "contains", "g1", "pf1")],
     animations: [anim("a1", "g1", "scale", { amplitude: 0.15 })],
@@ -243,7 +237,6 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
       obj("l2", "box", { label: "Layer 2", position: { x: 0, y: 0.5, z: 0 }, size: 1 }),
       obj("l3", "box", { label: "Layer 3", position: { x: 0, y: -0.5, z: 0 }, size: 1 }),
       obj("l4", "box", { label: "Layer 4", position: { x: 0, y: -1.5, z: 0 }, size: 1 }),
-      obj("lb1", "label", { label: "Layered system", position: { x: 0, y: 2.8, z: 0 } }),
     ],
     relationships: [
       rel("r1", "contains", "root", "l1"),
@@ -279,11 +272,6 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
       obj("p2", "process_node", { label: "Stage B", position: { x: 2, y: 0, z: 0 }, size: 1 }),
       obj("p3", "process_node", { label: "Stage C", position: { x: 0, y: -2, z: 0 }, size: 1 }),
       obj("p4", "process_node", { label: "Stage D", position: { x: -2, y: 0, z: 0 }, size: 1 }),
-      obj("e1", "process_edge", { position: { x: 1, y: 1.4, z: 0 } }),
-      obj("e2", "process_edge", { position: { x: 1.4, y: -1, z: 0 } }),
-      obj("e3", "process_edge", { position: { x: -1, y: -1.4, z: 0 } }),
-      obj("e4", "process_edge", { position: { x: -1.4, y: 1, z: 0 } }),
-      obj("lb1", "label", { label: "Cycle", position: { x: 0, y: 3, z: 0 } }),
     ],
     relationships: [
       rel("r1", "flows_to", "p1", "p2"),
@@ -291,12 +279,7 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
       rel("r3", "flows_to", "p3", "p4"),
       rel("r4", "flows_to", "p4", "p1"),
     ],
-    animations: [
-      anim("a1", "e1", "pulse"),
-      anim("a2", "e2", "pulse"),
-      anim("a3", "e3", "pulse"),
-      anim("a4", "e4", "pulse"),
-    ],
+    animations: [],
     limitations: ["Real cycles usually have side branches and leak energy; this one is a closed loop."],
     prediction: {
       prompt: "If one stage of a cycle is skipped, what happens to the whole cycle?",
@@ -321,8 +304,6 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
       obj("after", "group", { children: ["b2", "lbA"] }),
       obj("b2", "box", { label: "After", position: { x: 2.5, y: 0, z: 0 }, size: 1 }),
       obj("lbA", "label", { label: "After state", position: { x: 2.5, y: -1.6, z: 0 } }),
-      obj("ar1", "arrow", { position: { x: 0, y: 0, z: 0 } }),
-      obj("lb1", "label", { label: "Transformation", position: { x: 0, y: 2.2, z: 0 } }),
     ],
     relationships: [rel("r1", "transforms_into", "before", "after")],
     animations: [anim("a1", "after", "reveal", { delayMs: 1500 })],
@@ -347,13 +328,10 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
       obj("s1", "sphere", { label: "Object A", position: { x: -2, y: 0, z: 0 }, size: 0.6, color: "#ff6b6b" }),
       obj("s2", "sphere", { label: "Object B", position: { x: 2, y: 0, z: 0 }, size: 0.6, color: "#4dabf7" }),
       obj("vf1", "vector_field", { position: { x: 0, y: 0, z: 0 }, size: 3 }),
-      obj("ar1", "arrow", { position: { x: 0, y: 0, z: 0 } }),
-      obj("lb1", "label", { label: "Field relationship", position: { x: 0, y: 2.4, z: 0 } }),
     ],
     relationships: [rel("r1", "attracts", "s1", "s2")],
     animations: [
       anim("a1", "vf1", "update_vector"),
-      anim("a2", "ar1", "pulse"),
     ],
     limitations: ["The field is shown in one plane; real fields extend in three dimensions."],
     prediction: {
@@ -377,21 +355,13 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
       obj("na", "process_node", { label: "Branch A", position: { x: -2.5, y: -1.8, z: 0 }, size: 0.8 }),
       obj("nb", "process_node", { label: "Branch B", position: { x: 2.5, y: -1.8, z: 0 }, size: 0.8 }),
       obj("nc", "process_node", { label: "Branch C", position: { x: 0, y: 2.4, z: 0 }, size: 0.8 }),
-      obj("ea", "process_edge", { position: { x: -1.4, y: -1, z: 0 } }),
-      obj("eb", "process_edge", { position: { x: 1.4, y: -1, z: 0 } }),
-      obj("ec", "process_edge", { position: { x: 0, y: 1.3, z: 0 } }),
-      obj("lb1", "label", { label: "Network", position: { x: 0, y: -3, z: 0 } }),
     ],
     relationships: [
       rel("r1", "flows_to", "hub", "na"),
       rel("r2", "flows_to", "hub", "nb"),
       rel("r3", "flows_to", "hub", "nc"),
     ],
-    animations: [
-      anim("a1", "ea", "pulse"),
-      anim("a2", "eb", "pulse"),
-      anim("a3", "ec", "pulse"),
-    ],
+    animations: [],
     limitations: ["A single hub is shown; real networks often have many hubs and rerouting."],
     prediction: {
       prompt: "If the hub stops working, which parts of the network lose supply?",
@@ -414,10 +384,6 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
       obj("t2", "process_node", { label: "Second", position: { x: -1, y: 0, z: 0 }, size: 0.9 }),
       obj("t3", "process_node", { label: "Third", position: { x: 1, y: 0, z: 0 }, size: 0.9 }),
       obj("t4", "process_node", { label: "Fourth", position: { x: 3, y: 0, z: 0 }, size: 0.9 }),
-      obj("s1", "process_edge", { position: { x: -2, y: 0, z: 0 } }),
-      obj("s2", "process_edge", { position: { x: 0, y: 0, z: 0 } }),
-      obj("s3", "process_edge", { position: { x: 2, y: 0, z: 0 } }),
-      obj("lb1", "label", { label: "Sequence", position: { x: 0, y: 1.8, z: 0 } }),
     ],
     relationships: [
       rel("r1", "flows_to", "t1", "t2"),

@@ -24,6 +24,7 @@ import {
 import type {
   AnimationSpec,
   DemoSpecV1,
+  PrimitiveKind,
   PrimitiveObjectSpec,
   RelationshipOperator,
   RelationshipSpec,
@@ -43,8 +44,152 @@ export interface BuildSceneGraphOptions {
   mobile?: boolean;
 }
 
-/** Renderer default color, applied when a color is missing or rejected. */
+/**
+ * Renderer default color, applied when a color is missing or rejected.
+ */
 export const DEFAULT_COLOR = "#5b8def";
+
+// ---------------------------------------------------------------------------
+// Canonical graph derivation (semantic mirror)
+// ---------------------------------------------------------------------------
+//
+// A "graph-like" scene is one whose objects are node-style primitives
+// (process_node / sphere) connected by typed relationships. For those scenes
+// the 3D stage renders edges DERIVED from scene3d.relationships — arrowhead
+// at the destination, `—|` bar for inhibits — so the 3D surface is an
+// alternate projection of the same canonical graph the 2D diagram resolves.
+// Hybrid showcase scenes (orbits/charges/waves) carry an engineMapping and
+// keep their dedicated orbital/field/wave rendering; their relationships are
+// motion couplings, never graph edges. Containment relationships
+// (group → child) are structural, not graph edges.
+
+/** Primitive kinds that act as graph nodes (edge anchors). */
+export const GRAPH_NODE_KINDS: ReadonlySet<PrimitiveKind> = new Set([
+  "process_node",
+  "sphere",
+]);
+
+/** A derived edge: from/to resolved node positions, ready to render. */
+export interface GraphEdgePlan {
+  id: string;
+  type: RelationshipOperator;
+  /** Relationship label or type — shown mid-edge. */
+  label: string;
+  fromId: string;
+  toId: string;
+  from: Vec3;
+  to: Vec3;
+  /** inhibits edges end in a bar (`—|`) instead of an arrowhead. */
+  inhibits: boolean;
+}
+
+/**
+ * True when the scene is a canonical graph (node-style objects connected by
+ * typed relationships). Containment/structural scenes (groups, particle
+ * fields, boxes) and engine-coupled showcases are not graphs.
+ */
+export function isGraphLikeScene(graph: SceneGraph): boolean {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  return graph.relationships.some((r) => {
+    const from = byId.get(r.from);
+    const to = byId.get(r.to);
+    return (
+      from !== undefined &&
+      to !== undefined &&
+      GRAPH_NODE_KINDS.has(from.kind) &&
+      GRAPH_NODE_KINDS.has(to.kind)
+    );
+  });
+}
+
+/**
+ * Derive the edges the renderer draws for a graph-like scene — one plan per
+ * relationship whose endpoints are node-style objects. Non-graph scenes yield
+ * no plans (their objects keep their dedicated rendering).
+ */
+export function deriveGraphEdges(graph: SceneGraph): GraphEdgePlan[] {
+  if (!isGraphLikeScene(graph)) return [];
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const plans: GraphEdgePlan[] = [];
+  for (const rel of graph.relationships) {
+    const from = byId.get(rel.from);
+    const to = byId.get(rel.to);
+    if (!from || !to) continue;
+    if (!GRAPH_NODE_KINDS.has(from.kind) || !GRAPH_NODE_KINDS.has(to.kind)) {
+      continue;
+    }
+    plans.push({
+      id: rel.id,
+      type: rel.type,
+      label: rel.label ?? rel.type,
+      fromId: rel.from,
+      toId: rel.to,
+      from: from.position,
+      to: to.position,
+      inhibits: rel.type === "inhibits",
+    });
+  }
+  return plans;
+}
+
+/**
+ * Breadth-first downstream order from a node over outgoing relationship
+ * edges (includes the start node). Drives the node-selection cascade
+ * (click Cause A → B responds → C responds → …).
+ */
+export function cascadeOrder(
+  relationships: SceneGraphRelationship[],
+  startId: string
+): string[] {
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const queue: string[] = [startId];
+  seen.add(startId);
+  for (let qi = 0; qi < queue.length; qi++) {
+    const current = queue[qi];
+    order.push(current);
+    for (const rel of relationships) {
+      if (rel.from !== current || seen.has(rel.to)) continue;
+      seen.add(rel.to);
+      queue.push(rel.to);
+    }
+  }
+  return order;
+}
+
+/** The causal path of an edge: its endpoints plus downstream nodes/edges. */
+export interface EdgeCausalPath {
+  nodes: string[];
+  edges: string[];
+}
+
+/**
+ * The causal path of one edge: the nodes it connects and — for chain graphs —
+ * every node/edge downstream of its destination. Everything outside this path
+ * dims when the edge is selected or hovered.
+ */
+export function edgeCausalPath(
+  relationships: SceneGraphRelationship[],
+  edgeId: string
+): EdgeCausalPath | null {
+  const rel = relationships.find((r) => r.id === edgeId);
+  if (!rel) return null;
+  const nodes = [rel.from, rel.to];
+  const edges = [rel.id];
+  const seen = new Set<string>([rel.from, rel.to]);
+  const queue: string[] = [rel.to];
+  for (let qi = 0; qi < queue.length; qi++) {
+    const current = queue[qi];
+    for (const r of relationships) {
+      if (r.from !== current || seen.has(r.to)) continue;
+      seen.add(r.to);
+      queue.push(r.to);
+      nodes.push(r.to);
+      edges.push(r.id);
+    }
+  }
+  return { nodes, edges };
+}
 
 const COLOR_HEX =
   /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;

@@ -19,7 +19,11 @@ import {
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 import {
   buildSceneGraph,
+  cascadeOrder,
   DEFAULT_COLOR,
+  deriveGraphEdges,
+  edgeCausalPath,
+  isGraphLikeScene,
   isSafeColor,
 } from "@/demonstrations/renderers/primitive-3d/scene-graph";
 import {
@@ -61,6 +65,21 @@ const threeStub = vi.hoisted(() => {
       this.g = c.g;
       this.b = c.b;
       return this;
+    }
+    lerp(c: Color, _t: number) {
+      this.r = c.r;
+      this.g = c.g;
+      this.b = c.b;
+      return this;
+    }
+  }
+
+  class Vector2 {
+    x: number;
+    y: number;
+    constructor(x = 0, y = 0) {
+      this.x = x;
+      this.y = y;
     }
   }
 
@@ -110,6 +129,16 @@ const threeStub = vi.hoisted(() => {
     }
   }
 
+  class Quaternion {
+    x = 0;
+    y = 0;
+    z = 0;
+    w = 1;
+    setFromUnitVectors(_a: Vector3, _b: Vector3) {
+      return this;
+    }
+  }
+
   class Euler {
     x = 0;
     y = 0;
@@ -126,10 +155,13 @@ const threeStub = vi.hoisted(() => {
     position = new Vector3();
     rotation = new Euler();
     scale = new Vector3(1, 1, 1);
+    quaternion = new Quaternion();
     children: Object3D[] = [];
     name = "";
     up = new Vector3(0, 1, 0);
+    parent: Object3D | null = null;
     add(o: Object3D) {
+      o.parent = this;
       this.children.push(o);
       return this;
     }
@@ -228,6 +260,38 @@ const threeStub = vi.hoisted(() => {
     }
     updateProjectionMatrix() {}
   }
+  class OrthographicCamera extends Object3D {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+    near: number;
+    far: number;
+    constructor(
+      left: number,
+      right: number,
+      top: number,
+      bottom: number,
+      near: number,
+      far: number
+    ) {
+      super();
+      this.left = left;
+      this.right = right;
+      this.top = top;
+      this.bottom = bottom;
+      this.near = near;
+      this.far = far;
+    }
+    updateProjectionMatrix() {}
+  }
+  class Raycaster {
+    setFromCamera(_ndc: Vector2, _camera: Object3D) {}
+    /** Returns the configurable hit list (see threeStub.raycastHits). */
+    intersectObjects(_objects: Object3D[], _recursive?: boolean) {
+      return raycastHits;
+    }
+  }
   class AmbientLight extends Object3D {
     constructor(_c?: unknown, _i = 1) {
       super();
@@ -280,10 +344,16 @@ const threeStub = vi.hoisted(() => {
     }
   }
 
+  // Programmable raycast hits: tests plant objects here and the stub
+  // Raycaster returns them (default: no hits).
+  const raycastHits: Array<{ object: Object3D; distance: number; point: unknown }> = [];
+
   const THREE = {
     Color,
+    Vector2,
     Vector3,
     Euler,
+    Quaternion,
     BufferAttribute,
     BufferGeometry,
     SphereGeometry: Geometry,
@@ -302,6 +372,8 @@ const threeStub = vi.hoisted(() => {
     Group,
     Scene,
     PerspectiveCamera,
+    OrthographicCamera,
+    Raycaster,
     AmbientLight,
     DirectionalLight,
     Object3D,
@@ -319,9 +391,11 @@ const threeStub = vi.hoisted(() => {
 
   return {
     THREE,
+    raycastHits,
     disposed,
     reset: () => {
       disposed.length = 0;
+      raycastHits.length = 0;
     },
   };
 });
@@ -631,6 +705,168 @@ describe("buildSceneGraph", () => {
     expect(graph.relationships).toEqual([]);
     expect(graph.animations).toEqual([]);
     expect(reasons).toContain("no_scene3d");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canonical graph derivation (semantic mirror — pure)
+// ---------------------------------------------------------------------------
+
+describe("canonical graph derivation", () => {
+  function graphSpec(
+    scene: Partial<Scene3D> | null
+  ): ReturnType<typeof buildSceneGraph>["graph"] {
+    return buildSceneGraph(makeSpec(scene)).graph;
+  }
+
+  it("isGraphLikeScene: node-style objects with typed relationships", () => {
+    expect(
+      isGraphLikeScene(
+        graphSpec({
+          objects: [
+            { id: "a", kind: "process_node", position: { x: -3, y: 1, z: 0 } },
+            { id: "b", kind: "process_node", position: { x: 0, y: 1, z: 0 } },
+          ],
+          relationships: [{ id: "r1", type: "causes", from: "a", to: "b" }],
+        })
+      )
+    ).toBe(true);
+    // spheres connected by a relationship are a graph too (field_relationship)
+    expect(
+      isGraphLikeScene(
+        graphSpec({
+          objects: [
+            { id: "s1", kind: "sphere" },
+            { id: "s2", kind: "sphere" },
+          ],
+          relationships: [{ id: "r1", type: "attracts", from: "s1", to: "s2" }],
+        })
+      )
+    ).toBe(true);
+  });
+
+  it("isGraphLikeScene: containment/structural scenes are not graphs", () => {
+    // particle_population / layered_system style: group → particle_field/box
+    expect(
+      isGraphLikeScene(
+        graphSpec({
+          objects: [
+            { id: "g", kind: "group", children: ["pf"] },
+            { id: "pf", kind: "particle_field" },
+          ],
+          relationships: [{ id: "r1", type: "contains", from: "g", to: "pf" }],
+        })
+      )
+    ).toBe(false);
+    expect(
+      isGraphLikeScene(
+        graphSpec({
+          objects: [
+            { id: "before", kind: "group", children: ["b1"] },
+            { id: "b1", kind: "box" },
+          ],
+          relationships: [
+            { id: "r1", type: "transforms_into", from: "before", to: "after" },
+          ],
+        })
+      )
+    ).toBe(false);
+    // no relationships at all
+    expect(isGraphLikeScene(graphSpec({ objects: [{ id: "a", kind: "sphere" }] }))).toBe(false);
+  });
+
+  it("deriveGraphEdges: arrowheads at destination, bar for inhibits", () => {
+    const graph = graphSpec({
+      objects: [
+        { id: "a", kind: "process_node", position: { x: -3, y: 1, z: 0 } },
+        { id: "b", kind: "process_node", position: { x: 0, y: 1, z: 0 } },
+        { id: "c", kind: "process_node", position: { x: 0, y: -1, z: 0 } },
+        { id: "d", kind: "process_node", position: { x: 3, y: -1, z: 0 } },
+      ],
+      relationships: [
+        { id: "r1", type: "causes", from: "a", to: "b" },
+        { id: "r2", type: "activates", from: "b", to: "c" },
+        { id: "r3", type: "inhibits", from: "c", to: "d", label: "blocks" },
+      ],
+    });
+    const plans = deriveGraphEdges(graph);
+    expect(plans.map((p) => p.id)).toEqual(["r1", "r2", "r3"]);
+    expect(plans[0].from).toEqual({ x: -3, y: 1, z: 0 });
+    expect(plans[0].to).toEqual({ x: 0, y: 1, z: 0 });
+    expect(plans[0].inhibits).toBe(false);
+    expect(plans[1].inhibits).toBe(false);
+    expect(plans[2].inhibits).toBe(true);
+    expect(plans[2].label).toBe("blocks");
+    // label falls back to the relationship type
+    expect(plans[0].label).toBe("causes");
+  });
+
+  it("deriveGraphEdges: no plans for non-graph or mixed-endpoint scenes", () => {
+    // group→group (before_after_comparison) and group→particle_field
+    // (particle_population) must not produce edges: the 2D diagram also
+    // drops them, so 3D must not invent an interpretation.
+    const groupScene = graphSpec({
+      objects: [
+        { id: "before", kind: "group", children: ["b1"] },
+        { id: "b1", kind: "box" },
+        { id: "after", kind: "group", children: ["b2"] },
+        { id: "b2", kind: "box" },
+      ],
+      relationships: [{ id: "r1", type: "transforms_into", from: "before", to: "after" }],
+    });
+    expect(deriveGraphEdges(groupScene)).toEqual([]);
+    // endpoint that is not node-like is skipped
+    const mixed = graphSpec({
+      objects: [
+        { id: "a", kind: "process_node" },
+        { id: "pf", kind: "particle_field" },
+      ],
+      relationships: [{ id: "r1", type: "flows_to", from: "a", to: "pf" }],
+    });
+    expect(deriveGraphEdges(mixed)).toEqual([]);
+  });
+
+  it("cascadeOrder: BFS downstream from the selected node", () => {
+    const graph = graphSpec({
+      objects: [
+        { id: "a", kind: "process_node" },
+        { id: "b", kind: "process_node" },
+        { id: "c", kind: "process_node" },
+        { id: "d", kind: "process_node" },
+      ],
+      relationships: [
+        { id: "r1", type: "causes", from: "a", to: "b" },
+        { id: "r2", type: "activates", from: "b", to: "c" },
+        { id: "r3", type: "activates", from: "b", to: "d" },
+        { id: "r4", type: "inhibits", from: "d", to: "c" },
+      ],
+    });
+    expect(cascadeOrder(graph.relationships, "a")).toEqual(["a", "b", "c", "d"]);
+    expect(cascadeOrder(graph.relationships, "b")).toEqual(["b", "c", "d"]);
+    expect(cascadeOrder(graph.relationships, "c")).toEqual(["c"]);
+  });
+
+  it("edgeCausalPath: edge endpoints + downstream nodes and edges", () => {
+    const graph = graphSpec({
+      objects: [
+        { id: "a", kind: "process_node" },
+        { id: "b", kind: "process_node" },
+        { id: "c", kind: "process_node" },
+        { id: "d", kind: "process_node" },
+      ],
+      relationships: [
+        { id: "r1", type: "causes", from: "a", to: "b" },
+        { id: "r2", type: "activates", from: "b", to: "c" },
+        { id: "r3", type: "activates", from: "b", to: "d" },
+      ],
+    });
+    const path = edgeCausalPath(graph.relationships, "r1")!;
+    expect(path.nodes).toEqual(["a", "b", "c", "d"]);
+    expect(path.edges).toEqual(["r1", "r2", "r3"]);
+    const sub = edgeCausalPath(graph.relationships, "r2")!;
+    expect(sub.nodes).toEqual(["b", "c"]);
+    expect(sub.edges).toEqual(["r2"]);
+    expect(edgeCausalPath(graph.relationships, "ghost")).toBeNull();
   });
 });
 
@@ -1070,5 +1306,254 @@ describe("primitive renderer lifecycle", () => {
     expect(clampDt(-5)).toBe(0);
     expect(clampDt(NaN)).toBe(0);
     expect(clampDt(0.01)).toBe(0.01);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Graph interaction surface (graph-like scenes: derived edges + selection)
+// ---------------------------------------------------------------------------
+
+describe("graph interaction surface", () => {
+  let rafQueue: Array<(t: number) => void> = [];
+  let rafIdCounter = 0;
+
+  class FakeResizeObserver {
+    constructor() {}
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+
+  function makeCanvas(): HTMLCanvasElement {
+    return document.createElement("canvas");
+  }
+
+  function mockWebGL(canvas: HTMLCanvasElement) {
+    vi.spyOn(canvas, "getContext").mockReturnValue({} as never);
+    // A real viewport so pointer picking produces valid NDC coordinates.
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+      width: 400,
+      height: 300,
+      left: 0,
+      top: 0,
+      right: 400,
+      bottom: 300,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+  }
+
+  const GRAPH_SCENE: Scene3D = {
+    objects: [
+      { id: "a", kind: "process_node", label: "Cause A", position: { x: -3, y: 1, z: 0 } },
+      { id: "b", kind: "process_node", label: "Effect B", position: { x: 0, y: 1, z: 0 } },
+      { id: "c", kind: "process_node", label: "Effect C", position: { x: 0, y: -1, z: 0 } },
+      { id: "d", kind: "process_node", label: "Inhibited D", position: { x: 3, y: -1, z: 0 } },
+    ],
+    relationships: [
+      { id: "r1", type: "causes", from: "a", to: "b" },
+      { id: "r2", type: "activates", from: "b", to: "c" },
+      { id: "r3", type: "inhibits", from: "c", to: "d" },
+    ],
+    animations: [],
+  };
+
+  beforeEach(() => {
+    rafQueue = [];
+    rafIdCounter = 0;
+    threeStub.reset();
+    vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => {
+      rafQueue.push(cb);
+      return ++rafIdCounter;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      rafQueue.length = 0;
+      void id;
+    });
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+  });
+
+  afterEach(() => {
+    rafQueue = [];
+    vi.unstubAllGlobals();
+  });
+
+  function clickCanvas(canvas: HTMLCanvasElement, x = 120, y = 80) {
+    canvas.dispatchEvent(
+      new PointerEvent("pointerdown", { clientX: x, clientY: y, bubbles: true })
+    );
+    canvas.dispatchEvent(
+      new PointerEvent("pointerup", { clientX: x, clientY: y, bubbles: true })
+    );
+  }
+
+  function pressKey(canvas: HTMLCanvasElement, key: string) {
+    canvas.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+  }
+
+  it("enters graph mode for node+relationship scenes; engineMapping opts out", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const renderer = new PrimitiveSceneRenderer(canvas);
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+    expect(renderer.getGraphMode()).toBe(true);
+    renderer.dispose();
+
+    // Engine-coupled hybrid showcase (orbits-style): NOT a graph.
+    const canvas2 = makeCanvas();
+    mockWebGL(canvas2);
+    const hybrid = new PrimitiveSceneRenderer(canvas2);
+    hybrid.setSpec(
+      makeSpec({
+        objects: [
+          { id: "star", kind: "sphere" },
+          { id: "planet", kind: "sphere" },
+        ],
+        relationships: [{ id: "r1", type: "orbits", from: "planet", to: "star" }],
+      }),
+      { engineMapping: { planet: { body: "planet", scale: 1 } } }
+    );
+    expect(hybrid.getGraphMode()).toBe(false);
+    hybrid.dispose();
+
+    // Containment scene (particle_population style): not a graph.
+    const canvas3 = makeCanvas();
+    mockWebGL(canvas3);
+    const containment = new PrimitiveSceneRenderer(canvas3);
+    containment.setSpec(
+      makeSpec({
+        objects: [
+          { id: "g1", kind: "group", children: ["pf1"] },
+          { id: "pf1", kind: "particle_field", particleCount: 4 },
+        ],
+        relationships: [{ id: "r1", type: "contains", from: "g1", to: "pf1" }],
+      })
+    );
+    expect(containment.getGraphMode()).toBe(false);
+    containment.dispose();
+  });
+
+  it("keyboard: canvas focus + arrow keys move node focus, Enter selects and manipulates, Escape clears", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const onNodeSelect = vi.fn();
+    const onNodeManipulate = vi.fn();
+    const onEdgeSelect = vi.fn();
+    const renderer = new PrimitiveSceneRenderer(canvas, {
+      onNodeSelect,
+      onNodeManipulate,
+      onEdgeSelect,
+    });
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+    expect(renderer.getGraphMode()).toBe(true);
+    expect(canvas.tabIndex).toBe(0);
+
+    canvas.dispatchEvent(new FocusEvent("focus"));
+    pressKey(canvas, "Enter");
+    expect(onNodeSelect).toHaveBeenLastCalledWith("a");
+    expect(onNodeManipulate).toHaveBeenLastCalledWith("a");
+    // The focused node is announced in the canvas's accessible name.
+    expect(canvas.getAttribute("aria-label")).toContain("Cause A");
+
+    pressKey(canvas, "ArrowRight");
+    pressKey(canvas, "Enter");
+    expect(onNodeSelect).toHaveBeenLastCalledWith("b");
+    expect(onNodeManipulate).toHaveBeenLastCalledWith("b");
+
+    pressKey(canvas, "Escape");
+    expect(onNodeSelect).toHaveBeenLastCalledWith(null);
+    expect(onEdgeSelect).not.toHaveBeenCalled();
+    renderer.dispose();
+  });
+
+  it("pointer: clicking a node selects + manipulates it, empty click clears", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const onNodeSelect = vi.fn();
+    const onNodeManipulate = vi.fn();
+    const renderer = new PrimitiveSceneRenderer(canvas, {
+      onNodeSelect,
+      onNodeManipulate,
+    });
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+
+    // Hit node "b" (name fallback resolves the node id).
+    threeStub.raycastHits.push({
+      object: { name: "b", parent: null } as never,
+      distance: 1,
+      point: {},
+    });
+    clickCanvas(canvas);
+    expect(onNodeSelect).toHaveBeenCalledWith("b");
+    expect(onNodeManipulate).toHaveBeenCalledWith("b");
+
+    // Empty click clears the selection.
+    threeStub.raycastHits.length = 0;
+    clickCanvas(canvas);
+    expect(onNodeSelect).toHaveBeenLastCalledWith(null);
+    renderer.dispose();
+  });
+
+  it("pointer: clicking an edge selects it (edge-path dim) and clears node selection", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const onNodeSelect = vi.fn();
+    const onEdgeSelect = vi.fn();
+    const renderer = new PrimitiveSceneRenderer(canvas, {
+      onNodeSelect,
+      onEdgeSelect,
+    });
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+
+    threeStub.raycastHits.push({
+      object: { name: "edge:r3", parent: null } as never,
+      distance: 1,
+      point: {},
+    });
+    clickCanvas(canvas);
+    expect(onEdgeSelect).toHaveBeenCalledWith("r3");
+    expect(onNodeSelect).not.toHaveBeenCalled();
+
+    // Re-click the same edge: no duplicate callback.
+    clickCanvas(canvas);
+    expect(onEdgeSelect).toHaveBeenCalledTimes(1);
+
+    threeStub.raycastHits.length = 0;
+    clickCanvas(canvas);
+    expect(onEdgeSelect).toHaveBeenLastCalledWith(null);
+    renderer.dispose();
+  });
+
+  it("non-graph scenes ignore pointer picks and keyboard selection", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const onNodeSelect = vi.fn();
+    const onEdgeSelect = vi.fn();
+    const onNodeManipulate = vi.fn();
+    const renderer = new PrimitiveSceneRenderer(canvas, {
+      onNodeSelect,
+      onEdgeSelect,
+      onNodeManipulate,
+    });
+    renderer.setSpec(
+      makeSpec({
+        objects: [{ id: "a", kind: "box" }],
+        relationships: [],
+        animations: [],
+      })
+    );
+    expect(renderer.getGraphMode()).toBe(false);
+    threeStub.raycastHits.push({
+      object: { name: "a", parent: null } as never,
+      distance: 1,
+      point: {},
+    });
+    clickCanvas(canvas);
+    pressKey(canvas, "Enter");
+    expect(onNodeSelect).not.toHaveBeenCalled();
+    expect(onEdgeSelect).not.toHaveBeenCalled();
+    expect(onNodeManipulate).not.toHaveBeenCalled();
+    renderer.dispose();
   });
 });
