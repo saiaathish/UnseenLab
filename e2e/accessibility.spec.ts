@@ -179,7 +179,7 @@ test.describe("320px viewport", () => {
   test("homepage fits without horizontal overflow", async ({ page }) => {
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "Ask for a demonstration" }),
+      page.getByRole("heading", { name: "What topic do you need help with?" }),
     ).toBeVisible();
     const fits = await page.evaluate(
       () =>
