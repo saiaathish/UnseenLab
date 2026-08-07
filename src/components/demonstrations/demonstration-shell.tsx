@@ -95,7 +95,7 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
   const { spec } = props;
 
   return (
-    <div className="mx-auto w-full max-w-[1480px] px-3 pb-10 pt-3 sm:px-5 sm:pt-4">
+    <div className="mx-auto w-full max-w-6xl px-3 pb-10 pt-3 sm:px-5 sm:pt-4">
       <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3">
         <Link
           href="/"
@@ -133,8 +133,8 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
       )}
 
       <main className="mt-4">
-        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <section className="order-2 min-w-0 xl:order-1">
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <section className="order-2 min-w-0 lg:order-1">
             <DemonstrationRepresentationTabs
               spec={spec}
               activeId={props.activeRepresentation}
@@ -177,7 +177,7 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
             </div>
           </section>
 
-          <aside className="order-1 flex min-w-0 flex-col gap-3 xl:order-2 xl:sticky xl:top-3">
+          <aside className="order-1 flex min-w-0 flex-col gap-3 lg:order-2 lg:sticky lg:top-3">
             <DemonstrationPredictionPanel
               prediction={spec.prediction}
               trustLevel={spec.trust.level}
