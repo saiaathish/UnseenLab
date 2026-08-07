@@ -86,37 +86,39 @@ export interface DemonstrationShellProps {
 }
 
 /**
- * The demo page layout: header (title, trust badge, source badge, save
- * status, back link), central stage with controls, prediction panel
- * (right column on desktop, below the stage on mobile), representation tabs,
- * observation, adaptation, limitations and the trial log. On mobile
- * everything stacks with the stage first — never a crushed three-column
- * layout.
+ * Canvas-first learning workspace. Product chrome stays deliberately quiet:
+ * the phenomenon is the dominant surface, prediction remains the gate, and
+ * controls/observations sit around the model as instruments rather than a
+ * dashboard. Renderer and state contracts are unchanged.
  */
 export function DemonstrationShell(props: DemonstrationShellProps) {
   const { spec } = props;
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <Link
-            href="/"
-            className="inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline"
-          >
-            ← Back to home
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold leading-tight">
+    <div className="mx-auto w-full max-w-[1480px] px-3 pb-10 pt-3 sm:px-5 sm:pt-4">
+      <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3">
+        <Link
+          href="/"
+          aria-label="Back to home"
+          className="inline-flex min-h-11 items-center gap-2 rounded-full px-2 text-sm font-medium text-muted-strong transition hover:bg-surface-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          <span aria-hidden="true">←</span>
+          <span className="hidden sm:inline">Home</span>
+        </Link>
+
+        <div className="min-w-0 pt-1 text-center">
+          <h1 className="truncate text-xl font-semibold leading-tight sm:text-2xl">
             {spec.title}
           </h1>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-strong">
+          <p className="mx-auto mt-1 max-w-3xl text-sm leading-5 text-muted-strong">
             {spec.learningObjective}
           </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
             <TrustBadge level={spec.trust.level} />
             <SourceBadge source={props.source} />
           </div>
         </div>
+
         <div className="shrink-0">
           <DemoSaveControl />
         </div>
@@ -130,84 +132,95 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
         />
       )}
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="flex min-w-0 flex-col gap-6">
-          <DemonstrationRepresentationTabs
-            spec={spec}
-            activeId={props.activeRepresentation}
-            reducedMotion={props.reducedMotion}
-            preferredRepresentations={props.preferredRepresentations}
-            readouts={props.readouts}
-            parameters={props.parameters}
-            onRepresentationChange={props.onRepresentationChange}
-            stage={{
-              spec,
-              parameters: props.parameters,
-              playing: props.playing,
-              speed: props.speed,
-              resetSignal: props.resetSignal,
-              reducedMotion: props.reducedMotion,
-              readouts: props.readouts,
-              onReadouts: props.onReadouts,
-              onVisualState: props.onVisualState,
-              visualState: props.visualState ?? null,
-              engineMapping: props.engineMapping ?? null,
-            }}
-          />
-          <DemonstrationControls
-            spec={spec}
-            enabled={props.predictionSubmitted}
-            parameters={props.parameters}
-            playing={props.playing}
-            speed={props.speed}
-            oneVariableMode={props.oneVariableMode}
-            lockedControl={props.lockedControl}
-            onParameterChange={props.onParameterChange}
-            onPlayPause={props.onPlayPause}
-            onSpeedChange={props.onSpeedChange}
-            onReset={props.onReset}
-            onControlTouched={props.onControlTouched}
-            onOneVariableModeChange={props.onOneVariableModeChange}
-          />
+      <main className="mt-4">
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <section className="order-2 min-w-0 xl:order-1">
+            <DemonstrationRepresentationTabs
+              spec={spec}
+              activeId={props.activeRepresentation}
+              reducedMotion={props.reducedMotion}
+              preferredRepresentations={props.preferredRepresentations}
+              readouts={props.readouts}
+              parameters={props.parameters}
+              onRepresentationChange={props.onRepresentationChange}
+              stage={{
+                spec,
+                parameters: props.parameters,
+                playing: props.playing,
+                speed: props.speed,
+                resetSignal: props.resetSignal,
+                reducedMotion: props.reducedMotion,
+                readouts: props.readouts,
+                onReadouts: props.onReadouts,
+                onVisualState: props.onVisualState,
+                visualState: props.visualState ?? null,
+                engineMapping: props.engineMapping ?? null,
+              }}
+            />
+
+            <div className="mt-3">
+              <DemonstrationControls
+                spec={spec}
+                enabled={props.predictionSubmitted}
+                parameters={props.parameters}
+                playing={props.playing}
+                speed={props.speed}
+                oneVariableMode={props.oneVariableMode}
+                lockedControl={props.lockedControl}
+                onParameterChange={props.onParameterChange}
+                onPlayPause={props.onPlayPause}
+                onSpeedChange={props.onSpeedChange}
+                onReset={props.onReset}
+                onControlTouched={props.onControlTouched}
+                onOneVariableModeChange={props.onOneVariableModeChange}
+              />
+            </div>
+          </section>
+
+          <aside className="order-1 flex min-w-0 flex-col gap-3 xl:order-2 xl:sticky xl:top-3">
+            <DemonstrationPredictionPanel
+              prediction={spec.prediction}
+              trustLevel={spec.trust.level}
+              truth={predictionTruth(spec)}
+              submitted={props.predictionSubmitted}
+              predictionIndex={props.predictionIndex}
+              manipulated={props.manipulated}
+              revealed={props.revealed}
+              onSubmit={props.onPredictionSubmit}
+              onReveal={props.onReveal}
+            />
+            <DemonstrationObservationPanel
+              prompts={spec.observationPrompts}
+              selections={props.observationSelections}
+              notes={props.observationNotes}
+              onToggle={props.onObservationToggle}
+              onNotesChange={props.onObservationNotesChange}
+              onSave={props.onSaveObservations}
+              savedNotice={props.observationsSaved}
+            />
+            <DemonstrationAdaptationPanel
+              suggestions={props.adaptationSuggestions}
+              onDecision={props.onAdaptationDecision}
+            />
+          </aside>
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-6">
-          <DemonstrationPredictionPanel
-            prediction={spec.prediction}
-            trustLevel={spec.trust.level}
-            truth={predictionTruth(spec)}
-            submitted={props.predictionSubmitted}
-            predictionIndex={props.predictionIndex}
-            manipulated={props.manipulated}
-            revealed={props.revealed}
-            onSubmit={props.onPredictionSubmit}
-            onReveal={props.onReveal}
-          />
-          <DemonstrationObservationPanel
-            prompts={spec.observationPrompts}
-            selections={props.observationSelections}
-            notes={props.observationNotes}
-            onToggle={props.onObservationToggle}
-            onNotesChange={props.onObservationNotesChange}
-            onSave={props.onSaveObservations}
-            savedNotice={props.observationsSaved}
-          />
-          <DemonstrationAdaptationPanel
-            suggestions={props.adaptationSuggestions}
-            onDecision={props.onAdaptationDecision}
-          />
-        </aside>
-      </div>
-
-      <div className="mt-6 flex flex-col gap-6">
-        <DemonstrationLimitations spec={spec} />
-        <TrialLog
-          spec={spec}
-          trials={props.trials}
-          replay={props.replay}
-          onReplayTrial={props.onReplayTrial}
-        />
-      </div>
+        <details className="group mt-5 border-t border-border/70 pt-4">
+          <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full px-3 text-sm font-medium text-muted-strong hover:bg-surface-raised hover:text-foreground">
+            Notes & history
+            <span aria-hidden="true" className="transition group-open:rotate-180">⌄</span>
+          </summary>
+          <div className="mt-3 flex flex-col gap-4">
+            <DemonstrationLimitations spec={spec} />
+            <TrialLog
+              spec={spec}
+              trials={props.trials}
+              replay={props.replay}
+              onReplayTrial={props.onReplayTrial}
+            />
+          </div>
+        </details>
+      </main>
     </div>
   );
 }
@@ -217,11 +230,11 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
 // ---------------------------------------------------------------------------
 
 function SourceBadge({ source }: { source: DemoSource }) {
-  const label = source === "model" ? "AI-generated" : "Offline catalog";
+  const label = source === "model" ? "AI-composed" : "Offline catalog";
   return (
     <span
       aria-label={`Source: ${label}`}
-      className="inline-flex min-h-8 items-center rounded-full border border-border bg-surface-raised px-3 py-1 text-sm font-medium text-muted-strong"
+      className="inline-flex min-h-7 items-center rounded-full border border-border/70 bg-surface/70 px-2.5 py-1 text-xs font-medium text-muted-strong backdrop-blur-sm"
     >
       {label}
     </span>
@@ -260,7 +273,7 @@ function ReplayBanner({
       ref={bannerRef}
       tabIndex={-1}
       aria-label={`Replay of trial entry ${trial.trial}`}
-      className="mt-6 rounded-xl border border-accent/40 bg-accent-soft/40 p-4"
+      className="mt-4 rounded-2xl border border-accent/35 bg-accent-soft/35 p-4"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
@@ -276,7 +289,7 @@ function ReplayBanner({
         <button
           type="button"
           onClick={onDismiss}
-          className="min-h-11 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-raised"
+          className="min-h-11 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-raised"
         >
           Dismiss replay
         </button>
