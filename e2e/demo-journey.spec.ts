@@ -69,30 +69,40 @@ async function runJourney(
     await page.keyboard.press("ArrowRight");
   await expect(slider).toHaveAttribute("aria-valuenow", cfg.sliderTarget);
 
+  // Lesson rail: prediction committed → interact step (the slider touch above
+  // is the real interaction) → observe step (checkbox + notes; Continue
+  // auto-records the observation trial entry).
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(
+    page.getByRole("region", { name: "Interact" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(
+    page.getByRole("region", { name: "Observe" }),
+  ).toBeVisible();
   await page
     .getByRole("checkbox", { name: /^Watch the (arrows|Speed readout)/ })
     .click();
   await page
     .getByRole("textbox", { name: "Your notes" })
     .fill("Orbit path stretched when I increased launch speed.");
-  await page
-    .getByRole("button", { name: "Save observations to my trial log" })
-    .click();
-  await expect(
-    page.getByText("Observations recorded to your trial log."),
-  ).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
 
+  // Save status lives in AboutThisModel (provenance demoted, not deleted).
+  await page.getByRole("button", { name: "About this model" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved on this device")).toBeVisible();
+  await page.keyboard.press("Escape");
 
+  // Reload: the session persists; the prediction gate restores from the trial
+  // log, the controls stay unlocked, and the trial log lives in the dialog.
   await page.reload();
-  await expect(page.getByText("Saved on this device")).toBeVisible();
   await expect(page.getByText("Prediction locked in")).toBeVisible();
   await expect(page.getByText("Predict first")).toHaveCount(0);
   await expect(slider).toBeEnabled();
-  await expect(page.getByText(/Show \(2\)/)).toBeVisible();
 
-  await page.locator("summary").filter({ hasText: "Trial log" }).click();
+  await page.getByRole("button", { name: "About this model" }).click();
+  await expect(page.getByText("Saved on this device")).toBeVisible();
   await expect(
     page.getByText(/Prediction: .*more elliptical/),
   ).toBeVisible();
@@ -104,6 +114,7 @@ async function runJourney(
     .getByRole("button", { name: "Restore these parameters" })
     .nth(1)
     .click();
+  await page.keyboard.press("Escape");
   await expect(page.getByText(/Parameters restored from entry 2/)).toBeVisible();
   await expect(slider).toHaveAttribute("aria-valuenow", cfg.sliderTarget);
 }
