@@ -71,7 +71,7 @@ export function DemonstrationObservationPanel({
         htmlFor="demo-observation-notes"
         className="mt-3 block text-xs font-medium text-muted-strong"
       >
-        One thing you noticed
+        Your notes <span className="font-normal text-muted">— one thing you noticed</span>
       </label>
       <textarea
         id="demo-observation-notes"
@@ -87,11 +87,11 @@ export function DemonstrationObservationPanel({
         onClick={onSave}
         className="mt-3 w-full rounded-full border border-border bg-surface-raised/70 px-4 py-2.5 text-sm font-semibold transition hover:bg-surface-raised"
       >
-        Record observation
+        Save observations to my trial log
       </button>
       {savedNotice && (
         <p role="status" className="mt-2 text-sm text-ok">
-          Observation recorded.
+          Observations recorded to your trial log.
         </p>
       )}
     </section>
