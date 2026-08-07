@@ -318,7 +318,7 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
     },
     observationPrompts: [
       "Compare the before and after groups and list what changed.",
-      "Describe what the arrow between them represents.",
+      "Describe what the relationship between the two states represents.",
     ],
   },
   field_relationship: {
@@ -630,7 +630,7 @@ export function buildConceptualSpec(
     },
     observationPrompts: scene.observationPrompts.map((prompt) => ({ prompt })),
     representations: [
-      { id: "rep_stage_3d", kind: "stage_3d", label: "3D stage" },
+      { id: "rep_stage_3d", kind: "stage_3d", label: "3D Model" },
       { id: "rep_diagram", kind: "diagram", label: "Diagram" },
       { id: "rep_text", kind: "text_sequence", label: "Text sequence" },
     ],

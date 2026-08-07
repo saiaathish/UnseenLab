@@ -382,7 +382,7 @@ function ControlRow({
       // separate DOM control — it is intentionally rendered as a note.
       body = (
         <p className="text-sm leading-6 text-muted">
-          {control.label} — drag directly on the stage.
+          {control.label} - drag directly on the stage.
         </p>
       );
       break;
