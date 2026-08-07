@@ -1,0 +1,657 @@
+/**
+ * demo-spec-schema.ts — the strict Zod mirror of DemoSpecV1.
+ *
+ * Every object level rejects unknown keys (`.strict()`), enums come only from
+ * the contract catalogs, numbers are finite and range-bounded, and the hard
+ * SPEC_LIMITS caps are enforced. Strings are bounded; URLs and executable
+ * code markers are rejected everywhere. Cross-field invariants (declared
+ * limits, group nesting depth, control target resolution) live in the root
+ * superRefine.
+ *
+ * This module is validation-only: it never edits the contract
+ * (src/demonstrations/spec/demo-spec.ts) and never reads secrets.
+ */
+
+import { z } from "zod";
+import {
+  TRUST_LEVELS,
+  VERIFIED_ENGINE_IDS,
+  PRIMITIVE_KINDS,
+  RELATIONSHIP_OPERATORS,
+  ANIMATION_OPERATORS,
+  CONTROL_TYPES,
+  SPEC_LIMITS,
+  RENDERER_KINDS,
+  FALLBACK_KINDS,
+} from "@/demonstrations/spec/demo-spec";
+import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
+
+// ---------------------------------------------------------------------------
+// Exported policy constants (consumers may tune their own layers with these)
+// ---------------------------------------------------------------------------
+
+/** Particle cap for low-power (mobile) renderers; desktop cap is
+ * SPEC_LIMITS.maxParticlesDesktop (1500). */
+export const MOBILE_MAX_PARTICLES = SPEC_LIMITS.maxParticlesMobile;
+
+/** Maximum nesting depth (objects + arrays) the validator accepts. */
+export const MAX_SPEC_DEPTH = 8;
+
+/** Global sanity envelope for any number in the spec. */
+export const GLOBAL_NUM_MIN = -1_000_000_000;
+export const GLOBAL_NUM_MAX = 1_000_000_000;
+
+// ---------------------------------------------------------------------------
+// String bounds
+// ---------------------------------------------------------------------------
+
+const MAX_ID_CHARS = 64;
+const MAX_TITLE_CHARS = 120;
+const MAX_OBJECTIVE_CHARS = 400;
+/**
+ * userQuery mirrors the intent-layer input cap (500 chars, see
+ * src/demonstrations/generation/intent/normalize.ts). It must never be
+ * smaller than that cap, or every long-but-legal query would produce a
+ * self-invalidating spec.
+ */
+const MAX_QUERY_CHARS = 500;
+const MAX_LIMITATION_CHARS = 240;
+const MAX_LABEL_CHARS = 120;
+const MAX_EVENT_TITLE_CHARS = 120;
+const MAX_ENGINE_VERSION_CHARS = 32;
+const MAX_COLOR_CHARS = 32;
+const MAX_UNIT_CHARS = 16;
+const MAX_GENERATED_AT_CHARS = 64;
+const MAX_MODEL_CHARS = 64;
+const MAX_OPTION_CHARS = 240;
+
+/** Long-form "explanation blocks": timeline event descriptions and
+ * prediction/observation prompts are capped at SPEC_LIMITS.maxExplanationChars
+ * (800). */
+const MAX_EXPLANATION_CHARS = SPEC_LIMITS.maxExplanationChars;
+
+const idString = z.string().min(1).max(MAX_ID_CHARS);
+const labelString = z.string().min(1).max(MAX_LABEL_CHARS);
+const colorString = z.string().min(1).max(MAX_COLOR_CHARS);
+const explanationString = z.string().min(1).max(MAX_EXPLANATION_CHARS);
+const engineVersionString = z.string().min(1).max(MAX_ENGINE_VERSION_CHARS);
+
+// ---------------------------------------------------------------------------
+// Numbers
+// ---------------------------------------------------------------------------
+
+const boundedNumber = z
+  .number()
+  .finite()
+  .min(GLOBAL_NUM_MIN)
+  .max(GLOBAL_NUM_MAX);
+
+/** step must be finite, positive and sane. */
+const positiveStep = z.number().finite().positive().max(GLOBAL_NUM_MAX);
+
+const vec3Schema = z
+  .object({
+    x: boundedNumber,
+    y: boundedNumber,
+    z: boundedNumber,
+  })
+  .strict();
+
+// ---------------------------------------------------------------------------
+// Sub-specs
+// ---------------------------------------------------------------------------
+
+const engineParameterSchema = z
+  .object({
+    key: idString,
+    label: labelString,
+    min: boundedNumber,
+    max: boundedNumber,
+    step: positiveStep,
+    value: boundedNumber,
+    unit: z.string().min(1).max(MAX_UNIT_CHARS).optional(),
+  })
+  .strict()
+  .superRefine((p, ctx) => {
+    if (p.min > p.max) {
+      ctx.addIssue({ code: "custom", message: "unsafe_value:param" });
+    }
+    if (p.value < p.min || p.value > p.max) {
+      ctx.addIssue({ code: "custom", message: "unsafe_value:param" });
+    }
+  });
+
+const readoutSchema = z
+  .object({
+    key: idString,
+    label: labelString,
+    format: z.enum(["fixed2", "fixed3", "percent", "raw"]),
+  })
+  .strict();
+
+const simulationSchema = z
+  .object({
+    engineId: z.enum(VERIFIED_ENGINE_IDS),
+    engineVersion: engineVersionString,
+    seed: z.number().finite().int().min(0).max(2 ** 32 - 1),
+    parameters: z.array(engineParameterSchema).min(1).max(20),
+    readouts: z.array(readoutSchema).min(1).max(20),
+  })
+  .strict();
+
+const primitiveObjectSchema = z
+  .object({
+    id: idString,
+    kind: z.enum(PRIMITIVE_KINDS),
+    label: labelString.optional(),
+    position: vec3Schema.optional(),
+    size: z.number().finite().min(0.001).max(GLOBAL_NUM_MAX).optional(),
+    color: colorString.optional(),
+    trailPoints: z
+      .number()
+      .finite()
+      .int()
+      .min(0)
+      .max(SPEC_LIMITS.maxTrailPoints)
+      .optional(),
+    particleCount: z
+      .number()
+      .finite()
+      .int()
+      .min(0)
+      .max(SPEC_LIMITS.maxParticlesDesktop)
+      .optional(),
+    children: z.array(idString).min(1).max(SPEC_LIMITS.maxObjects).optional(),
+  })
+  .strict();
+
+const relationshipSchema = z
+  .object({
+    id: idString,
+    type: z.enum(RELATIONSHIP_OPERATORS),
+    from: idString,
+    to: idString,
+    label: labelString.optional(),
+  })
+  .strict();
+
+const animationSchema = z
+  .object({
+    id: idString,
+    target: idString,
+    operator: z.enum(ANIMATION_OPERATORS),
+    speed: z.number().finite().min(0.001).max(100).optional(),
+    delayMs: z.number().finite().min(0).max(3_600_000).optional(),
+    axis: z.enum(["x", "y", "z"]).optional(),
+    amplitude: z.number().finite().min(0.001).max(1_000_000).optional(),
+  })
+  .strict();
+
+const timelineEventSchema = z
+  .object({
+    title: z.string().min(1).max(MAX_EVENT_TITLE_CHARS),
+    description: explanationString,
+    startMs: z.number().finite().min(0).max(3_600_000),
+    durationMs: z.number().finite().min(0).max(3_600_000),
+  })
+  .strict();
+
+const timelineSchema = z
+  .object({
+    events: z
+      .array(timelineEventSchema)
+      .min(1)
+      .max(SPEC_LIMITS.maxTimelineEvents),
+  })
+  .strict();
+
+const controlTargetSchema = z.discriminatedUnion("kind", [
+  z
+    .object({ kind: z.literal("parameter"), ref: idString })
+    .strict(),
+  z
+    .object({ kind: z.literal("animation"), ref: idString })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("scene"),
+      ref: z.enum(["speed", "paused", "reset", "play_pause"]),
+    })
+    .strict(),
+]);
+
+const controlSchema = z
+  .object({
+    id: idString,
+    type: z.enum(CONTROL_TYPES),
+    label: labelString,
+    target: controlTargetSchema,
+    min: boundedNumber.optional(),
+    max: boundedNumber.optional(),
+    step: positiveStep.optional(),
+    options: z.array(labelString).min(1).max(8).optional(),
+    defaultValue: z.union([labelString, boundedNumber]).optional(),
+  })
+  .strict()
+  .superRefine((c, ctx) => {
+    if (
+      c.min !== undefined &&
+      c.max !== undefined &&
+      c.min > c.max
+    ) {
+      ctx.addIssue({ code: "custom", message: "unsafe_value:control" });
+    }
+    if (c.min !== undefined && c.max !== undefined && c.step !== undefined) {
+      // A step that cannot be reached from min with at most 10k increments
+      // suggests a malformed control; the renderer would loop forever.
+      if ((c.max - c.min) / c.step > 10_000) {
+        ctx.addIssue({ code: "custom", message: "unsafe_value:control" });
+      }
+    }
+  });
+
+const predictionSchema = z
+  .object({
+    prompt: explanationString,
+    options: z
+      .array(z.string().min(1).max(MAX_OPTION_CHARS))
+      .min(1)
+      .max(SPEC_LIMITS.maxPredictionOptions),
+    correctIndex: z
+      .number()
+      .int()
+      .min(0)
+      .max(SPEC_LIMITS.maxPredictionOptions - 1)
+      .optional(),
+  })
+  .strict();
+
+const observationPromptSchema = z
+  .object({
+    prompt: explanationString,
+  })
+  .strict();
+
+const representationSchema = z
+  .object({
+    id: idString,
+    kind: z.enum([
+      "stage_2d",
+      "stage_3d",
+      "diagram",
+      "graph",
+      "table",
+      "timeline",
+      "text_sequence",
+      "causal_map",
+    ]),
+    label: labelString,
+  })
+  .strict();
+
+const adaptationContextSchema = z
+  .object({
+    allowed: z.boolean(),
+    oneVariableMode: z.boolean(),
+  })
+  .strict();
+
+const provenanceSchema = z
+  .object({
+    source: z.enum([
+      "curated_engine",
+      "template_composition",
+      "model_generated_spec",
+    ]),
+    templateIds: z.array(idString).max(10),
+    generatedAt: z.string().min(1).max(MAX_GENERATED_AT_CHARS),
+    model: z.string().min(1).max(MAX_MODEL_CHARS).optional(),
+  })
+  .strict();
+
+const scene3dSchema = z
+  .object({
+    objects: z.array(primitiveObjectSchema).max(SPEC_LIMITS.maxObjects),
+    relationships: z
+      .array(relationshipSchema)
+      .max(SPEC_LIMITS.maxRelationships),
+    // Local bound (no SPEC_LIMITS entry): animations are capped at 100 and
+    // the whole spec is capped at 256 KB anyway.
+    animations: z.array(animationSchema).max(100),
+  })
+  .strict();
+
+const trustSchema = z
+  .object({
+    level: z.enum(TRUST_LEVELS),
+    label: labelString,
+    limitations: z
+      .array(z.string().min(1).max(MAX_LIMITATION_CHARS))
+      .max(4),
+    engineId: z.enum(VERIFIED_ENGINE_IDS).optional(),
+    engineVersion: engineVersionString.optional(),
+  })
+  .strict();
+
+const rendererSchema = z
+  .object({
+    kind: z.enum(RENDERER_KINDS),
+    fallbackKind: z.enum(FALLBACK_KINDS),
+    preferredAspectRatio: z.number().finite().min(0.1).max(10),
+    background: z.enum(["dark", "light"]),
+  })
+  .strict();
+
+const limitsSchema = z
+  .object({
+    // All four budgets may be 0: a spec with no objects/particles/timeline/
+    // controls legitimately declares a zero budget (the model does this).
+    // The sanitizer raises declared limits to actual usage when inconsistent,
+    // and clamps over-declared budgets to the hard caps.
+    maxObjects: z.number().finite().int().min(0).max(SPEC_LIMITS.maxObjects),
+    maxParticles: z
+      .number()
+      .finite()
+      .int()
+      .min(0)
+      .max(SPEC_LIMITS.maxParticlesDesktop),
+    maxTimelineEvents: z
+      .number()
+      .finite()
+      .int()
+      .min(0)
+      .max(SPEC_LIMITS.maxTimelineEvents),
+    maxControls: z
+      .number()
+      .finite()
+      .int()
+      .min(0)
+      .max(SPEC_LIMITS.maxControls),
+  })
+  .strict();
+
+// ---------------------------------------------------------------------------
+// URL / executable-code scan helpers (also used by sanitize + science policy)
+// ---------------------------------------------------------------------------
+
+const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+/** True if the string looks like it carries a URL: known dangerous schemes,
+ * "www.", a scheme:// prefix, or a protocol-relative "//" prefix. */
+export function isUnsafeUrlString(value: string): boolean {
+  const lower = value.toLowerCase();
+  if (
+    lower.includes("http://") ||
+    lower.includes("https://") ||
+    lower.includes("data:") ||
+    lower.includes("javascript:") ||
+    lower.includes("www.")
+  ) {
+    return true;
+  }
+  if (URL_SCHEME_RE.test(lower)) return true;
+  if (lower.startsWith("//")) return true;
+  return false;
+}
+
+/**
+ * Model-authored executable code markers. Matching is case- and
+ * whitespace-insensitive, with word boundaries so legitimate words
+ * ("evaluate(", "functionality") never false-positive. Also covers event
+ * handler attributes, inline scripts and innerHTML sinks — anything that
+ * would be executable if it ever reached a DOM sink.
+ */
+export function isExecutableCodeString(value: string): boolean {
+  const compact = value.replace(/\s+/g, " ");
+  const patterns: RegExp[] = [
+    /\beval\s*\(/i,
+    /\bnew\s+Function\s*\(/i,
+    /\bonclick\s*=/i,
+    /\bonerror\s*=/i,
+    /\bonload\s*=/i,
+    /\bonmouseover\s*=/i,
+    /<script/i,
+    /\bsrcdoc\s*=/i,
+    /dangerouslySetInnerHTML/i,
+  ];
+  return patterns.some((re) => re.test(compact));
+}
+
+/** Returns the first string (in DFS order) matching the predicate, or null. */
+export function findUnsafeString(
+  node: unknown,
+  predicate: (s: string) => boolean
+): string | null {
+  if (typeof node === "string") {
+    return predicate(node) ? node : null;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findUnsafeString(item, predicate);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  if (node !== null && typeof node === "object") {
+    for (const key of Object.keys(node)) {
+      const found = findUnsafeString(
+        (node as Record<string, unknown>)[key],
+        predicate
+      );
+      if (found !== null) return found;
+    }
+  }
+  return null;
+}
+
+/** True if any own key anywhere is a prototype-pollution vector. */
+export function hasPollutionKey(node: unknown): boolean {
+  if (Array.isArray(node)) {
+    return node.some((item) => hasPollutionKey(item));
+  }
+  if (node !== null && typeof node === "object") {
+    const record = node as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      if (key === "__proto__" || key === "constructor" || key === "prototype") {
+        return true;
+      }
+      if (hasPollutionKey(record[key])) return true;
+    }
+  }
+  return false;
+}
+
+/** Maximum object/array nesting depth. Recursion is bounded by
+ * `limit` so a hostile deeply-nested input cannot overflow the stack. */
+export function measureDepth(node: unknown, limit: number, depth = 0): number {
+  if (depth > limit) return depth;
+  if (Array.isArray(node)) {
+    let max = depth + 1;
+    for (const item of node) {
+      max = Math.max(max, measureDepth(item, limit, depth + 1));
+    }
+    return max;
+  }
+  if (node !== null && typeof node === "object") {
+    let max = depth + 1;
+    for (const key of Object.keys(node)) {
+      max = Math.max(
+        max,
+        measureDepth((node as Record<string, unknown>)[key], limit, depth + 1)
+      );
+    }
+    return max;
+  }
+  return depth;
+}
+
+// ---------------------------------------------------------------------------
+// Root-level cross-field invariants
+// ---------------------------------------------------------------------------
+
+function addIssue(
+  ctx: z.RefinementCtx,
+  message: string,
+  path: (string | number)[]
+): void {
+  ctx.addIssue({ code: "custom", message, path });
+}
+
+/** Longest chain of nested "group" objects. Cycles count as infinite. */
+function maxGroupDepth(spec: DemoSpecV1): number {
+  const objects = spec.scene3d?.objects ?? [];
+  const kindById = new Map(objects.map((o) => [o.id, o.kind]));
+  const memo = new Map<string, number>();
+  const depthOf = (id: string, seen: Set<string>): number => {
+    if (kindById.get(id) !== "group") return 0;
+    const cached = memo.get(id);
+    if (cached !== undefined) return cached;
+    if (seen.has(id)) return Number.POSITIVE_INFINITY; // cycle
+    seen.add(id);
+    const object = objects.find((o) => o.id === id);
+    let maxChild = 0;
+    for (const childId of object?.children ?? []) {
+      maxChild = Math.max(maxChild, depthOf(childId, seen));
+    }
+    seen.delete(id);
+    memo.set(id, 1 + maxChild);
+    return 1 + maxChild;
+  };
+  let max = 0;
+  for (const object of objects) {
+    if (object.kind === "group") {
+      max = Math.max(max, depthOf(object.id, new Set()));
+    }
+  }
+  return max;
+}
+
+const demoSpecBaseSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    id: idString,
+    generationId: idString,
+    userQuery: z.string().min(1).max(MAX_QUERY_CHARS),
+    normalizedConcept: z.string().min(1).max(MAX_EXPLANATION_CHARS),
+    title: z.string().min(1).max(MAX_TITLE_CHARS),
+    learningObjective: z.string().min(1).max(MAX_OBJECTIVE_CHARS),
+
+    trust: trustSchema,
+    renderer: rendererSchema,
+
+    simulation: simulationSchema.optional(),
+    scene3d: scene3dSchema.optional(),
+    timeline: timelineSchema.optional(),
+
+    controls: z.array(controlSchema).max(SPEC_LIMITS.maxControls),
+    prediction: predictionSchema,
+    observationPrompts: z
+      .array(observationPromptSchema)
+      .max(SPEC_LIMITS.maxObservationPrompts),
+    representations: z
+      .array(representationSchema)
+      .max(SPEC_LIMITS.maxRepresentations),
+    adaptationContext: adaptationContextSchema,
+
+    provenance: provenanceSchema,
+
+    limits: limitsSchema,
+  })
+  .strict();
+
+/** The strict DemoSpecV1 schema. Use sanitizeDemoSpec/validateDemoSpec for
+ * the repair-aware pipeline; use this directly only when clamping has
+ * already happened. */
+export const demoSpecSchema: z.ZodType<DemoSpecV1> = demoSpecBaseSchema
+  .superRefine((spec, ctx) => {
+    const objectCount = spec.scene3d?.objects.length ?? 0;
+    const relationshipCount = spec.scene3d?.relationships.length ?? 0;
+    const timelineCount = spec.timeline?.events.length ?? 0;
+    const labelCount =
+      spec.scene3d?.objects.filter((o) => o.kind === "label").length ?? 0;
+    const maxParticleCount = Math.max(
+      0,
+      ...(spec.scene3d?.objects.map((o) => o.particleCount ?? 0) ?? [0])
+    );
+
+    // Declared limits are a promise: actual counts never exceed them, and
+    // declared limits never exceed the hard SPEC_LIMITS caps.
+    if (objectCount > spec.limits.maxObjects) {
+      addIssue(ctx, "count_exceeded:objects", ["scene3d", "objects"]);
+    }
+    if (timelineCount > spec.limits.maxTimelineEvents) {
+      addIssue(ctx, "count_exceeded:timeline_events", ["timeline", "events"]);
+    }
+    if (spec.controls.length > spec.limits.maxControls) {
+      addIssue(ctx, "count_exceeded:controls", ["controls"]);
+    }
+    if (maxParticleCount > spec.limits.maxParticles) {
+      addIssue(ctx, "count_exceeded:particles", ["limits", "maxParticles"]);
+    }
+    if (labelCount > SPEC_LIMITS.maxLabels) {
+      addIssue(ctx, "count_exceeded:labels", ["scene3d", "objects"]);
+    }
+    if (relationshipCount > SPEC_LIMITS.maxRelationships) {
+      addIssue(ctx, "count_exceeded:relationships", [
+        "scene3d",
+        "relationships",
+      ]);
+    }
+
+    // Group nesting is capped at SPEC_LIMITS.maxGroupDepth.
+    if (maxGroupDepth(spec) > SPEC_LIMITS.maxGroupDepth) {
+      addIssue(ctx, "count_exceeded:group_depth", ["scene3d", "objects"]);
+    }
+
+    // Control targets must resolve against the spec's own catalogs.
+    const parameterKeys = new Set(
+      spec.simulation?.parameters.map((p) => p.key) ?? []
+    );
+    const animationIds = new Set(
+      spec.scene3d?.animations.map((a) => a.id) ?? []
+    );
+    for (const control of spec.controls) {
+      if (control.target.kind === "parameter" && !parameterKeys.has(control.target.ref)) {
+        addIssue(ctx, "invalid_control_target", ["controls"]);
+      }
+      if (control.target.kind === "animation" && !animationIds.has(control.target.ref)) {
+        addIssue(ctx, "invalid_control_target", ["controls"]);
+      }
+    }
+
+    // correctIndex must point inside the option list.
+    if (
+      spec.prediction.correctIndex !== undefined &&
+      spec.prediction.correctIndex >= spec.prediction.options.length
+    ) {
+      addIssue(ctx, "invalid_prediction_index", ["prediction"]);
+    }
+
+    // Trust block must agree with the simulation block when both are present.
+    if (
+      spec.simulation &&
+      spec.trust.engineId !== undefined &&
+      spec.trust.engineId !== spec.simulation.engineId
+    ) {
+      addIssue(ctx, "inconsistent_engine", ["trust"]);
+    }
+    if (
+      spec.simulation &&
+      spec.trust.engineVersion !== undefined &&
+      spec.trust.engineVersion !== spec.simulation.engineVersion
+    ) {
+      addIssue(ctx, "inconsistent_engine", ["trust"]);
+    }
+
+    // Backstop URL / executable-code scan on every string in the parsed spec
+    // (the sanitizer also scans the raw tree, so this is defense in depth for
+    // direct demoSpecSchema consumers).
+    const unsafeUrl = findUnsafeString(spec as unknown, isUnsafeUrlString);
+    if (unsafeUrl !== null) {
+      addIssue(ctx, "unsafe_value:url", []);
+    }
+    const unsafeCode = findUnsafeString(spec as unknown, isExecutableCodeString);
+    if (unsafeCode !== null) {
+      addIssue(ctx, "unsafe_value:code", []);
+    }
+  });

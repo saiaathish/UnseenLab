@@ -1,0 +1,457 @@
+/**
+ * scene-graph.ts — PURE spec -> validated scene graph conversion for the
+ * primitive-3d namespace. Never touches Three.js, the DOM or WebGL: fully
+ * unit-testable.
+ *
+ * Responsibilities (defence in depth on top of the upstream sanitizer):
+ *  - apply SPEC_LIMITS: objects<=80, labels<=25, relationships<=100,
+ *    group depth<=4, trailPoints<=300, particleCount<=1500 desktop / 500 mobile
+ *  - clamp colors to a safe allowlist (hex or basic named colors); anything
+ *    else (e.g. "url(...)", "var(--x)") is rejected and the default applied
+ *  - reject unknown primitive kinds (node dropped)
+ *  - resolve relationship from/to refs (missing ref -> reason, relation dropped)
+ *  - validate animation target refs and clamp operator parameters
+ *  - derive orbit centers/radii and follow_path waypoints
+ *
+ * All reasons are safe codes; offending content is never echoed.
+ */
+
+import {
+  PRIMITIVE_KINDS,
+  RELATIONSHIP_OPERATORS,
+  SPEC_LIMITS,
+} from "@/demonstrations/spec/demo-spec";
+import type {
+  AnimationSpec,
+  DemoSpecV1,
+  PrimitiveObjectSpec,
+  RelationshipOperator,
+  RelationshipSpec,
+  Vec3,
+} from "@/demonstrations/spec/demo-spec";
+import { validateOperatorParams } from "./operators";
+import type {
+  SceneGraph,
+  SceneGraphAnimation,
+  SceneGraphLimits,
+  SceneGraphNode,
+  SceneGraphRelationship,
+} from "./types";
+
+export interface BuildSceneGraphOptions {
+  /** Mobile: particle budget drops from 1500 to 500. */
+  mobile?: boolean;
+}
+
+/** Renderer default color, applied when a color is missing or rejected. */
+export const DEFAULT_COLOR = "#5b8def";
+
+const COLOR_HEX =
+  /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
+/** Basic safe named colors (opaque only; no url(), var(), gradients...). */
+const NAMED_COLORS = new Set([
+  "white", "black", "red", "green", "blue", "yellow", "cyan", "magenta",
+  "orange", "purple", "pink", "brown", "gray", "grey", "silver", "gold",
+  "teal", "navy", "olive", "lime", "maroon", "coral", "indigo", "violet",
+  "turquoise", "aqua", "fuchsia", "tan", "khaki", "plum", "orchid",
+]);
+
+export function isSafeColor(value: string): boolean {
+  const trimmed = value.trim();
+  return COLOR_HEX.test(trimmed) || NAMED_COLORS.has(trimmed.toLowerCase());
+}
+
+const POSITION_BOUND = 500;
+const SIZE_MIN = 0.001;
+const SIZE_MAX = 100;
+
+function clampNum(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function finOr(value: number | undefined, fallback: number): number {
+  return value === undefined || !Number.isFinite(value) ? fallback : value;
+}
+
+function vec3OrDefault(
+  position: Vec3 | undefined,
+  reasons: string[]
+): Vec3 {
+  if (!position) return { x: 0, y: 0, z: 0 };
+  let clamped = false;
+  const out: Vec3 = { x: 0, y: 0, z: 0 };
+  for (const key of ["x", "y", "z"] as const) {
+    const v = finOr(position[key], 0);
+    const c = clampNum(v, -POSITION_BOUND, POSITION_BOUND);
+    if (c !== v) clamped = true;
+    out[key] = c;
+  }
+  if (clamped) reasons.push("position_clamped");
+  return out;
+}
+
+function emptySceneGraph(spec: DemoSpecV1): SceneGraph {
+  return {
+    nodes: [],
+    relationships: [],
+    animations: [],
+    background: spec.renderer?.background ?? "dark",
+    limits: computeLimits(spec, false),
+  };
+}
+
+function computeLimits(spec: DemoSpecV1, mobile: boolean): SceneGraphLimits {
+  const declared = spec.limits ?? {
+    maxObjects: SPEC_LIMITS.maxObjects,
+    maxParticles: SPEC_LIMITS.maxParticlesDesktop,
+    maxTimelineEvents: SPEC_LIMITS.maxTimelineEvents,
+    maxControls: SPEC_LIMITS.maxControls,
+  };
+  return {
+    maxObjects: Math.min(
+      SPEC_LIMITS.maxObjects,
+      Math.max(0, declared.maxObjects)
+    ),
+    particleLimit: Math.min(
+      mobile ? SPEC_LIMITS.maxParticlesMobile : SPEC_LIMITS.maxParticlesDesktop,
+      Math.max(0, declared.maxParticles)
+    ),
+    maxTrailPoints: SPEC_LIMITS.maxTrailPoints,
+    maxLabels: SPEC_LIMITS.maxLabels,
+    maxRelationships: SPEC_LIMITS.maxRelationships,
+    maxGroupDepth: SPEC_LIMITS.maxGroupDepth,
+  };
+}
+
+const POSITION_OF = (map: Map<string, SceneGraphNode>, id: string): Vec3 => {
+  const node = map.get(id);
+  return node ? node.position : { x: 0, y: 0, z: 0 };
+};
+
+function distance(a: Vec3, b: Vec3): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+/**
+ * Derive follow_path waypoints by walking flows_to/transfers_to chains from
+ * the target node, then closing the loop back to the start. Returns null when
+ * no meaningful path exists (< 2 distinct points).
+ */
+function derivePath(
+  targetId: string,
+  relationships: SceneGraphRelationship[],
+  byId: Map<string, SceneGraphNode>
+): Vec3[] | null {
+  const EDGE_TYPES = new Set<RelationshipOperator>([
+    "flows_to",
+    "transfers_to",
+  ]);
+  const path: Vec3[] = [POSITION_OF(byId, targetId)];
+  const visited = new Set<string>([targetId]);
+  let current = targetId;
+  for (let i = 0; i < 32; i++) {
+    const next = relationships.find(
+      (r) => EDGE_TYPES.has(r.type) && r.from === current && !visited.has(r.to)
+    );
+    if (!next) break;
+    visited.add(next.to);
+    path.push(POSITION_OF(byId, next.to));
+    current = next.to;
+  }
+  // Close the loop so the object returns to its start point.
+  path.push(POSITION_OF(byId, targetId));
+  // Drop consecutive duplicate points; need >= 2 distinct points.
+  const distinct: Vec3[] = [];
+  for (const p of path) {
+    const last = distinct[distinct.length - 1];
+    if (!last || distance(last, p) > 1e-6) distinct.push(p);
+  }
+  return distinct.length >= 2 ? distinct : null;
+}
+
+/**
+ * Convert spec.scene3d into a validated, bounded SceneGraph.
+ * Never throws: malformed input yields reasons and a safe partial graph.
+ */
+export function buildSceneGraph(
+  spec: DemoSpecV1,
+  options?: BuildSceneGraphOptions
+): { graph: SceneGraph; reasons: string[] } {
+  const reasons: string[] = [];
+  const mobile = !!options?.mobile;
+  const scene3d = spec.scene3d;
+  if (!scene3d || !Array.isArray(scene3d.objects)) {
+    return { graph: emptySceneGraph(spec), reasons: [...reasons, "no_scene3d"] };
+  }
+
+  const limits = computeLimits(spec, mobile);
+
+  // -------------------------------------------------------------------------
+  // 1. Objects: cap, kind check, color clamp, per-field clamps
+  // -------------------------------------------------------------------------
+  let objects = scene3d.objects;
+  if (objects.length > limits.maxObjects) {
+    reasons.push("objects_capped");
+    objects = objects.slice(0, limits.maxObjects);
+  }
+
+  const nodes: SceneGraphNode[] = [];
+  const byId = new Map<string, SceneGraphNode>();
+  for (const obj of objects) {
+    if (!obj || typeof obj !== "object") {
+      reasons.push("invalid_object");
+      continue;
+    }
+    const kind = (obj as { kind?: unknown }).kind as string;
+    if (
+      typeof kind !== "string" ||
+      !(PRIMITIVE_KINDS as readonly string[]).includes(kind)
+    ) {
+      reasons.push("unknown_primitive_kind");
+      continue;
+    }
+    const id = typeof obj.id === "string" ? obj.id : String(obj.id);
+    const unsafeColor =
+      typeof obj.color === "string" && !isSafeColor(obj.color);
+    const color = unsafeColor
+      ? DEFAULT_COLOR
+      : typeof obj.color === "string"
+        ? obj.color.trim()
+        : DEFAULT_COLOR;
+    if (unsafeColor) reasons.push("color_rejected");
+
+    let trailPoints = 0;
+    if (typeof obj.trailPoints === "number") {
+      const clamped = Math.round(
+        clampNum(obj.trailPoints, 0, limits.maxTrailPoints)
+      );
+      if (clamped !== obj.trailPoints) reasons.push("trail_points_clamped");
+      trailPoints = clamped;
+    }
+
+    let particleCount = 0;
+    if (typeof obj.particleCount === "number") {
+      const clamped = Math.round(clampNum(obj.particleCount, 0, limits.particleLimit));
+      if (clamped !== obj.particleCount) reasons.push("particle_count_clamped");
+      particleCount = clamped;
+    }
+
+    const size = clampNum(
+      finOr((obj as PrimitiveObjectSpec).size, 1),
+      SIZE_MIN,
+      SIZE_MAX
+    );
+    if (
+      typeof (obj as PrimitiveObjectSpec).size === "number" &&
+      size !== (obj as PrimitiveObjectSpec).size
+    )
+      reasons.push("size_clamped");
+
+    const node: SceneGraphNode = {
+      id,
+      kind: kind as SceneGraphNode["kind"],
+      label: (obj as PrimitiveObjectSpec).label,
+      position: vec3OrDefault((obj as PrimitiveObjectSpec).position, reasons),
+      size,
+      color,
+      children: [],
+      trailPoints,
+      particleCount,
+      depth: 1,
+    };
+    nodes.push(node);
+    byId.set(node.id, node);
+  }
+
+  // -------------------------------------------------------------------------
+  // 2. Label budget (maxLabels)
+  // -------------------------------------------------------------------------
+  let labelCount = 0;
+  for (const node of nodes) {
+    if (node.label !== undefined) {
+      if (labelCount >= limits.maxLabels) {
+        reasons.push("label_cap_exceeded");
+        node.label = undefined;
+      } else {
+        labelCount++;
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 3. Groups: validate child refs, cap nesting depth (flatten over-deep)
+  // -------------------------------------------------------------------------
+  const groupDecls = new Map<string, string[]>();
+  const parentOf = new Map<string, string>();
+  for (const obj of objects) {
+    if (
+      (obj as PrimitiveObjectSpec).kind === "group" &&
+      Array.isArray((obj as PrimitiveObjectSpec).children)
+    ) {
+      const id = typeof obj.id === "string" ? obj.id : String(obj.id);
+      const children = (obj as PrimitiveObjectSpec).children!.map(String);
+      groupDecls.set(id, children);
+      for (const c of children) parentOf.set(c, id);
+    }
+  }
+
+  const depth = new Map<string, number>();
+  const queue: Array<{ id: string; d: number }> = [];
+  for (const n of nodes) if (!parentOf.has(n.id)) queue.push({ id: n.id, d: 1 });
+  for (let qi = 0; qi < queue.length; qi++) {
+    const { id, d } = queue[qi];
+    if (depth.has(id)) continue;
+    depth.set(id, d);
+    for (const childId of groupDecls.get(id) ?? []) {
+      queue.push({ id: childId, d: d + 1 });
+    }
+  }
+
+  const flattened = new Set<string>();
+  for (const n of nodes) {
+    const d = depth.get(n.id);
+    if (d === undefined) {
+      // Only reachable via a cycle: treat as a root, detach it.
+      flattened.add(n.id);
+      reasons.push("group_cycle_flattened");
+    } else if (d > limits.maxGroupDepth) {
+      flattened.add(n.id);
+      reasons.push("group_depth_flattened");
+    }
+  }
+
+  for (const n of nodes) {
+    if (n.kind !== "group") continue;
+    const declared = groupDecls.get(n.id) ?? [];
+    for (const childId of declared) {
+      if (!byId.has(childId)) {
+        reasons.push("missing_child_ref");
+        continue;
+      }
+      if (flattened.has(childId)) continue;
+      n.children.push(childId);
+    }
+  }
+
+  // Recompute depth over the flattened tree.
+  const childSet = new Set<string>();
+  for (const n of nodes) for (const c of n.children) childSet.add(c);
+  const roots = nodes.filter((n) => !childSet.has(n.id)).map((n) => ({ id: n.id, d: 1 }));
+  const depth2 = new Map<string, number>();
+  const q2: Array<{ id: string; d: number }> = [...roots];
+  for (let qi = 0; qi < q2.length; qi++) {
+    const { id, d } = q2[qi];
+    if (depth2.has(id)) continue;
+    depth2.set(id, d);
+    for (const childId of byId.get(id)?.children ?? []) {
+      q2.push({ id: childId, d: d + 1 });
+    }
+  }
+  for (const n of nodes) n.depth = depth2.get(n.id) ?? 1;
+
+  // -------------------------------------------------------------------------
+  // 4. Relationships: type check + ref resolution + cap
+  // -------------------------------------------------------------------------
+  const relationships: SceneGraphRelationship[] = [];
+  for (const rel of scene3d.relationships ?? []) {
+    if (relationships.length >= limits.maxRelationships) {
+      reasons.push("relationships_capped");
+      break;
+    }
+    if (!rel || typeof rel !== "object") {
+      reasons.push("invalid_relationship");
+      continue;
+    }
+    const r = rel as RelationshipSpec;
+    if (!(RELATIONSHIP_OPERATORS as readonly string[]).includes(r.type)) {
+      reasons.push("unknown_relationship_type");
+      continue;
+    }
+    if (!byId.has(String(r.from)) || !byId.has(String(r.to))) {
+      reasons.push("relationship_ref_missing");
+      continue;
+    }
+    relationships.push({
+      id: String(r.id),
+      type: r.type,
+      from: String(r.from),
+      to: String(r.to),
+      label: r.label,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // 5. Animations: target refs, operator validation, derived enrichments
+  // -------------------------------------------------------------------------
+  const animations: SceneGraphAnimation[] = [];
+  for (const anim of scene3d.animations ?? []) {
+    if (!anim || typeof anim !== "object") {
+      reasons.push("invalid_animation");
+      continue;
+    }
+    const a = anim as AnimationSpec;
+    if (!byId.has(String(a.target))) {
+      reasons.push("animation_target_missing");
+      continue;
+    }
+    const validation = validateOperatorParams({
+      operator: a.operator,
+      speed: a.speed,
+      delayMs: a.delayMs,
+      axis: a.axis,
+      amplitude: a.amplitude,
+    });
+    if (!validation.ok) {
+      reasons.push(...validation.reasons);
+      continue;
+    }
+    reasons.push(...validation.reasons);
+
+    const graphAnim: SceneGraphAnimation = {
+      id: String(a.id),
+      target: String(a.target),
+      operator: a.operator,
+      speed: validation.params.speed,
+      delayMs: validation.params.delayMs,
+      axis: validation.params.axis,
+      amplitude: validation.params.amplitude,
+    };
+
+    if (a.operator === "orbit") {
+      const rel = relationships.find(
+        (r) => r.type === "orbits" && r.from === graphAnim.target
+      );
+      const center = rel
+        ? POSITION_OF(byId, rel.to)
+        : { x: 0, y: 0, z: 0 };
+      const radius = rel
+        ? distance(POSITION_OF(byId, graphAnim.target), center)
+        : distance(POSITION_OF(byId, graphAnim.target), { x: 0, y: 0, z: 0 });
+      graphAnim.orbitCenter = center;
+      graphAnim.orbitRadius = Math.max(0.001, radius);
+    }
+
+    if (a.operator === "follow_path") {
+      const path = derivePath(graphAnim.target, relationships, byId);
+      if (!path) {
+        reasons.push("follow_path_needs_path");
+        continue;
+      }
+      graphAnim.path = path;
+    }
+
+    animations.push(graphAnim);
+  }
+
+  const graph: SceneGraph = {
+    nodes,
+    relationships,
+    animations,
+    background: spec.renderer?.background ?? "dark",
+    limits,
+  };
+
+  return { graph, reasons: [...new Set(reasons)] };
+}

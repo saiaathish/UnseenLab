@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NUCLEAR_CHAIN_REACTION_EXPERIMENT } from "@/domain/experiments";
 import { ExperimentShell } from "@/components/lab/experiment-shell";
@@ -72,15 +72,20 @@ describe("run guard and progress feedback", () => {
       screen.getByText(/interpreting your evidence/i),
     ).toBeInTheDocument();
 
-    // Completing the interpretation appends exactly one trial.
+    // Completing the interpretation appends exactly one trial. The
+    // localStorage write happens in an effect after the state resolves, so
+    // await it (fixes an interleaving flake where the assertion raced the
+    // write and saw the pre-write snapshot).
     proposeState.pending = false;
     proposeState.resolve?.([]);
     expect(await screen.findByText(/state summary:/i)).toBeInTheDocument();
 
-    const stored = JSON.parse(
-      window.localStorage.getItem(EVIDENCE_KEY) ?? "null",
-    );
-    expect(stored.trials).toHaveLength(1);
-    expect(stored.predictions).toHaveLength(1);
+    await waitFor(() => {
+      const stored = JSON.parse(
+        window.localStorage.getItem(EVIDENCE_KEY) ?? "null",
+      );
+      expect(stored.trials).toHaveLength(1);
+      expect(stored.predictions).toHaveLength(1);
+    });
   });
 });

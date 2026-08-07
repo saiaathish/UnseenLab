@@ -10,6 +10,10 @@ verbatim observation grids).
 **Honesty rule:** fill in nothing that did not happen. All templates stay empty
 until a real session runs. Never fabricate results.
 
+**Generative demo session (judge Gate 5/6):** use
+`participant-test-extension.md` instead. Mandated task text, verbatim:
+"Ask UnseenLab to help you understand why planets remain in orbit."
+
 **Never collect:** email, account info, Firebase tokens, Mongo credentials, or
 any diagnosis. The export has no such fields; do not write them into the notes.
 

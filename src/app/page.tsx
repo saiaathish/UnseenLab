@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { AppHeader } from "@/components/navigation/app-header";
+import { AskDemoSection } from "@/components/demonstrations/ask-demo-form";
 import { TopicInputHero } from "@/components/ui/topic-input-hero";
+import { isGenerativeDemosEnabled } from "@/demonstrations/feature-flag";
 import {
   NUCLEAR_CHAIN_REACTION_EXPERIMENT,
   PLANNED_EXPERIMENTS,
@@ -26,11 +28,14 @@ const steps = [
 ];
 
 export default function Home() {
+  const generativeDemosEnabled = isGenerativeDemosEnabled();
+
   return (
     <main id="main-content" className="bg-[#070b14] text-white">
       <AppHeader />
       <TopicInputHero />
       <div className="mx-auto max-w-5xl px-4 sm:px-6">
+        {generativeDemosEnabled ? <AskDemoSection /> : null}
         <section
           id="how-it-works"
           aria-labelledby="how-heading"

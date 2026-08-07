@@ -57,3 +57,8 @@ next-env.d.ts
 
 # ai benchmark results
 benchmark-results-*
+
+# Local scratch / reference material (never published)
+.dstl/
+dstl/
+.zcode/
