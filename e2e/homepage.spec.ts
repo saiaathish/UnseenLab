@@ -1,17 +1,9 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Homepage ask-to-demonstration flow, browser level:
- * - keyboard-only path: a STEM topic generates a demonstration and enters it
- * - the Newton's-second-law acceptance: generated experience, never the
- *   legacy nuclear fallback, never "unsupported"
- * - breadth examples are the single entrance; the legacy nuclear hero and
- *   the nuclear homepage sections are gone
- * - ambiguous topics get one clarifying question (recovery loop)
- * - reduced-motion rendering (no canvas)
- * - mobile layout: no horizontal overflow, menu + anchor navigation
- * - the single auth entry point (header Sign in -> dialog) and the guest
- *   path staying auth-free
+ * Homepage ask-to-demonstration flow, browser level. The restored visual hero
+ * deliberately uses the old CTA/chip vocabulary, but every submission still
+ * enters the generative pipeline rather than the deleted routeTopic router.
  */
 
 test("keyboard-only: a supported topic generates and enters its demonstration", async ({
@@ -26,7 +18,6 @@ test("keyboard-only: a supported topic generates and enters its demonstration", 
   await input.pressSequentially("nuclear chain reaction");
   await page.keyboard.press("Enter");
 
-  // The generative pipeline produces a verified-simulation demonstration.
   await expect(page.getByText("Your demonstration is ready")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("Verified simulation")).toBeVisible();
 
@@ -34,7 +25,6 @@ test("keyboard-only: a supported topic generates and enters its demonstration", 
   await expect(
     page.getByRole("heading", { name: "Nuclear Chain Reaction", level: 1 }),
   ).toBeVisible();
-  // In the guided flow the prediction step is the first interactive step.
   await expect(
     page.getByRole("button", { name: "Submit prediction" }),
   ).toBeVisible();
@@ -48,9 +38,8 @@ test("acceptance: Newton's second law generates an experience — never the nucl
   await page
     .getByRole("textbox", { name: "What topic do you need help with?" })
     .fill("second law of newton");
-  await page.getByRole("button", { name: "Generate demonstration" }).click();
+  await page.getByRole("button", { name: "Find my learning path" }).click();
 
-  // NOT the legacy nuclear fallback: no "Start this lab", no lab redirect.
   await expect(page.getByText("Your demonstration is ready")).toBeVisible({ timeout: 20_000 });
   await expect(
     page.getByText("Gravity & Orbits", { exact: false }),
@@ -60,51 +49,50 @@ test("acceptance: Newton's second law generates an experience — never the nucl
   await expect(
     page.getByRole("heading", { name: "Newton's Second Law", level: 1 }),
   ).toBeVisible();
-  // Honest trust tier + the force/mass science the acceptance requires.
-  // One-variable mode keeps the focus control (force) and holds mass
-  // constant; the prediction gate asks about force/acceleration (the exact
-  // F/m relationship is pinned deterministically in the unit acceptance
-  // test — the hosted model's wording varies per generation).
   await expect(page.getByLabel("Trust: Verified simulation")).toBeVisible();
   await expect(page.getByRole("slider", { name: "Applied force" })).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Predict first" }),
   ).toBeVisible();
   await expect(page.getByRole("radio").first()).toBeVisible();
-  // No nuclear content anywhere in the generated experience.
   await expect(
     page.getByText("Nuclear Chain Reaction", { exact: false }),
   ).toHaveCount(0);
 });
 
-test("the legacy nuclear hero and homepage sections are gone", async ({ page }) => {
+test("restored old-style hero still uses the generative entrance", async ({ page }) => {
   await page.goto("/");
 
   await expect(
     page.getByRole("heading", { name: "What topic do you need help with?", level: 1 }),
   ).toBeVisible();
   await expect(
-    page.getByRole("region", { name: "Find a learning path" }),
-  ).toHaveCount(0);
+    page.getByText(
+      "Describe the idea that feels unclear. We’ll guide you to the closest interactive learning experience.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Find my learning path" }),
+  ).toBeVisible();
+
+  // The three old visual suggestion chips are back, but the old nuclear-only
+  // result card/available-lab funnel remains deleted.
+  await expect(
+    page.getByRole("button", { name: "Nuclear chain reactions" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Why reactions accelerate" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "How absorbers change reactions" }),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Available lab" }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Nuclear chain reactions" }),
-  ).toHaveCount(0);
-  await expect(
     page.getByRole("link", { name: "Start this lab" }),
   ).toHaveCount(0);
-
-  // Breadth examples are the entrance.
-  await expect(
-    page.getByRole("button", {
-      name: "What does Newton's second law say about force and mass?",
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "How does photosynthesis transfer energy?" }),
-  ).toBeVisible();
+  await expect(page.getByText("Or try an example:")).toHaveCount(0);
 });
 
 test("ambiguous topic offers a clarifying question and preserves the input", async ({
@@ -115,23 +103,18 @@ test("ambiguous topic offers a clarifying question and preserves the input", asy
   await page
     .getByRole("textbox", { name: "What topic do you need help with?" })
     .fill("orbital motion");
-  await page.getByRole("button", { name: "Generate demonstration" }).click();
+  await page.getByRole("button", { name: "Find my learning path" }).click();
 
-  // The intent layer asks one short question instead of guessing.
   await expect(page.getByText("Your demonstration is ready")).not.toBeVisible({ timeout: 20_000 });
   await expect(
     page.getByRole("textbox", { name: "Your answer" }),
   ).toBeVisible();
 
-  // Answering the clarify question resubmits with the appended detail and
-  // lands on a demonstration.
   await page
     .getByRole("textbox", { name: "Your answer" })
     .fill("planets around the sun");
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByText("Your demonstration is ready")).toBeVisible({ timeout: 20_000 });
-
-  // The path never surfaces an error to the learner.
   await expect(page.getByText(/Error|Failed|Invalid topic/i)).toHaveCount(0);
 });
 
@@ -146,7 +129,6 @@ test.describe("reduced motion", () => {
       page.getByRole("heading", { name: "What topic do you need help with?" }),
     ).toBeVisible();
 
-    // No animated hero canvas under reduced motion.
     await expect(page.locator("canvas")).toHaveCount(0);
 
     const input = page.getByRole("textbox", {
@@ -167,8 +149,6 @@ test.describe("mobile viewport", () => {
   }) => {
     await page.goto("/");
 
-    // No horizontal overflow: scrollWidth must not exceed clientWidth (1px
-    // tolerance for fractional rounding).
     const fits = await page.evaluate(
       () =>
         document.documentElement.scrollWidth <=
@@ -196,14 +176,11 @@ test("homepage auth entry opens the dialog; guest path stays auth-free", async (
 }) => {
   await page.goto("/");
 
-  // No login/signup *pages or links* — the only auth surface is the dialog
-  // trigger in the header.
   await expect(
     page.getByRole("link", { name: /log ?in|sign ?up/i }),
   ).toHaveCount(0);
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
-  // The header "Sign in" opens the single auth dialog with mandated copy.
   await page.getByRole("button", { name: "Sign in" }).first().click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(
@@ -213,7 +190,6 @@ test("homepage auth entry opens the dialog; guest path stays auth-free", async (
     page.getByRole("button", { name: "Continue with Google" }),
   ).toBeVisible();
 
-  // Guest dismissal keeps the ask flow working with no auth wall.
   await page.getByRole("button", { name: "Try without an account" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page
