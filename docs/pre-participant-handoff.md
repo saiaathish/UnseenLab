@@ -1,22 +1,22 @@
 # UnseenLab — Participant Session Handoff (one page)
 
-Audit verdict: **PARTICIPANT_READY** (2026-08-06; closure head `168ecd3`, canonical preview deployment `dpl_465ggSSHfaFNPC6iQfRZ6k7SaSUk`; verdict originally recorded at head `00d2943`, deployment `5780793198`).
+Audit verdict: **PARTICIPANT_READY** (2026-08-06; closure head `583f7f9` — homepage generative-hero fix `7505141`+`5c5101c`+`583f7f9`, canonical preview deployment `dpl_B5KqtzE8Ch8v4VVkidMeCT`; earlier heads `168ecd3`/`00d2943` historical).
 
 ## 1. The exact session URL
 
 ```
-https://unseen-jra0d5mjk-sai-aathish-karthiks-projects.vercel.app
+https://unseen-ptzrpuio3-sai-aathish-karthiks-projects.vercel.app
 ```
 
 - Behind Vercel SSO → **open it in a browser where you are already signed in to Vercel** (the facilitator's session). The learner uses the product only; no accounts, no keys, no terminal.
-- Commit: `168ecd3ed2122cf7a46bf8cafb904dfd7dc91176` (PR #10 draft head; code frozen until the participant produces evidence).
-- Superseded preview (historical, 089aef0-era): https://unseen-k4nudwiwu-sai-aathish-karthiks-projects.vercel.app
+- Commit: `583f7f9` (PR #10 draft head; product code frozen until the participant produces evidence).
+- Superseded previews (historical): https://unseen-jra0d5mjk-sai-aathish-karthiks-projects.vercel.app (168ecd3-era) and https://unseen-k4nudwiwu-sai-aathish-karthiks-projects.vercel.app (089aef0-era)
 
 ## 2. The task (verbatim)
 
 > "Ask UnseenLab to help you understand why planets remain in orbit."
 
-On screen: the same idea is one click — the example button **"Show why planets stay in orbit."**
+On screen: the same idea is one click — the example button **"Show why planets stay in orbit."** (The homepage is now a single generative ask hero; any STEM topic — e.g. Newton's second law — generates its own demonstration.)
 
 ## 3. Session flow (15–20 min)
 
