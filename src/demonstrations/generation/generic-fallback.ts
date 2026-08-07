@@ -11,6 +11,9 @@
  *   `conceptual_demonstration` trust: no simulation and no quantitative claim.
  * - If the provider is missing/fails/returns an invalid spec, a deterministic
  *   conceptual template is emitted instead of a dead-end unsupported card.
+ * - Generic model specs are normalized to a first-class interactive primitive
+ *   stage. A conceptual spec may never declare the Lumina simulation renderer
+ *   when it has no simulation payload.
  * - Safety, prompt-injection, non-English, and empty-input decisions remain in
  *   the primary intent layer and never reach this fallback.
  */
@@ -112,6 +115,65 @@ function offlineGeneric(
     ),
     source: "offline",
     reason,
+  };
+}
+
+/**
+ * Canonical rendering contract for arbitrary-topic conceptual demos.
+ *
+ * Hosted model output is allowed to author the qualitative scene, but it does
+ * not own the runtime surface. A Level-2 spec has no simulation payload, so a
+ * model-declared `lumina_2d` renderer is structurally impossible to execute
+ * and previously produced the learner-facing "simulation could not be
+ * started" fallback card.
+ *
+ * We deterministically normalize a renderable scene to the primitive stage:
+ * - no scientific fields or relationships are changed;
+ * - no trust escalation occurs;
+ * - the primary tab becomes an interactive model backed by the approved
+ *   primitive renderer;
+ * - diagram + guided-steps views remain available without WebGL.
+ *
+ * A model spec with no scene is rejected here and replaced by the curated
+ * deterministic conceptual template rather than shipping a hollow lab.
+ */
+export function normalizeGenericConceptualSpec(
+  spec: DemoSpecV1,
+): DemoSpecV1 | null {
+  if (
+    spec.trust.level !== "conceptual_demonstration" ||
+    spec.simulation !== undefined ||
+    !spec.scene3d ||
+    spec.scene3d.objects.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    ...spec,
+    renderer: {
+      ...spec.renderer,
+      kind: "primitive_3d",
+      fallbackKind: "accessible_diagram",
+      preferredAspectRatio: 4 / 3,
+    },
+    representations: [
+      {
+        id: "rep_interactive_model",
+        kind: "stage_3d",
+        label: "Interactive model",
+      },
+      {
+        id: "rep_diagram",
+        kind: "diagram",
+        label: "Diagram",
+      },
+      {
+        id: "rep_guided_steps",
+        kind: "text_sequence",
+        label: "Guided steps",
+      },
+    ],
   };
 }
 
@@ -233,14 +295,20 @@ export async function generateGenericConceptDemo(
       return offlineGeneric(normalizedQuery, prefs, "generic_trust_mismatch");
     }
 
+    const normalizedSpec = normalizeGenericConceptualSpec(sanitized.spec);
+    if (!normalizedSpec) {
+      return offlineGeneric(normalizedQuery, prefs, "generic_unrenderable_scene");
+    }
+
     console.info("[generation] generic_fallback", {
       outcome: "spec",
       source: "model",
       repaired: sanitized.status === "repaired",
+      renderer: normalizedSpec.renderer.kind,
     });
 
     return {
-      spec: sanitized.spec,
+      spec: normalizedSpec,
       source: "model",
       reason:
         sanitized.status === "repaired"
