@@ -446,7 +446,7 @@ export function buildEngineSpec(
   // data table of parameters + readouts, and a text sequence. A stage_3d or
   // diagram tab without scene3d content would be a dead end.
   const representations: DemoSpecV1["representations"] = [
-    { id: "rep_stage_2d", kind: "stage_2d", label: "2D stage" },
+    { id: "rep_stage_2d", kind: "stage_2d", label: "Model" },
     { id: "rep_table", kind: "table", label: "Table" },
     { id: "rep_text", kind: "text_sequence", label: "Text sequence" },
   ];

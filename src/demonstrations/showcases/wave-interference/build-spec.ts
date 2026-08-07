@@ -226,11 +226,11 @@ const OBSERVATION_PROMPTS = [
 ];
 
 const REPRESENTATIONS: DemoSpecV1["representations"] = [
-  { id: "rep-stage-3d", kind: "stage_3d", label: "3D wave stage" },
-  { id: "rep-stage-2d", kind: "stage_2d", label: "Top-down ripple view" },
-  { id: "rep-graph", kind: "graph", label: "Intensity profile" },
-  { id: "rep-timeline", kind: "timeline", label: "What to watch" },
-  { id: "rep-text", kind: "text_sequence", label: "Step-by-step explanation" },
+  { id: "rep-stage-3d", kind: "stage_3d", label: "3D Model" },
+  { id: "rep-stage-2d", kind: "stage_2d", label: "2D Model" },
+  { id: "rep-graph", kind: "graph", label: "Graph" },
+  { id: "rep-timeline", kind: "timeline", label: "Timeline" },
+  { id: "rep-text", kind: "text_sequence", label: "Text sequence" },
 ];
 
 const TIMELINE = {
