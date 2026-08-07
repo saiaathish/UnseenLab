@@ -205,13 +205,18 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
           </aside>
         </div>
 
-        <details className="group mt-5 border-t border-border/70 pt-4">
-          <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full px-3 text-sm font-medium text-muted-strong hover:bg-surface-raised hover:text-foreground">
-            Notes & history
-            <span aria-hidden="true" className="transition group-open:rotate-180">⌄</span>
-          </summary>
-          <div className="mt-3 flex flex-col gap-4">
-            <DemonstrationLimitations spec={spec} />
+        <div className="mt-5 border-t border-border/70 pt-4">
+          <details className="group">
+            <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full px-3 text-sm font-medium text-muted-strong hover:bg-surface-raised hover:text-foreground">
+              Notes & limitations
+              <span aria-hidden="true" className="transition group-open:rotate-180">⌄</span>
+            </summary>
+            <div className="mt-3">
+              <DemonstrationLimitations spec={spec} />
+            </div>
+          </details>
+
+          <div className="mt-3">
             <TrialLog
               spec={spec}
               trials={props.trials}
@@ -219,7 +224,7 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
               onReplayTrial={props.onReplayTrial}
             />
           </div>
-        </details>
+        </div>
       </main>
     </div>
   );
