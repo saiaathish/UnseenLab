@@ -23,21 +23,18 @@ import {
 } from "./generation-progress";
 import { GenerationError, type GenerationErrorKind } from "./generation-error";
 
-/** The ask flow prepends its own stages to the canonical generation stages. */
 const PENDING_STAGES: readonly string[] = [
   "Understanding your request…",
   "Building your demonstration…",
   ...DEMO_GENERATION_STAGES,
 ];
 
-/** Old hero suggestion chips, retained as visual examples only. */
 const HERO_EXAMPLES: readonly string[] = [
   "Nuclear chain reactions",
   "Why reactions accelerate",
   "How absorbers change reactions",
 ];
 
-/** Broad recovery suggestions used only when generation cannot satisfy a request. */
 const RECOVERY_EXAMPLES: readonly string[] = [
   "Show why planets stay in orbit.",
   "What does Newton's second law say about force and mass?",
@@ -92,6 +89,10 @@ type Phase =
     }
   | { kind: "error"; errorKind: GenerationErrorKind; message: string; query: string };
 
+interface AskDemoFormProps {
+  ctaLabel?: string;
+}
+
 function readPreferences() {
   return loadLocalSession().preferences;
 }
@@ -114,7 +115,9 @@ function reducedMotionRequested(): boolean {
   }
 }
 
-export function AskDemoForm() {
+export function AskDemoForm({
+  ctaLabel = "Generate demonstration",
+}: AskDemoFormProps = {}) {
   const [value, setValue] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
@@ -141,9 +144,6 @@ export function AskDemoForm() {
     }
   }, [phase.kind]);
 
-  // Recover the original hero's typewriter placeholder. It runs only while
-  // the empty field is idle and unfocused, and is completely disabled when
-  // reduced motion is requested.
   useEffect(() => {
     const shouldAnimate =
       phase.kind === "idle" && !focused && value.length === 0;
@@ -410,7 +410,7 @@ export function AskDemoForm() {
                 type="submit"
                 className="inline-flex items-center gap-2 rounded-xl bg-teal-500 px-6 py-3.5 font-semibold text-[#070b14] transition-colors hover:bg-teal-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60"
               >
-                Find my learning path
+                {ctaLabel}
                 <span aria-hidden="true">→</span>
               </button>
             </div>
@@ -483,10 +483,6 @@ export function AskDemoForm() {
   );
 }
 
-/**
- * Secondary embedding surface retained for internal/test usage. The homepage
- * itself uses LandingHero as the only public entrance.
- */
 export function AskDemoSection() {
   return (
     <section
