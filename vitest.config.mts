@@ -14,9 +14,14 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.{ts,tsx}"],
     globals: false,
+    deps: {
+      // zod 4.x is pure ESM; interopDefault keeps named imports working
+      // through the SSR transform under real Node (Bun's node shim masks
+      // this on the default PATH).
+      interopDefault: true,
+    },
     server: {
       deps: {
-        interopDefault: true,
         inline: ["zod"],
       },
     },
