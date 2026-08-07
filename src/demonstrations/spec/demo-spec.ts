@@ -39,6 +39,7 @@ export const VERIFIED_ENGINE_IDS = [
   "reaction_diffusion",
   "cellular_automaton",
   "rc_circuit",
+  "newton_second_law",
   "nuclear_chain_reaction",
 ] as const;
 
@@ -530,6 +531,19 @@ export const ENGINE_CATALOG: Record<VerifiedEngineId, EngineCapability> = {
     ],
     parameterKeys: ["initialNeutrons", "absorber", "multiplication"],
     readoutKeys: ["neutronCount", "generation"],
+    supports3D: false,
+    supports2D: true,
+  },
+  newton_second_law: {
+    id: "newton_second_law",
+    title: "Newton's Second Law",
+    domain: "mechanics",
+    keywords: [
+      "newton's second law", "second law of newton", "newton second law",
+      "f = ma", "force and mass", "force and acceleration", "newtons law",
+    ],
+    parameterKeys: ["force", "mass"],
+    readoutKeys: ["acceleration", "velocity", "distance"],
     supports3D: false,
     supports2D: true,
   },

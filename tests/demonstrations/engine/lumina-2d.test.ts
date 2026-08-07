@@ -33,6 +33,7 @@ const CATALOG_IDS: VerifiedEngineId[] = [
   "rc_circuit",
   "reaction_diffusion",
   "cellular_automaton",
+  "newton_second_law",
 ];
 
 function makeCtx(w = 800, h = 600): SimContext {

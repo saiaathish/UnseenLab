@@ -49,6 +49,7 @@ const ENGINE_QUERIES: Record<VerifiedEngineId, string> = {
   reaction_diffusion: "reaction diffusion turing patterns",
   cellular_automaton: "game of life glider",
   nuclear_chain_reaction: "nuclear chain reaction fission neutrons",
+  newton_second_law: "What does Newton's second law say about force and mass?",
 };
 
 function normalizeProvenance(spec: DemoSpecV1): DemoSpecV1 {

@@ -407,4 +407,25 @@ export const LEARNING_RELATIONSHIPS: Record<
       priority: 4,
     },
   ],
+
+  // -------------------------------------------------------------------------
+  // newton_second_law — force ↔ acceleration; mass ↔ acceleration (inverse).
+  // -------------------------------------------------------------------------
+  newton_second_law: [
+    {
+      phrases: ["force", "push", "pull", "applied force", "net force", "stronger push"],
+      keys: ["force"],
+      priority: 1,
+    },
+    {
+      phrases: ["mass", "heavier", "lighter", "heavy", "inertia"],
+      keys: ["mass"],
+      priority: 2,
+    },
+    {
+      phrases: ["accelerate", "acceleration", "speed up", "f = ma", "second law"],
+      keys: ["force", "mass"],
+      priority: 3,
+    },
+  ],
 };

@@ -633,4 +633,36 @@ export const ENGINE_CONTROL_CATALOG: Record<
       priority: 3,
     },
   ],
+
+  // -------------------------------------------------------------------------
+  // newton_second_law — canonical source: engine-builder.ts ENGINE_PARAMETERS
+  // (force, mass) + lumina-2d engines/newton-second-law.ts META bounds.
+  // a = F/m is the engine-owned physics; the learner controls force and mass.
+  // -------------------------------------------------------------------------
+  newton_second_law: [
+    {
+      key: "force",
+      label: "Applied force",
+      description: "Sets the constant horizontal push on the block; doubling the force doubles the acceleration.",
+      controlType: "slider",
+      min: 1,
+      max: 50,
+      step: 1,
+      defaultValue: 10,
+      learningRelationships: ["force", "newton", "second law", "acceleration", "push"],
+      priority: 1,
+    },
+    {
+      key: "mass",
+      label: "Mass",
+      description: "Sets the block's mass; doubling the mass halves the acceleration for the same force.",
+      controlType: "slider",
+      min: 0.5,
+      max: 10,
+      step: 0.5,
+      defaultValue: 2,
+      learningRelationships: ["mass", "newton", "second law", "acceleration", "inertia"],
+      priority: 2,
+    },
+  ],
 };
