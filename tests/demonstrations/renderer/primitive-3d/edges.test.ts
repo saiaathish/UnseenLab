@@ -24,6 +24,7 @@ import {
   ROUTE_MAX_WAYPOINTS,
   SHAFT_GAP,
   REASON_EDGE_DEGENERATE,
+  REASON_EDGE_HEAD_SUPPRESSED,
   REASON_EDGE_LABEL_DENSE,
   REASON_EDGE_LABEL_SKIPPED,
   REASON_EDGE_UNROUTABLE,
@@ -466,6 +467,137 @@ describe("arrowhead + shaft span (I4 / F-08)", () => {
     updateEdge(edge);
     expect(edge.shaft.attribute.array[0]).toBeCloseTo(-2.5 + 0.52, 5);
     expect(edge.shaft.attribute.array[3]).toBeCloseTo(2.5 - 0.86, 5);
+  });
+
+  it("transforms_into renders a legacy 3D edge with a real arrowhead (MUST-FIX 2, tpl-before-after-01)", () => {
+    // before_after's b1→b2: non-graph (groups + boxes), so the edge goes
+    // through the legacy path — which previously drew only flows_to /
+    // transfers_to, leaving transforms_into invisible in 3D while the 2D
+    // surface drew it. Now it renders with the same arrowhead semantics as
+    // flows_to (parity with the 2D surface, which draws every relationship).
+    const graph = graphFromSpec({
+      objects: [
+        { id: "b1", kind: "box", position: { x: -2.5, y: 0, z: 0 }, size: 1 },
+        { id: "b2", kind: "box", position: { x: 2.5, y: 0, z: 0 }, size: 1 },
+      ],
+      relationships: [
+        { id: "r1", type: "transforms_into", from: "b1", to: "b2", label: "transforms into" },
+      ],
+      animations: [],
+    });
+    const ctx = edgeContext(graph);
+    buildFlowEdge(
+      ctx,
+      runtimeNode("b1", { x: -2.5, y: 0, z: 0 }, 1),
+      runtimeNode("b2", { x: 2.5, y: 0, z: 0 }, 1),
+      graph.relationships[0]
+    );
+    expect(ctx.edges).toHaveLength(1);
+    expect(ctx.reasons).not.toContain(REASON_EDGE_HEAD_SUPPRESSED); // 5u edge
+    const edge = ctx.edges[0];
+    updateEdge(edge);
+    // Arrowhead present and oriented like flows_to (head base at r_t + len).
+    expect(edge.head).not.toBeNull();
+    expect(edge.head!.mesh.position.x).toBeCloseTo(2.5 - (0.5 + 0.18), 5);
+    // Shaft surface-to-surface (r_s + SHAFT_GAP → r_t + len base).
+    expect(edge.shaft.attribute.array[0]).toBeCloseTo(-2.5 + 0.52, 5);
+    expect(edge.shaft.attribute.array[3]).toBeCloseTo(2.5 - 0.86, 5);
+  });
+
+  it("short edges suppress the arrowhead with a loud reason (MUST-FIX 5, red-team W7)", () => {
+    // L = 1.0 < r_s + r_t + headLen = 0.5 + 0.5 + 0.36 → the head would embed
+    // the source. The renderer degrades by simplification: no arrowhead,
+    // REASON_EDGE_HEAD_SUPPRESSED fires once at build. The bare surfaces need
+    // r_s + r_t + 2·SHAFT_GAP = 1.04, so at L = 1.0 nothing is drawn at all —
+    // never an inverted stub; at L = 1.1 the shaft spans surface-to-surface.
+    const graph = graphFromSpec({
+      objects: [
+        { id: "a", kind: "process_node", position: { x: 0, y: 0, z: 0 }, size: 1 },
+        { id: "b", kind: "process_node", position: { x: 1, y: 0, z: 0 }, size: 1 },
+      ],
+      relationships: [{ id: "r1", type: "causes", from: "a", to: "b" }],
+      animations: [],
+    });
+    const ctx = edgeContext(graph);
+    buildGraphEdge(
+      ctx,
+      runtimeNode("a", { x: 0, y: 0, z: 0 }, 1),
+      runtimeNode("b", { x: 1, y: 0, z: 0 }, 1),
+      {
+        id: "r1",
+        type: "causes",
+        label: "causes",
+        fromId: "a",
+        toId: "b",
+        from: { x: 0, y: 0, z: 0 },
+        to: { x: 1, y: 0, z: 0 },
+        inhibits: false,
+      }
+    );
+    expect(ctx.reasons).toContain(REASON_EDGE_HEAD_SUPPRESSED);
+    const edge = ctx.edges[0];
+    expect(edge.headSuppressed).toBe(true);
+    expect(edge.head).toBeNull(); // degraded away — never a head inside a body
+    updateEdge(edge);
+    // 1.0 < 1.04: even the bare surfaces cannot span the gap → draw nothing.
+    expect(edge.shaft.geometry.drawRange.count).toBe(0);
+    expect(edge.shaft.line.visible).toBe(false);
+
+    // L = 1.1 (just above the 1.04 floor): the shaft runs surface-to-surface
+    // (SHAFT_GAP at both ends), still no head.
+    const ctx2 = edgeContext(graph);
+    buildGraphEdge(
+      ctx2,
+      runtimeNode("a", { x: 0, y: 0, z: 0 }, 1),
+      runtimeNode("b", { x: 1.1, y: 0, z: 0 }, 1),
+      {
+        id: "r1",
+        type: "causes",
+        label: "causes",
+        fromId: "a",
+        toId: "b",
+        from: { x: 0, y: 0, z: 0 },
+        to: { x: 1.1, y: 0, z: 0 },
+        inhibits: false,
+      }
+    );
+    expect(ctx2.reasons).toContain(REASON_EDGE_HEAD_SUPPRESSED);
+    const edge2 = ctx2.edges[0];
+    updateEdge(edge2);
+    expect(edge2.shaft.attribute.array[0]).toBeCloseTo(0.5 + SHAFT_GAP, 5);
+    expect(edge2.shaft.attribute.array[3]).toBeCloseTo(1.1 - (0.5 + SHAFT_GAP), 5);
+    expect(edge2.shaft.line.visible).toBe(true);
+  });
+
+  it("short LEGACY flow edges suppress the arrowhead too (MUST-FIX 5, non-graph scenes)", () => {
+    // buildFlowEdge (before_after / box scenes) got the same short-edge
+    // degrade as derived graph edges: L = 0.9 < r_s + r_t + headLen = 1.36
+    // → no head mesh, REASON_EDGE_HEAD_SUPPRESSED fires once at build.
+    const graph = graphFromSpec({
+      objects: [
+        { id: "a", kind: "box", position: { x: 0, y: 0, z: 0 }, size: 1 },
+        { id: "b", kind: "box", position: { x: 0.9, y: 0, z: 0 }, size: 1 },
+      ],
+      relationships: [
+        { id: "r1", type: "flows_to", from: "a", to: "b", label: "transforms into" },
+      ],
+      animations: [],
+    });
+    const ctx = edgeContext(graph);
+    buildFlowEdge(
+      ctx,
+      runtimeNode("a", { x: 0, y: 0, z: 0 }, 1),
+      runtimeNode("b", { x: 0.9, y: 0, z: 0 }, 1),
+      graph.relationships[0]
+    );
+    expect(ctx.reasons).toContain(REASON_EDGE_HEAD_SUPPRESSED);
+    const edge = ctx.edges[0];
+    expect(edge.headSuppressed).toBe(true);
+    expect(edge.head).toBeNull(); // never a head inside a body
+    // L = 0.9 < the 1.04 bare-surface floor → nothing is drawn.
+    updateEdge(edge);
+    expect(edge.shaft.geometry.drawRange.count).toBe(0);
+    expect(edge.shaft.line.visible).toBe(false);
   });
 });
 

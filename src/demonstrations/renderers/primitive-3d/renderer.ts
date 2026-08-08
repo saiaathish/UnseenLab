@@ -77,13 +77,18 @@ import {
   frameCamera,
   type OrbitState,
 } from "./camera";
+import { runGeometryGate } from "./presentation/pipeline";
+import { FRAME_ASPECT_DEFAULT } from "./camera";
 
 export const MAX_DT = 0.05; // seconds; avoid huge jumps on tab refocus
 export const DPR_CAP = 2;
 export const DPR_CAP_MOBILE = 1.5;
 const FPS_INTERVAL = 0.5; // seconds between onFps emissions
 const AUTO_ORBIT_RATE = 0.06; // rad/s gentle idle orbit
-const EDGE_TYPES = new Set(["flows_to", "transfers_to"]);
+// Legacy (non-graph) drawn edge types. transforms_into joined in MUST-FIX 2:
+// before_after's b1→b2 renders on the 3D surface with the same arrowhead
+// semantics as flows_to, matching the 2D surface which always drew it.
+const EDGE_TYPES = new Set(["flows_to", "transfers_to", "transforms_into"]);
 
 // Canonical-graph (graph-like scene) framing constants live in ./camera.ts
 // (GRAPH_VIEW_DIR / GRAPH_AZIMUTH_BAND / GRAPH_POLAR_BAND).
@@ -152,6 +157,9 @@ export interface RuntimeNode {
   state: NodeState;
   owned: OwnedMaterial[];
   children: RuntimeNode[];
+  /** Parent runtime node (null for roots). Group-targeted state (opacity)
+   * propagates through this chain (MUST-FIX 3). */
+  parent: RuntimeNode | null;
   trail?: {
     capacity: number;
     buffer: Float32Array;
@@ -420,6 +428,23 @@ export class PrimitiveSceneRenderer {
       list.push(anim);
       this.animationsByTarget.set(anim.target, list);
     }
+    // GEOMETRY GATE — production wiring (MUST-FIX 1, design-2 §7.2): the
+    // production runner degrades repairable I3 (shorten + re-place colliding
+    // node labels — MUST run before buildScene so the built scene carries
+    // the degraded labels), assembles the GateScene exactly as this renderer
+    // renders it, runs checkScene (I1–I5 + INFO) over the laid-out scene,
+    // and joins its surfaced reasons (gate_I{n}_violations / gate_unverified)
+    // into the renderer's reason surface. Fail loudly / degrade is now real:
+    // a scene that breaches I1–I5 after every repair stage reports it here,
+    // never silently. The gate camera uses the build-time default aspect —
+    // exactly the frame frameCamera applies at build — so the gate verdict
+    // matches the corpus.
+    this.lastReasons.push(
+      ...runGeometryGate(graph, {
+        graphMode: this.graphMode,
+        aspect: FRAME_ASPECT_DEFAULT,
+      }).reasons,
+    );
     this.buildScene(graph);
   }
 
@@ -554,6 +579,7 @@ export class PrimitiveSceneRenderer {
       state: makeNodeState({ position: node.position, color: node.color }),
       owned: [],
       children: [],
+      parent,
     };
     this.runtime.set(node.id, rn);
 
@@ -796,6 +822,13 @@ export class PrimitiveSceneRenderer {
     if (!this.scene || !this.graph) return;
     for (const rn of this.runtime.values()) this.applyAnimations(rn, dt, time);
     for (const rn of this.runtime.values()) this.applyTransforms(rn);
+    // Group-targeted state propagation (MUST-FIX 3, design-2 §5.3): groups
+    // own no materials, so a reveal/fade targeting a group was a visual
+    // no-op. A deterministic recursive pass (bounded by the graph's group
+    // depth) multiplies each group's opacity into every descendant's
+    // materials after the per-node pass, so the before_after "after" group
+    // reveal actually reveals its children (and nested groups compose).
+    this.applyGroupOpacity();
     // Fresh world matrices: edges, trails and labels read world positions
     // every frame (a stale matrix would trail a moving body by one frame).
     this.scene.updateMatrixWorld(true);
@@ -895,6 +928,56 @@ export class PrimitiveSceneRenderer {
         };
         color.color.set(s.color);
       }
+    }
+  }
+
+  /**
+   * Cumulative opacity factor of a node's GROUP ANCESTORS (MUST-FIX 3):
+   * the product of every ancestor group's state opacity. A leaf's effective
+   * opacity is its own state opacity × this factor; used by the propagation
+   * pass and by selection visuals so dim/highlight never erases a group
+   * reveal.
+   */
+  private groupOpacityFactor(rn: RuntimeNode): number {
+    let factor = 1;
+    let current = rn.parent;
+    let depth = 0;
+    while (current && depth < 8) {
+      if (current.graph.kind === "group") factor *= current.state.opacity;
+      current = current.parent;
+      depth++;
+    }
+    return factor;
+  }
+
+  /**
+   * Recursive group-opacity propagation (MUST-FIX 3, design-2 §5.3): walk the
+   * runtime tree from the roots; every descendant's opacity-animated material
+   * is multiplied by the cumulative group factor. Deterministic (fixed tree
+   * order, depth-bounded at the graph's max group depth) and idempotent per
+   * frame — the per-node applyTransforms ran first, this pass is last.
+   */
+  private applyGroupOpacity(): void {
+    for (const rn of this.roots) this.propagateGroupOpacity(rn, 1, 0);
+  }
+
+  private propagateGroupOpacity(
+    rn: RuntimeNode,
+    inherited: number,
+    depth: number
+  ): void {
+    const factor =
+      rn.graph.kind === "group" ? inherited * rn.state.opacity : inherited;
+    if (depth >= 8) return; // bounded — the graph caps group depth at 4 anyway
+    for (const child of rn.children) {
+      this.propagateGroupOpacity(child, factor, depth + 1);
+    }
+    if (rn.graph.kind === "group" || Math.abs(factor - 1) < 1e-9) return;
+    for (const owned of rn.owned) {
+      if (!owned.animateOpacity) continue;
+      const opacity = rn.state.opacity * factor;
+      owned.material.opacity = opacity;
+      owned.material.transparent = opacity < 1;
     }
   }
 
@@ -1230,7 +1313,10 @@ export class PrimitiveSceneRenderer {
     for (const rn of this.runtime.values()) {
       if (rn.graph.kind === "group") continue;
       const { dim, highlight } = this.nodeVisual(rn.graph.id);
-      const baseOpacity = rn.state.opacity;
+      // Group-targeted opacity (MUST-FIX 3) composes with selection dimming:
+      // a revealed group's children stay hidden while dimmed, never
+      // re-shown by the selection pass.
+      const baseOpacity = rn.state.opacity * this.groupOpacityFactor(rn);
       const opacity = baseOpacity * (1 - dim * 0.65);
       for (const owned of rn.owned) {
         owned.material.opacity = opacity;

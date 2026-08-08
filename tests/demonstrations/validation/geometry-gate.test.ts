@@ -2,6 +2,14 @@
  * geometry-gate.test.ts — unit tests for the pure geometry gate (C5, Wave 3;
  * design-2 §7, §9 C5 tests 5–12). Every invariant checker is tested against
  * passing AND violating fixtures; informational checkers never flip `ok`.
+ *
+ * Wave-4b addition (MUST-FIX 1): the production runner (presentation/pipeline
+ * runGeometryGate) is the gate's ONLY production call site — the renderer
+ * invokes it at setSpec and the 2D surface at resolveLayout consumption.
+ * The runner contract (degrade → checkScene → surfaced reason codes →
+ * gate_unverified) is covered here at the gate level; the end-to-end corpus
+ * pinning lives in presentation-pipeline.test.ts and
+ * primitive-3d/presentation/pipeline.test.ts.
  */
 
 import { describe, expect, it } from "vitest";
@@ -15,6 +23,7 @@ import {
   checkRelationshipVisibility,
   checkScene,
   checkViewportCoverage,
+  gateReasonForInvariant,
   REASON_ARROW_HEAD_IN_SOURCE,
   REASON_ARROW_HEAD_LENGTH,
   REASON_ARROW_HEAD_PENETRATES_TARGET,
@@ -22,6 +31,12 @@ import {
   REASON_EDGE_CROSSES_NODE,
   REASON_ENVELOPE_OVERLAP,
   REASON_FIELD_OVERLAPS_NODE,
+  REASON_GATE_I1,
+  REASON_GATE_I2,
+  REASON_GATE_I3,
+  REASON_GATE_I4,
+  REASON_GATE_I5,
+  REASON_GATE_UNVERIFIED,
   REASON_LABEL_OVERLAP,
   REASON_SHAFT_INSIDE_SOURCE,
   REASON_VIEWPORT_OUT_OF_FRAME,
@@ -702,5 +717,49 @@ describe("stress corpus — gate-level assertions", () => {
       radius: (o.size ?? 1) * 0.5,
     }));
     expect(checkEnvelopeIntersections(emptyScene({ envelopes })).ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wave-4b — production runner contract (MUST-FIX 1): the reason-code mapping
+// and the headSuppressed I4 skip the runner (presentation/pipeline.ts)
+// depends on. End-to-end runner behavior is covered in
+// primitive-3d/presentation/pipeline.test.ts and presentation-pipeline.test.ts.
+// ---------------------------------------------------------------------------
+
+describe("production gate codes (MUST-FIX 1 runner contract)", () => {
+  it("maps every invariant to its surfaced code; INFO never blocks", () => {
+    expect(gateReasonForInvariant("I1")).toBe(REASON_GATE_I1);
+    expect(gateReasonForInvariant("I2")).toBe(REASON_GATE_I2);
+    expect(gateReasonForInvariant("I3")).toBe(REASON_GATE_I3);
+    expect(gateReasonForInvariant("I4")).toBe(REASON_GATE_I4);
+    expect(gateReasonForInvariant("I5")).toBe(REASON_GATE_I5);
+    expect(gateReasonForInvariant("INFO")).toBeNull();
+    // The codes are the exact strings the design's reason surface uses.
+    expect(REASON_GATE_I1).toBe("gate_I1_violations");
+    expect(REASON_GATE_I2).toBe("gate_I2_violations");
+    expect(REASON_GATE_I3).toBe("gate_I3_violations");
+    expect(REASON_GATE_I4).toBe("gate_I4_violations");
+    expect(REASON_GATE_I5).toBe("gate_I5_violations");
+    expect(REASON_GATE_UNVERIFIED).toBe("gate_unverified");
+  });
+
+  it("skips headSuppressed edges in I4 (the short-edge degrade the runner relies on)", () => {
+    // MUST-FIX 5: an edge shorter than r_s + r_t + len has its arrowhead
+    // suppressed by the runner/edges.ts (`edge_head_suppressed_short_edge`
+    // reason); the I4 checker skips it entirely — there is no head to
+    // anchor, and the suppression reason is the loud surface, never a
+    // silent pass.
+    const scene = emptyScene({
+      envelopes: [sphereEnv("a", 0, 0, 0, 0.5), sphereEnv("b", 0.6, 0, 0, 0.5)],
+      edges: [
+        straightEdge("r1", "a", "b", V(0, 0, 0), V(0.6, 0, 0), 0.5, 0.5, {
+          headSuppressed: true,
+        }),
+      ],
+    });
+    const result = checkArrowAnchoring(scene);
+    expect(result.ok).toBe(true);
+    expect(result.violations).toEqual([]);
   });
 });

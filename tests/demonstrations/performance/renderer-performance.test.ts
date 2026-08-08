@@ -131,6 +131,10 @@ const threeStub = vi.hoisted(() => {
     position = new Vector3();
     rotation = new Euler();
     scale = new Vector3(1, 1, 1);
+    // MUST-FIX 2: buildFlowEdge now creates real arrowheads (parity with
+    // derived graph edges), so updateEdge's cone-orientation branch runs for
+    // non-graph scenes too — the stub needs the quaternion surface.
+    quaternion = { setFromUnitVectors() {} };
     children: Object3D[] = [];
     name = "";
     up = new Vector3(0, 1, 0);

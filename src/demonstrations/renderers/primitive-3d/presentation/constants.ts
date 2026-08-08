@@ -382,6 +382,7 @@ export const REASON_EDGE_LABEL_DENSE = "edge_label_suppressed_density";
 export const REASON_EDGE_UNROUTABLE = "edge_unroutable";
 export const REASON_LINE_NO_ENDPOINTS = "line_no_endpoint_nodes";
 export const REASON_EDGE_DEGENERATE = "edge_degenerate_self_loop";
+export const REASON_EDGE_HEAD_SUPPRESSED = "edge_head_suppressed_short_edge";
 export const REASON_FIELD_AUTO_FIT = "field_span_auto_fit";
 export const REASON_UPDATE_VECTOR_IDENTITY = "update_vector_identity_axis_fallback";
 export const REASON_TRANSLATE_UNBOUNDED = "translate_unbounded_path_candidate";

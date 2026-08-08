@@ -37,6 +37,7 @@ import {
   derivePacketSlidePath,
   resolveLayout,
 } from "@/demonstrations/renderers/primitive-3d/layout/resolve-layout";
+import { arrowHead } from "@/demonstrations/renderers/primitive-3d/presentation/constants";
 import {
   isLayoutEligible,
 } from "@/demonstrations/renderers/primitive-3d/scene-graph";
@@ -269,8 +270,11 @@ describe("resolveLayout — determinism", () => {
 
 describe("resolveLayout — bounded repulsion", () => {
   it("total displacement per unit never exceeds MAX_TOTAL_DISPLACEMENT", () => {
-    // The sphere must travel ~20.5 units to exit the box; the budget stops it
-    // at MAX_TOTAL_DISPLACEMENT with a documented residual.
+    // The sphere must travel ~3.6 units to exit the box; Phase B exhausts its
+    // 24-pass budget while the ball is still inside (random-walk jitter axes),
+    // but MUST-FIX 4's wedge-equilibrium breaker (Phase C2) then nudges it out
+    // with bounded repulsion — so the FINAL layout is collision-free and the
+    // only residual reason is the honest Phase-B cap.
     const out = resolveLayout(sphereInsideFixedField(), 3);
     for (const move of out.layout.moved) {
       const d = Math.hypot(
@@ -281,7 +285,12 @@ describe("resolveLayout — bounded repulsion", () => {
       expect(d).toBeLessThanOrEqual(MAX_TOTAL_DISPLACEMENT + 1e-9);
     }
     expect(out.reasons).toContain("layout_iterations_capped");
-    expect(out.reasons).toContain("layout_collision_remaining");
+    // Wedge breaker resolved the box-escape within budget: no residual I1.
+    expect(out.reasons).not.toContain("layout_collision_remaining");
+    const ball = out.graph.nodes.find((n) => n.id === "ball")!;
+    const wall = out.graph.nodes.find((n) => n.id === "wall")!;
+    const d = Math.hypot(ball.position.x - wall.position.x, ball.position.y - wall.position.y);
+    expect(d).toBeGreaterThanOrEqual(3 + 0.5 + ENVELOPE_CLEARANCE - 1e-9);
   });
 
   it("never throws on adversarial dense clusters (bounded, no infinite loop)", () => {
@@ -715,5 +724,333 @@ describe("resolveLayout — bounds contract", () => {
       );
       expect(m.to.x).not.toBeCloseTo(m.from.x, 9);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wave-4 red-team regression suite (MUST-FIX 4/5 + minors; attacks W2–W11)
+// ---------------------------------------------------------------------------
+
+/**
+ * Residual I1 envelope-overlap pairs at the layout's own verification
+ * tolerance (ENVELOPE_CLEARANCE with the OVERLAP_EPS slack the engine uses).
+ * Node ids in graph node order; group containers carry no envelope.
+ */
+function residualI1Pairs(
+  out: ReturnType<typeof resolveLayout>
+): string[] {
+  const pairs: string[] = [];
+  const nodes = out.graph.nodes.filter((n) => n.kind !== "group");
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      if (
+        envelopeOverlap(
+          nodeEnvelope(nodes[i]),
+          nodeEnvelope(nodes[j]),
+          ENVELOPE_CLEARANCE - 1e-4
+        )
+      ) {
+        pairs.push(`${nodes[i].id}×${nodes[j].id}`);
+      }
+    }
+  }
+  return pairs;
+}
+
+describe("MUST-FIX 4 — Wave-4 residual-cluster repros (red-team W2/W3/W4/W5)", () => {
+  it("W2: 7 coincident size-1 spheres spread with NO residual I1 (was 2)", () => {
+    const nodes: SceneGraphNode[] = [];
+    for (let i = 1; i <= 7; i++) nodes.push(node(`n${i}`, "sphere", 0, 0, 0));
+    const g = graph(
+      nodes,
+      [{ id: "r1", type: "causes", from: "n1", to: "n2" }]
+    );
+    const out = resolveLayout(g, 42);
+    // Every envelope pair ends at or beyond r_a + r_b + clearance — the
+    // 3–7-unit coincident cluster no longer sits in the dead zone.
+    expect(residualI1Pairs(out)).toEqual([]);
+    expect(out.reasons).not.toContain("layout_collision_remaining");
+    expect(out.layout.repaired).toBe(true);
+    // Deterministic per seed (the pure-function contract).
+    expect(JSON.stringify(resolveLayout(g, 42))).toBe(JSON.stringify(out));
+  });
+
+  it("W3: 7 size-5 process nodes at 1u spacing — grid reflow resolves (was 6)", () => {
+    const nodes: SceneGraphNode[] = [];
+    for (let i = 0; i < 7; i++) {
+      nodes.push(node(`n${i}`, "process_node", -3 + i, 0, 0, 5));
+    }
+    const g = graph(nodes, [{ id: "r1", type: "causes", from: "n0", to: "n1" }]);
+    const out = resolveLayout(g, 42);
+    // 7 colliding units fire the lowered grid threshold (≥ 4); the reflow +
+    // hard-only polish leave every size-5 envelope separated.
+    expect(out.reasons).toContain("layout_grid_fallback");
+    expect(residualI1Pairs(out)).toEqual([]);
+    expect(out.reasons).not.toContain("layout_collision_remaining");
+  });
+
+  it("W4: 25-node 5×5 grid at 1u with 120-char labels reaches the documented degrade path (was 2 I1 + 15 I3)", () => {
+    const nodes: SceneGraphNode[] = [];
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        nodes.push(
+          node(`n${r}_${c}`, "process_node", (c - 2) * 1, (r - 2) * 1, 0, 1, "A".repeat(120))
+        );
+      }
+    }
+    const g = graph(nodes, [{ id: "r1", type: "causes", from: "n0_0", to: "n0_1" }]);
+    const out = resolveLayout(g, 42);
+    // The grid reflow fires (25 colliding units ≥ 4) and the FULL degrade
+    // chain runs: shorten labels → suppress edge labels → accept + emit.
+    // The 120-char glyph pre-clear churns the reflowed grid (a label rect's
+    // center coincides with the envelope of the node directly above it, so
+    // the coincident-center jitter axis re-scatters units every polish pass);
+    // the few envelope pairs that stay interpenetrated are RECORDED
+    // (layout_collision_remaining), never silent. This is the documented
+    // degrade path design-1 §5 sanctions for density the layout cannot clear
+    // — pinned at the pipeline level in presentation-pipeline.test.ts
+    // (MUST-FIX 1 re-pin; shipped templates are all gate-clean).
+    expect(out.reasons).toContain("layout_grid_fallback");
+    expect(out.reasons).toContain("layout_labels_shortened");
+    expect(out.reasons).toContain("layout_edge_labels_suppressed");
+    expect(out.reasons).toContain("layout_collision_remaining");
+    // The colliding units' labels were truncated to the canvas-fit budget.
+    expect(out.layout.labelShortened.length).toBeGreaterThan(0);
+    for (const id of out.layout.labelShortened) {
+      const n = out.graph.nodes.find((x) => x.id === id)!;
+      expect(n.label!.length).toBe(CANVAS_FIT_CHARS);
+    }
+    // A residual envelope-overlap class remains — recorded, never silent.
+    expect(residualI1Pairs(out).length).toBeGreaterThan(0);
+    // Deterministic per seed — same input, byte-identical output.
+    expect(JSON.stringify(resolveLayout(g, 42))).toBe(JSON.stringify(out));
+  });
+
+  it("W5: orbit-target wedge — the wedged moon escapes; only the authored fixed star×planet overlap remains", () => {
+    const g = graph(
+      [
+        node("star", "sphere", 0, 0, 0, 2),
+        node("planet", "sphere", 1, 0, 0),
+        node("moon", "sphere", 0.2, 0, 0),
+      ],
+      [{ id: "rel", type: "orbits", from: "planet", to: "star" }],
+      [
+        {
+          id: "a1",
+          target: "planet",
+          operator: "orbit",
+          speed: 1,
+          delayMs: 0,
+          amplitude: 1,
+          axis: "y",
+        },
+      ]
+    );
+    const out = resolveLayout(g, 42);
+    // Physics bodies never move (orbit target + orbit center — design-1 §1.2).
+    expect(posById(out, "star")).toEqual({ x: 0, y: 0, z: 0 });
+    expect(posById(out, "planet")).toEqual({ x: 1, y: 0, z: 0 });
+    // The moon escaped the net-zero wedge (seeded orthogonal nudge + bounded
+    // hard repulsion): its envelope clears BOTH fixed bodies.
+    const moon = posById(out, "moon");
+    expect(moon).not.toEqual({ x: 0.2, y: 0, z: 0 });
+    // The ONLY residual is the authored star×planet penetration — a
+    // fixed-vs-fixed pair the layout is forbidden to repair — recorded
+    // honestly (the same precedent as the sun/planet physics test above).
+    expect(residualI1Pairs(out)).toEqual(["star×planet"]);
+    expect(out.reasons).toContain("layout_collision_remaining");
+    expect(out.reasons).toContain("layout_repaired");
+  });
+});
+
+describe("MUST-FIX 5 — post-repair short-edge lengthening (red-team W6/W7)", () => {
+  const required = 0.5 + 0.5 + arrowHead(0.5).len; // size-1 pair, r 0.5
+
+  it("edges shorter than r_s + r_t + headLen are lengthened along the edge axis", () => {
+    // overlappingPair: repulsion separates to 1.1, still short of 1.36 → the
+    // post-repair pass lengthens along the axis (deficit split 0.5/0.5).
+    const out = resolveLayout(overlappingPair(), 7);
+    const pa = posById(out, "n1");
+    const pb = posById(out, "n2");
+    const L = Math.hypot(pb.x - pa.x, pb.y - pa.y, pb.z - pa.z);
+    expect(L).toBeGreaterThanOrEqual(required - 1e-6);
+    // Axis-preserving: the pair stays on the separation line, order intact.
+    expect(pa.x).toBeLessThan(pb.x);
+    expect(Math.abs(pa.y - pb.y)).toBeLessThan(1e-6);
+  });
+
+  it("a tight chain whose lengthening would create new I1 stays short — the renderer degrade path", () => {
+    // a→b→c collinear: lengthening r1 pushes b toward c (0.97 < 1.1) and
+    // lengthening r2 pushes b toward a — every lengthen move would create a
+    // NEW I1 pair, so the guard leaves the edges short (the renderer's
+    // REASON_EDGE_HEAD_SUPPRESSED degrade takes over). The guard must never
+    // trade an I4 breach for a new I1.
+    const g = graph(
+      [
+        node("a", "sphere", 0, 0, 0),
+        node("b", "sphere", 0.5, 0, 0),
+        node("c", "sphere", 1.0, 0, 0),
+      ],
+      [
+        { id: "r1", type: "causes", from: "a", to: "b" },
+        { id: "r2", type: "causes", from: "b", to: "c" },
+      ]
+    );
+    const out = resolveLayout(g, 21);
+    const ps = ["a", "b", "c"].map((id) => posById(out, id));
+    // Order preserved; envelopes clean (no new I1 anywhere).
+    expect(ps[0].x).toBeLessThan(ps[1].x);
+    expect(ps[1].x).toBeLessThan(ps[2].x);
+    expect(residualI1Pairs(out)).toEqual([]);
+    // Both edges remain shorter than the I4 requirement → both arrowheads are
+    // suppressed at render time (never a head inside the source).
+    for (let i = 0; i < 2; i++) {
+      const L = Math.hypot(
+        ps[i + 1].x - ps[i].x,
+        ps[i + 1].y - ps[i].y,
+        ps[i + 1].z - ps[i].z
+      );
+      expect(L).toBeGreaterThanOrEqual(1 + ENVELOPE_CLEARANCE - 1e-4); // I1 clean
+      expect(L).toBeLessThan(required - 1e-6); // still short of I4
+    }
+  });
+
+  it("a chain with room on the far side lengthens fully (shared endpoint keeps moving)", () => {
+    // a→b at 0.5 apart with c far away: r1's lengthen pushes b +x — no new
+    // overlap with c (2+ units away) — so the edge reaches the full 1.36.
+    const g = graph(
+      [
+        node("a", "sphere", 0, 0, 0),
+        node("b", "sphere", 0.5, 0, 0),
+        node("c", "sphere", 3, 0, 0),
+      ],
+      [
+        { id: "r1", type: "causes", from: "a", to: "b" },
+        { id: "r2", type: "causes", from: "b", to: "c" },
+      ]
+    );
+    const out = resolveLayout(g, 21);
+    const ps = ["a", "b", "c"].map((id) => posById(out, id));
+    const L = Math.hypot(ps[1].x - ps[0].x, ps[1].y - ps[0].y, ps[1].z - ps[0].z);
+    expect(L).toBeGreaterThanOrEqual(required - 1e-6);
+    expect(residualI1Pairs(out)).toEqual([]);
+    expect(ps[0].x).toBeLessThan(ps[1].x);
+    expect(ps[1].x).toBeLessThan(ps[2].x);
+  });
+
+  it("group-rigid endpoints cannot be lengthened — the edge stays short for the renderer's head-suppression degrade", () => {
+    // Both endpoints live in ONE group: the unit root is the group, and
+    // directly-movable-roots excludes group units — individual lengthening is
+    // impossible by construction. The edge stays short and the renderer's
+    // degrade (REASON_EDGE_HEAD_SUPPRESSED, edges.test.ts) takes over.
+    const g = graph(
+      [
+        node("g", "group", 0, 0, 0),
+        node("a", "sphere", -0.25, 0, 0),
+        node("b", "sphere", 0.25, 0, 0),
+      ],
+      [{ id: "r1", type: "causes", from: "a", to: "b" }]
+    );
+    const withChildren: SceneGraph = {
+      ...g,
+      nodes: g.nodes.map((n) =>
+        n.id === "g"
+          ? { ...n, children: ["a", "b"] }
+          : n.id === "a" || n.id === "b"
+            ? { ...n, depth: 2 }
+            : n
+      ),
+    };
+    const out = resolveLayout(withChildren, 11);
+    // Rigid unit untouched: no outside unit collides, so the members keep
+    // their authored positions and the edge keeps its short length.
+    expect(posById(out, "a")).toEqual({ x: -0.25, y: 0, z: 0 });
+    expect(posById(out, "b")).toEqual({ x: 0.25, y: 0, z: 0 });
+    const pa = posById(out, "a");
+    const pb = posById(out, "b");
+    const L = Math.hypot(pb.x - pa.x, pb.y - pa.y, pb.z - pa.z);
+    expect(L).toBeLessThan(required - 1e-6);
+    // Same-unit overlaps are structural (rigid containment) — not a layout
+    // residual; no dishonest collision reason is emitted.
+    expect(out.reasons).not.toContain("layout_collision_remaining");
+    expect(out.reasons).toEqual([]);
+  });
+});
+
+describe("Wave-4 minors — packet co-slot cap (W10) and on-surface snap (W11)", () => {
+  it("W10: >2 co-slotted packets on a short chain cap their slots and never pass the destination", () => {
+    // D1 repro: src/dst size 2 at (0,0)/(1.6,0), six energy packets co-slotted
+    // at the source, each transfers_to dst. Un-capped, offsets k·0.5 would put
+    // packets past the destination center (1.85) and scatter them through it;
+    // the slot cap keeps every packet inside the segment and emits the reason.
+    const nodes: SceneGraphNode[] = [
+      node("src", "process_node", 0, 0, 0, 2),
+      node("dst", "process_node", 1.6, 0, 0, 2),
+    ];
+    const rels: SceneGraphRelationship[] = [];
+    const anims: SceneGraphAnimation[] = [];
+    for (let i = 1; i <= 6; i++) {
+      nodes.push(node(`ep${i}`, "energy_packet", 0, 0, 0, 0.3));
+      rels.push({ id: `r${i}`, type: "transfers_to", from: `ep${i}`, to: "dst" });
+      anims.push({
+        id: `a${i}`,
+        target: `ep${i}`,
+        operator: "follow_path",
+        speed: 1,
+        delayMs: i * 100,
+        amplitude: 1,
+      });
+    }
+    rels.push({ id: "rc", type: "transfers_to", from: "src", to: "dst" });
+    const g = graph(nodes, rels, anims);
+    const out = resolveLayout(g, 42);
+    expect(out.reasons).toContain("layout_packet_slots_capped");
+    const src = posById(out, "src");
+    const dst = posById(out, "dst");
+    for (let i = 1; i <= 6; i++) {
+      const p = posById(out, `ep${i}`);
+      // Never past the destination center (D1: un-capped ep4–ep6 landed at
+      // 1.9/2.4/2.9, beyond the 1.85 center) — and never behind the source.
+      expect(p.x).toBeGreaterThan(src.x - 1e-9);
+      expect(p.x).toBeLessThan(dst.x + 1e-9);
+    }
+    // Deterministic per seed.
+    expect(JSON.stringify(resolveLayout(g, 42))).toBe(JSON.stringify(out));
+  });
+
+  it("W11: a packet with its own outgoing flow edge snaps ON the source surface, not inside it", () => {
+    // Shipped-template graph shape (process_flow r0: ep1→pn2 + r1: pn1→pn2):
+    // before the fix the packet's own outgoing edge made the packet its own
+    // nearest flow source (dist 0) and the snap parked it 0.25 INSIDE the
+    // source surface. A packet is a carrier, never its own chain source.
+    const g = graph(
+      [
+        node("pn1", "process_node", -3, 0, 0),
+        node("pn2", "process_node", 0, 0, 0),
+        node("ep1", "energy_packet", -3, 0, 0, 0.3),
+      ],
+      [
+        { id: "r0", type: "flows_to", from: "ep1", to: "pn2" },
+        { id: "r1", type: "flows_to", from: "pn1", to: "pn2" },
+      ],
+      [
+        {
+          id: "a1",
+          target: "ep1",
+          operator: "follow_path",
+          speed: 1.5,
+          delayMs: 0,
+          amplitude: 1,
+        },
+      ]
+    );
+    const out = resolveLayout(g, 6);
+    const ep1 = posById(out, "ep1");
+    // pn1 exit = −3 + (0.5 + 0.15 + PATH_CLEARANCE) = −2.25 — ON the surface.
+    expect(ep1.x).toBeCloseTo(-2.25, 9);
+    expect(ep1.y).toBeCloseTo(0, 9);
+    expect(ep1.z).toBeCloseTo(0, 9);
+    expect(out.reasons).toContain("layout_repaired");
+    expect(out.reasons).not.toContain("layout_collision_remaining");
   });
 });

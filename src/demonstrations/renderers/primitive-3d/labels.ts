@@ -142,7 +142,13 @@ export function nodeEnvelopeHalfExtents(node: {
     case "camera_marker":
       return { x: node.size * 0.4, y: node.size * 0.4, z: node.size * 0.4 };
     case "vector_field":
-      return { x: half, y: half, z: (node.size * 0.22) / 2 };
+      // Renderer geometry: the grid spans size/2 horizontally in x AND z
+      // (field span); the ticks are the only vertical extent, height =
+      // size·0.22 (design-1 §1.3/§2.4 — half-height size·0.11). The x/z and
+      // y axes were swapped here, which inflated the frame AABB in y and
+      // under-covered the grid corners in z (Wave-4b: electric-fields'
+      // field-vectors clipped in the canonical top view).
+      return { x: half, y: (node.size * 0.22) / 2, z: half };
     case "line":
     case "trail":
     case "process_edge":
@@ -925,12 +931,14 @@ export interface LabelKindContext {
   trackDisposable(d: { dispose(): void }): void;
 }
 
-/** Standalone `label`-kind node sprite (the `label` case of buildVisual). */
+/** Standalone `label`-kind node sprite (the `label` case of buildVisual).
+ * Returns the sprite's material so the renderer can register it for opacity
+ * animation and group-targeted propagation (MUST-FIX 3). */
 export function buildLabelKindVisual(
   ctx: LabelKindContext,
   node: SceneGraphNode,
   holder: THREE.Group
-): void {
+): THREE.SpriteMaterial {
   const text = node.label ?? node.id;
   const resolved = resolveLabelText(text);
   const texture = makeLabelTexture(text, {
@@ -947,6 +955,7 @@ export function buildLabelKindVisual(
   sprite.scale.set(scale.w, scale.h, 1);
   holder.add(sprite);
   ctx.trackDisposable(texture);
+  return material;
 }
 
 /**

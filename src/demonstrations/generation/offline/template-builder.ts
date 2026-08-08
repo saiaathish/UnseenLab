@@ -323,9 +323,14 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
     relationships: [
       // The transformation is a CHILD-to-CHILD relationship (b1 → b2), not a
       // group-to-group one: groups render no edge on either surface, so the
-      // before→after transformation was invisible (tpl-before-after-01). Both
-      // surfaces can draw box→box edges.
-      rel("r1", "transforms_into", "b1", "b2"),
+      // before→after transformation was invisible on the 3D surface
+      // (tpl-before-after-01, MUST-FIX 2). Type flows_to + label
+      // "transforms into": BOTH surfaces render flows_to (the 2D diagram
+      // draws every relationship; the 3D legacy edge path draws flows_to /
+      // transfers_to) — the label preserves the template's intent verbatim
+      // and reads correctly on the 2D surface (previously the raw type name
+      // "transforms_into" was rendered as the edge label there).
+      rel("r1", "flows_to", "b1", "b2", "transforms into"),
     ],
     animations: [anim("a1", "after", "reveal", { delayMs: 1500 })],
     limitations: ["The change is simplified; the real process may involve many intermediate steps."],

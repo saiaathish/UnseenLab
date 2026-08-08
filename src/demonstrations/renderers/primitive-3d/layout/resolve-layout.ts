@@ -6,8 +6,12 @@
  *   Phase A  unit model (rigid movable units + fixed obstacles)
  *   Phase B  bounded pairwise repulsion (≤ 24 passes, nudge ≤ 0.5/pass,
  *            total ≤ 8/unit, order-preserving collinear chains)
- *   Phase C  grid-slot reflow fallback (≥ 8 units still colliding)
- *   Phase D  packet snap + z re-check + clamp + I1 verify + degrade chain
+ *   Phase C  grid-slot reflow fallback (≥ 4 units still colliding — lowered
+ *            from 8 by MUST-FIX 4 to close the 3–7-unit dead zone)
+ *   Phase C2 wedge-equilibrium breaker (seeded orthogonal nudge on units
+ *            stuck in net-zero fixed-obstacle wedges; MUST-FIX 4, W5)
+ *   Phase D  packet snap + short-edge lengthening (MUST-FIX 5) + z re-check
+ *            + clamp + I1 verify + degrade chain
  *
  * Determinism: seeded jitter via mulberry32(seed) breaks coincident-center
  * deadlocks (axis choice only — positions are never jittered, so collision-
@@ -47,6 +51,7 @@ import {
   rectEnvelopeOverlap,
   rectRectOverlap,
 } from "../geometry/envelopes";
+import { arrowHead } from "../presentation/constants";
 import { mulberry32 } from "../geometry/rng";
 
 // ---------------------------------------------------------------------------
@@ -56,8 +61,35 @@ import { mulberry32 } from "../geometry/rng";
 export const MAX_LAYOUT_ITERATIONS = 24;
 export const MAX_NUDGE_PER_ITERATION = 0.5;
 export const MAX_TOTAL_DISPLACEMENT = 8.0;
-export const GRID_FALLBACK_MIN_UNITS = 8;
+/**
+ * Grid-slot reflow threshold (design-1 §5, lowered by MUST-FIX 4): the
+ * original 8-unit floor left clusters of 3–7 interpenetrated units in a dead
+ * zone — repulsion exhausted its budget while the grid fallback never fired
+ * (red-team W2/W3). 4 units is below every reported residual-cluster class,
+ * and sub-threshold clusters of ≤ 3 still resolve by repulsion alone (the
+ * "does NOT trigger below the threshold" test pins the boundary).
+ */
+export const GRID_FALLBACK_MIN_UNITS = 4;
 export const GRID_POLISH_ITERATIONS = 8;
+
+/**
+ * Wedge-equilibrium breaker (MUST-FIX 4, red-team W5): a movable unit wedged
+ * between fixed obstacles (e.g. an orbit target between the star and planet)
+ * can sit in a net-zero repulsion equilibrium — the opposing pushes cancel
+ * every pass and the loop terminates with residual collisions. The breaker
+ * nudges each still-colliding unit along a SEEDED direction (deterministic
+ * per seed; small enough to never escape the displacement intent) and re-runs
+ * bounded repulsion. Positions are never jittered — only the wedge axis is
+ * broken — so collision-free scenes stay byte-identical for any seed.
+ */
+export const WEDGE_BREAK_ATTEMPTS = 3;
+export const WEDGE_NUDGE = 0.15;
+export const WEDGE_POLISH_PASSES = 6;
+
+/** Co-slot cap for chained packets sharing one source (MUST-FIX, W10):
+ * at most 2 staggered slots per source; further packets share the last slot
+ * (the reason `layout_packet_slots_capped` surfaces the pile-up honestly). */
+export const MAX_CO_SLOTTED_PACKETS = 2;
 
 /**
  * Float slack for the clearance boundary in the TERMINATION/residual
@@ -87,7 +119,18 @@ const MOVABLE_KINDS = new Set<string>([
   "label",
 ]);
 
+/** Packet chain / slidePath walking types (design-1 §1.6 — carriers follow
+ * flow edges only; transforms_into is a state change, never a flow chain). */
 const FLOW_TYPES = new Set<RelationshipOperator>(["flows_to", "transfers_to"]);
+
+/** Relationship types the renderer draws as legacy (non-graph) edges — their
+ * edge-label rects count in the scene bounds. transforms_into is drawn on
+ * both surfaces (MUST-FIX 2: before_after's b1→b2). */
+const DRAWN_EDGE_TYPES = new Set<RelationshipOperator>([
+  "flows_to",
+  "transfers_to",
+  "transforms_into",
+]);
 
 const GRAPH_NODE_KINDS_LOCAL = new Set<string>(["process_node", "sphere"]);
 
@@ -220,7 +263,16 @@ export function derivePacketChain(
   const sources: string[] = [];
   const seen = new Set<string>();
   for (const rel of graph.relationships) {
-    if (FLOW_TYPES.has(rel.type) && byId.has(rel.from) && !seen.has(rel.from)) {
+    // MUST-FIX (W11): the packet's OWN outgoing edge (template r0: ep1→pn2)
+    // makes the packet itself a flow source at distance 0 — snapping from
+    // the packet's own center parks it INSIDE the real source's surface.
+    // A packet is a carrier, never its own chain source.
+    if (
+      FLOW_TYPES.has(rel.type) &&
+      rel.from !== packetId &&
+      byId.has(rel.from) &&
+      !seen.has(rel.from)
+    ) {
       seen.add(rel.from);
       sources.push(rel.from);
     }
@@ -467,7 +519,8 @@ export function resolveLayout(
   );
 
   // -------------------------------------------------------------------------
-  // Phase C — grid-slot fallback (design-1 §2.4)
+  // Phase C — grid-slot fallback (design-1 §2.4, threshold lowered by
+  // MUST-FIX 4)
   // -------------------------------------------------------------------------
   const collidingUnits = units.filter(
     (u) =>
@@ -514,9 +567,61 @@ export function resolveLayout(
   }
 
   // -------------------------------------------------------------------------
-  // Phase D — packet snap + clamp + I1 verify + degrade (design-1 §2.4/§5)
+  // Phase C2 — wedge-equilibrium breaker (MUST-FIX 4, red-team W5)
   // -------------------------------------------------------------------------
-  const snapOffsets = packetSnapOffsets(work, chainedPackets);
+  // A unit wedged between fixed obstacles (an orbit target between the star
+  // and planet) can sit in a net-zero equilibrium: the opposing correction
+  // magnitudes are identical every pass, the displacement is ~0, and
+  // runRepulsionPasses terminates with residuals. Break the equilibrium with
+  // a small SEEDED nudge (deterministic per seed, orthogonal intent — it only
+  // has to be non-zero) and re-run bounded repulsion. The nudge counts toward
+  // the unit's MAX_TOTAL_DISPLACEMENT budget, so an already-exhausted unit is
+  // left untouched (the existing budget-cap tests stay byte-identical).
+  for (let attempt = 0; attempt < WEDGE_BREAK_ATTEMPTS; attempt++) {
+    if (!envelopeCollisionsRemain(units, obstacles, memberEnv)) break;
+    let nudged = false;
+    for (const u of units) {
+      if (
+        !(
+          unitPairOverlapsAny(u, units, memberEnv) ||
+          unitObstacleOverlaps(u, obstacles, memberEnv)
+        )
+      ) {
+        continue;
+      }
+      const root = byId.get(u.rootId);
+      if (!root) continue;
+      const magnitude = WEDGE_NUDGE * (attempt + 1);
+      const total = totalDisplacement.get(u.rootId) ?? 0;
+      const allowed = Math.max(0, MAX_TOTAL_DISPLACEMENT - total);
+      if (allowed <= 1e-12) continue; // budget exhausted — never move it
+      const applied = Math.min(magnitude, allowed);
+      root.position = add(root.position, mul(jitterAxis(), applied));
+      totalDisplacement.set(u.rootId, total + applied);
+      nudged = true;
+    }
+    if (!nudged) break;
+    runRepulsionPasses(
+      units,
+      obstacles,
+      memberEnv,
+      jitterAxis,
+      totalDisplacement,
+      WEDGE_POLISH_PASSES,
+      byId,
+      unitByRoot,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase D — packet snap + short-edge lengthening + clamp + I1 verify +
+  // degrade (design-1 §2.4/§5, MUST-FIX 5)
+  // -------------------------------------------------------------------------
+  const { offsets: snapOffsets, capped: packetSlotsCapped } = packetSnapOffsets(
+    work,
+    chainedPackets,
+  );
+  if (packetSlotsCapped) reasons.push("layout_packet_slots_capped");
   for (const packetId of chainedPackets.keys()) {
     const path = derivePacketSlidePath(work, packetId);
     if (!path || path.length < 2) continue;
@@ -527,6 +632,19 @@ export function resolveLayout(
       (snapOffsets.get(packetId) ?? 0) * (2 * (packet.size * 0.5) + PACKET_SPACING);
     packet.position = add(path[0], mul(firstDir, offset));
   }
+
+  // MUST-FIX 5 (red-team W6/W7): enforce L >= r_s + r_t + headLen for every
+  // drawn graph edge after repair — the arrowhead must never sit inside the
+  // source. Lengthen along the edge axis when both endpoints are directly
+  // movable; edges that cannot comply stay short and are left for the
+  // renderer's head-suppression degrade (edge_head_suppressed_short_edge).
+  lengthenShortEdges(
+    work,
+    byId,
+    parentOf,
+    directlyMovableRoots(units),
+    new Set(chainedPackets.keys()),
+  );
 
   // Defensive clamp (can't trigger: input clamped, nudges bounded).
   const clampBound = SCENE_POSITION_BOUND - 1;
@@ -904,11 +1022,16 @@ function centroidOfMovables(units: Unit[], envOf: EnvOf): Vec3 {
   return { x: acc.x / n, y: acc.y / n, z: acc.z / n };
 }
 
-/** Per-source stagger index for chained packets: ordered by (delayMs, id). */
+/** Per-source stagger index for chained packets: ordered by (delayMs, id).
+ * The index is CAPPED at MAX_CO_SLOTTED_PACKETS − 1 (MUST-FIX, W10): more
+ * than two co-slotted packets on a short segment would otherwise stagger past
+ * the destination center (offsets k·0.5 for k ≥ 3 land beyond a 1.6u
+ * segment). Capped packets share the last slot; `capped` surfaces the
+ * pile-up via `layout_packet_slots_capped`. */
 function packetSnapOffsets(
   graph: SceneGraph,
   chainedPackets: Map<string, string[]>,
-): Map<string, number> {
+): { offsets: Map<string, number>; capped: boolean } {
   const animOf = new Map<string, number>(); // packetId -> delayMs
   for (const anim of graph.animations) {
     if (
@@ -929,6 +1052,7 @@ function packetSnapOffsets(
     bySource.set(source, list);
   }
   const out = new Map<string, number>();
+  let capped = false;
   for (const packets of bySource.values()) {
     const ordered = [...packets].sort((a, b) => {
       const da = animOf.get(a) ?? 0;
@@ -936,15 +1060,128 @@ function packetSnapOffsets(
       if (da !== db) return da - db;
       return a < b ? -1 : a > b ? 1 : 0;
     });
-    ordered.forEach((p, k) => out.set(p, k));
+    ordered.forEach((p, k) => {
+      if (k >= MAX_CO_SLOTTED_PACKETS) capped = true;
+      out.set(p, Math.min(k, MAX_CO_SLOTTED_PACKETS - 1));
+    });
   }
-  return out;
+  return { offsets: out, capped };
 }
 
 interface VerificationShape {
   env: Envelope;
   /** Unit root id for same-unit skip (rigid members keep their offsets). */
   unitRoot?: string;
+}
+
+/**
+ * Unit roots that can be translated INDIVIDUALLY: node-rooted units (the root
+ * is a movable node, not a group). Group roots are excluded — translating a
+ * group root moves every member rigidly and can never change the length of an
+ * edge between two of its members. Chained packets are excluded too (their
+ * position is decided by the Phase D snap).
+ */
+function directlyMovableRoots(units: Unit[]): Set<string> {
+  const out = new Set<string>();
+  for (const u of units) {
+    if (!u.rootIsGroup) out.add(u.rootId);
+  }
+  return out;
+}
+
+/**
+ * Post-repair minimum edge length (MUST-FIX 5, red-team W6/W7): repulsion
+ * separates envelopes but never guarantees L >= r_s + r_t + headLen, so
+ * repaired tight pairs render the arrowhead INSIDE the source. After every
+ * other position stage, drawn graph edges shorter than that are lengthened
+ * ALONG THEIR AXIS — each endpoint that is a directly movable unit root is
+ * translated outward by its share of the deficit, only when the move does
+ * not create a new I1 overlap (checked against every other envelope at the
+ * current positions). Bounded passes (8) cover chains whose shared endpoints
+ * shorten a neighbor while lengthening (the deficit sum halves per pass).
+ * Edges that cannot comply are left short — the renderer's degrade stage
+ * suppresses their arrowhead and emits `edge_head_suppressed_short_edge`;
+ * the geometry gate reports the residual I4 honestly.
+ */
+function lengthenShortEdges(
+  graph: SceneGraph,
+  byId: Map<string, SceneGraphNode>,
+  parentOf: Map<string, string>,
+  movableRoots: Set<string>,
+  chainedPackets: Set<string>,
+): void {
+  const EDGE_EPS = 1e-6;
+  const edges: Array<{ id: string; from: string; to: string }> = [];
+  for (const rel of graph.relationships) {
+    const from = byId.get(rel.from);
+    const to = byId.get(rel.to);
+    if (!from || !to) continue;
+    if (
+      !(GRAPH_NODE_KINDS_LOCAL.has(from.kind) && GRAPH_NODE_KINDS_LOCAL.has(to.kind))
+    ) {
+      continue; // only arrowhead-bearing (graph) edges are I4 subjects
+    }
+    edges.push({ id: rel.id, from: rel.from, to: rel.to });
+  }
+  edges.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  for (let pass = 0; pass < 8; pass++) {
+    let changed = false;
+    for (const e of edges) {
+      const fromNode = byId.get(e.from);
+      const toNode = byId.get(e.to);
+      if (!fromNode || !toNode) continue;
+      const pa = worldPositionOf(e.from, byId, parentOf);
+      const pb = worldPositionOf(e.to, byId, parentOf);
+      const L = dist(pa, pb);
+      if (L < 1e-9) continue; // degenerate self-loop — nothing to lengthen
+      const rS = fromNode.size * 0.5;
+      const rT = toNode.size * 0.5;
+      const required = rS + rT + arrowHead(rT).len;
+      const deficit = required - L;
+      if (deficit <= EDGE_EPS) continue;
+      const u = norm(sub(pb, pa));
+      const canA = movableRoots.has(e.from) && !chainedPackets.has(e.from);
+      const canB = movableRoots.has(e.to) && !chainedPackets.has(e.to);
+      if (!canA && !canB) continue; // both fixed/bound → degrade (suppress head)
+      const shareA = canA && canB ? 0.5 : canA ? 1 : 0;
+      const shareB = canA && canB ? 0.5 : canB ? 1 : 0;
+      const deltaA = mul(u, -deficit * shareA);
+      const deltaB = mul(u, deficit * shareB);
+      const okA =
+        shareA === 0 || !lengthenMoveCreatesOverlap(e.from, deltaA, byId, parentOf);
+      const okB =
+        shareB === 0 || !lengthenMoveCreatesOverlap(e.to, deltaB, byId, parentOf);
+      if (!okA || !okB) continue; // would create new I1 → leave short (degrade)
+      if (shareA > 0) byId.get(e.from)!.position = add(byId.get(e.from)!.position, deltaA);
+      if (shareB > 0) byId.get(e.to)!.position = add(byId.get(e.to)!.position, deltaB);
+      changed = true;
+    }
+    if (!changed) return;
+  }
+}
+
+/** True when translating `nodeId` by `delta` would create a new I1 overlap
+ * with any other node envelope (same-unit members excluded — rigid offsets
+ * are preserved by construction). Chained packets count as shapes (their
+ * snap position is final), so a lengthen never re-crashes a packet. */
+function lengthenMoveCreatesOverlap(
+  nodeId: string,
+  delta: Vec3,
+  byId: Map<string, SceneGraphNode>,
+  parentOf: Map<string, string>,
+): boolean {
+  const node = byId.get(nodeId);
+  if (!node) return false;
+  const newWorld = add(worldPositionOf(nodeId, byId, parentOf), delta);
+  const newEnv = nodeEnvelope({ ...node, position: newWorld });
+  for (const other of byId.values()) {
+    if (other.id === nodeId) continue;
+    if (envelopeOverlap(newEnv, worldEnvelopeOf(other.id, byId, parentOf), OVERLAP_MARGIN)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** All envelope shapes for the I1 verification: unit members (world), chained
@@ -1004,7 +1241,7 @@ export function computeBoundsFor(
     if (!from || !to) continue;
     const graphEdge =
       GRAPH_NODE_KINDS_LOCAL.has(from.kind) && GRAPH_NODE_KINDS_LOCAL.has(to.kind);
-    const legacyEdge = FLOW_TYPES.has(rel.type);
+    const legacyEdge = DRAWN_EDGE_TYPES.has(rel.type);
     if (graphEdge || legacyEdge) {
       edges.push({
         from: worldPositionOf(from.id, byId, parentOf),

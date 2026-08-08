@@ -53,6 +53,7 @@ import {
   REASON_EDGE_LABEL_SKIPPED,
   REASON_EDGE_LABEL_DENSE,
   REASON_EDGE_DEGENERATE,
+  REASON_EDGE_HEAD_SUPPRESSED,
   REASON_LINE_NO_ENDPOINTS,
   type Rect,
 } from "./presentation/constants";
@@ -266,7 +267,6 @@ export function nodeEnvelopes(graph: SceneGraph): Envelope[] {
       case "sphere":
       case "process_node":
       case "box":
-      case "camera_marker":
         envs.push({
           id: n.id,
           kind: "node",
@@ -274,6 +274,21 @@ export function nodeEnvelopes(graph: SceneGraph): Envelope[] {
           center: { ...n.position },
           halfExtents: { x: half, y: half, z: half },
           radius: n.kind === "box" ? undefined : half,
+        });
+        break;
+      case "camera_marker":
+        // Renderer geometry: camera_marker sphere r = size·0.4 (renderer.ts,
+        // design-1 §1.3) — NOT size/2. The placement/layout models already
+        // use 0.4; this gate/routing model must match or the marker's own
+        // label false-flags I3 (Wave-4b: orbits/electric-fields/wave
+        // showcases).
+        envs.push({
+          id: n.id,
+          kind: "node",
+          shape: "sphere",
+          center: { ...n.position },
+          halfExtents: { x: n.size * 0.4, y: n.size * 0.4, z: n.size * 0.4 },
+          radius: n.size * 0.4,
         });
         break;
       case "energy_packet":
@@ -296,12 +311,15 @@ export function nodeEnvelopes(graph: SceneGraph): Envelope[] {
         });
         break;
       case "vector_field":
+        // Renderer geometry: the field is a flat tick grid, height = tick
+        // length size·0.22 → half-height size·0.11 (design-1 §1.3/§2.4). A
+        // full cube (half y = size/2) samples phantom corners in I5.
         envs.push({
           id: n.id,
           kind: "field",
           shape: "box",
           center: { ...n.position },
-          halfExtents: { x: half, y: half, z: half },
+          halfExtents: { x: half, y: n.size * 0.11, z: half },
         });
         break;
       case "plane":
@@ -325,12 +343,16 @@ export function nodeEnvelopes(graph: SceneGraph): Envelope[] {
         });
         break;
       case "wave_surface":
+        // Renderer geometry: a flat x–z surface with amplitude size·0.15 in
+        // the displaced axis (design-2 §3.1) — NOT a full cube. The phantom
+        // cube corners (y = ±size/2) don't exist on screen and produced false
+        // I5 majors for wave-interference's surface.
         envs.push({
           id: n.id,
           kind: "wave",
           shape: "box",
           center: { ...n.position },
-          halfExtents: { x: half, y: half, z: half },
+          halfExtents: { x: half, y: n.size * 0.15, z: half },
         });
         break;
       default:
@@ -832,6 +854,13 @@ export interface RuntimeEdge {
   labelPlan: SceneEdgeLabelPlan | null;
   /** True when from==to: nothing is drawn and REASON_EDGE_DEGENERATE fires. */
   degenerate: boolean;
+  /**
+   * True when the edge is shorter than r_s + r_t + headLen even after the
+   * layout's post-repair lengthening (MUST-FIX 5): the arrowhead is degraded
+   * away and REASON_EDGE_HEAD_SUPPRESSED fires once at build; updateEdge
+   * draws the shaft only while the surfaces permit it.
+   */
+  headSuppressed: boolean;
 }
 
 /** The subset of renderer state edge construction operates on. */
@@ -866,6 +895,15 @@ export function buildGraphEdge(
   const totalLen = Math.hypot(t.x - f.x, t.y - f.y, t.z - f.z);
   const degenerate = totalLen < EPS;
   if (degenerate) ctx.reasons.push(REASON_EDGE_DEGENERATE);
+  // MUST-FIX 5 degrade: L < r_s + r_t + headLen would embed the arrowhead in
+  // the source. The layout lengthens these after repair; edges that STILL
+  // cannot comply (fixed/bound endpoints, blocked moves) degrade by
+  // simplification — no arrowhead, loud reason, never a head inside a body.
+  const rFrom = from.graph.size * 0.5;
+  const rTo = to.graph.size * 0.5;
+  const headSuppressed =
+    !degenerate && totalLen < rFrom + rTo + arrowHead(rTo).len - 1e-6;
+  if (headSuppressed) ctx.reasons.push(REASON_EDGE_HEAD_SUPPRESSED);
 
   let route: Vec3[] = [f, t];
   if (!degenerate) {
@@ -896,28 +934,30 @@ export function buildGraphEdge(
 
   const toColor = to.graph.color;
   let head: RuntimeEdge["head"] = null;
-  if (plan.inhibits) {
-    const barGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.4, 8);
-    const material = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(toColor),
-    });
-    material.transparent = true;
-    const bar = new THREE.Mesh(barGeo, material);
-    group.add(bar);
-    head = { mesh: bar, material, baseColor: toColor };
-    ctx.trackDisposable(barGeo);
-  } else {
-    // Fixed-proportion cone; updateEdge scales it to the ACTUAL target radius
-    // each frame (I4: len = clamp(0.72·r_t, 0.18, 0.5), radius = len/2.4).
-    const tipGeo = new THREE.ConeGeometry(0.15, 0.36, 10);
-    const material = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(toColor),
-    });
-    material.transparent = true;
-    const tip = new THREE.Mesh(tipGeo, material);
-    group.add(tip);
-    head = { mesh: tip, material, baseColor: toColor };
-    ctx.trackDisposable(tipGeo);
+  if (!headSuppressed) {
+    if (plan.inhibits) {
+      const barGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.4, 8);
+      const material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(toColor),
+      });
+      material.transparent = true;
+      const bar = new THREE.Mesh(barGeo, material);
+      group.add(bar);
+      head = { mesh: bar, material, baseColor: toColor };
+      ctx.trackDisposable(barGeo);
+    } else {
+      // Fixed-proportion cone; updateEdge scales it to the ACTUAL target radius
+      // each frame (I4: len = clamp(0.72·r_t, 0.18, 0.5), radius = len/2.4).
+      const tipGeo = new THREE.ConeGeometry(0.15, 0.36, 10);
+      const material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(toColor),
+      });
+      material.transparent = true;
+      const tip = new THREE.Mesh(tipGeo, material);
+      group.add(tip);
+      head = { mesh: tip, material, baseColor: toColor };
+      ctx.trackDisposable(tipGeo);
+    }
   }
 
   ctx.scene?.add(group);
@@ -938,11 +978,16 @@ export function buildGraphEdge(
     route,
     labelPlan: null,
     degenerate,
+    headSuppressed,
   });
   ctx.pickEdges.set(group, plan.id);
 }
 
-/** Legacy plain edge (flows_to / transfers_to only, non-graph scenes). */
+/** Legacy plain edge (flows_to / transfers_to / transforms_into, non-graph
+ * scenes). MUST-FIX 2: carries the same radius-aware arrowhead as derived
+ * graph edges, so before_after's transforms_into b1→b2 renders on the 3D
+ * surface with parity to the 2D surface (which always drew it), and the
+ * short-edge head suppression degrade (MUST-FIX 5) applies equally. */
 export function buildFlowEdge(
   ctx: EdgeContext,
   from: RuntimeNode,
@@ -960,6 +1005,32 @@ export function buildFlowEdge(
   group.add(line);
   ctx.scene?.add(group);
   ctx.trackDisposable(geo);
+
+  const totalLen = Math.hypot(
+    to.graph.position.x - from.graph.position.x,
+    to.graph.position.y - from.graph.position.y,
+    to.graph.position.z - from.graph.position.z,
+  );
+  const rFrom = from.graph.size * 0.5;
+  const rTo = to.graph.size * 0.5;
+  const headSuppressed =
+    totalLen < rFrom + rTo + arrowHead(rTo).len - 1e-6;
+  if (headSuppressed) ctx.reasons.push(REASON_EDGE_HEAD_SUPPRESSED);
+
+  const toColor = to.graph.color;
+  let head: RuntimeEdge["head"] = null;
+  if (!headSuppressed) {
+    const tipGeo = new THREE.ConeGeometry(0.15, 0.36, 10);
+    const material = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(toColor),
+    });
+    material.transparent = true;
+    const tip = new THREE.Mesh(tipGeo, material);
+    group.add(tip);
+    head = { mesh: tip, material, baseColor: toColor };
+    ctx.trackDisposable(tipGeo);
+  }
+
   ctx.edges.push({
     plan: {
       id: rel.id,
@@ -981,11 +1052,12 @@ export function buildFlowEdge(
       material: materialFor("line", from.graph.color),
       baseColor: from.graph.color,
     },
-    head: null,
+    head,
     label: null,
     route: [from.graph.position, to.graph.position],
     labelPlan: null,
     degenerate: false,
+    headSuppressed,
   });
 }
 
@@ -1084,7 +1156,18 @@ export function updateEdge(edge: RuntimeEdge): void {
   const shiftZ = (from.z + to.z) / 2 - midGraphZ;
 
   const gap = rFrom + SHAFT_GAP;
-  const headBase = rTo + headPlan.len;
+  // MUST-FIX 5: a suppressed head has no band — the shaft ends at the target
+  // surface (SHAFT_GAP). When even the bare surfaces cannot span the gap
+  // (r_s + r_t + 2·SHAFT_GAP), nothing is drawn — never an inverted stub.
+  const headBase = edge.headSuppressed ? rTo + SHAFT_GAP : rTo + headPlan.len;
+  const minSpan = rFrom + rTo + 2 * SHAFT_GAP;
+  if (len < minSpan) {
+    edge.shaft.geometry.setDrawRange(0, 0);
+    edge.shaft.line.visible = false;
+    if (edge.head) edge.head.mesh.visible = false;
+    if (edge.label) edge.label.visible = false;
+    return;
+  }
   const attribute = edge.shaft.attribute;
   attribute.setXYZ(
     0,

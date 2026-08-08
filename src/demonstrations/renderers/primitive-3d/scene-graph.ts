@@ -720,7 +720,13 @@ function identitySceneLayout(graph: SceneGraph): SceneLayout {
   };
   const nodes = graph.nodes.map((n) => ({ ...n, position: worldOf(n.id) }));
   const edges: Array<{ from: Vec3; to: Vec3 }> = [];
-  const EDGE_TYPES = new Set<RelationshipOperator>(["flows_to", "transfers_to"]);
+  // Draws the same legacy-edge set as the renderer (flows_to/transfers_to +
+  // transforms_into — MUST-FIX 2) plus derived graph edges.
+  const EDGE_TYPES = new Set<RelationshipOperator>([
+    "flows_to",
+    "transfers_to",
+    "transforms_into",
+  ]);
   for (const rel of graph.relationships) {
     const from = byId.get(rel.from);
     const to = byId.get(rel.to);

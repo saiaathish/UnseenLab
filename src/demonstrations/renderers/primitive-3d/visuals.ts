@@ -655,7 +655,15 @@ export function buildVisual(
       break;
     }
     case "label": {
-      buildLabelKindVisual(ctx, node, holder);
+      const labelMaterial = buildLabelKindVisual(ctx, node, holder);
+      // The sprite material is owned by this node so opacity animation and
+      // group-targeted propagation reach it (MUST-FIX 3): a label inside a
+      // revealed group fades in with the group.
+      rn.owned.push({
+        material: labelMaterial,
+        animateOpacity: true,
+        animateColor: false,
+      });
       break;
     }
     case "group": {
@@ -676,14 +684,55 @@ export function buildVisual(
   const anims = ctx.animationsByTarget.get(node.id) ?? [];
   const animateOpacity = anims.some((a) => OPACITY_ANIMATORS.has(a.operator));
   const animateColor = anims.some((a) => COLOR_ANIMATORS.has(a.operator));
-  if (animateOpacity || animateColor || ctx.graphMode) {
+  // MUST-FIX 3 (tpl-before-after-02): a group-targeted reveal/fade/pulse must
+  // reach the group's descendants. The propagation pass (renderer.ts
+  // applyGroupOpacity) can only write materials the build OWNED (cloned), so
+  // a descendant of an opacity-animated group gets a clone even when it has
+  // no animation of its own — otherwise the shipped "after" group reveal was
+  // a visual no-op (children rendered at full opacity from t=0).
+  const groupOpacityAnimated = opacityAnimatedGroupAncestor(
+    ctx.graph,
+    node.id,
+    ctx.animationsByTarget
+  );
+  if (animateOpacity || groupOpacityAnimated || animateColor || ctx.graphMode) {
     ctx.cloneMaterials(
       holder,
       rn,
-      animateOpacity || ctx.graphMode,
+      animateOpacity || groupOpacityAnimated || ctx.graphMode,
       animateColor
     );
   }
+}
+
+/**
+ * MUST-FIX 3: true when any GROUP ANCESTOR of `nodeId` carries an opacity
+ * animation (fade/reveal/pulse). Walk the children→parent chain (bounded by
+ * the graph's max group depth); groups are containers, so their animated
+ * opacity must compose into every descendant's rendered opacity.
+ */
+function opacityAnimatedGroupAncestor(
+  graph: SceneGraph | null,
+  nodeId: string,
+  animationsByTarget: Map<string, SceneGraphAnimation[]>
+): boolean {
+  if (!graph) return false;
+  const parentOf = new Map<string, string>();
+  for (const n of graph.nodes) {
+    for (const childId of n.children) parentOf.set(childId, n.id);
+  }
+  let current = parentOf.get(nodeId);
+  let depth = 0;
+  while (current !== undefined && depth < 8) {
+    const ancestor = graph.nodes.find((n) => n.id === current);
+    if (ancestor?.kind === "group") {
+      const anims = animationsByTarget.get(current) ?? [];
+      if (anims.some((a) => OPACITY_ANIMATORS.has(a.operator))) return true;
+    }
+    current = parentOf.get(current);
+    depth++;
+  }
+  return false;
 }
 
 /** Per-frame update of per-kind runtime state (particles/wave/ticks/trail). */

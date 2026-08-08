@@ -65,6 +65,7 @@ function makeRuntime(
     state: makeNodeState({ position: gnode.position, color: gnode.color }),
     owned: [],
     children: [],
+    parent: null,
   };
   return { rn, holder };
 }

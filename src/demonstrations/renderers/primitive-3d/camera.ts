@@ -451,6 +451,18 @@ export function graphFrameHalfHeight(
  *   half = max(halfX, halfY, halfX / aspect); margin as §3.2 (no swing);
  *   distance = (half + margin) / tan(fovDeg / 2), clamped [4, 120].
  * Worked checks: layered_system → 5.68; particle_population → 4 (floor).
+ *
+ * Wave-4b addition (I5 canonical coverage): the axis-aligned half frames the
+ * AABB only for content ON the view plane — off-axis corners project beyond
+ * the frustum in the top/left/right canonical views (and the ±band worst
+ * view), which the gate's I5 enforces. For each canonical view direction the
+ * EXACT framing distance is
+ *     max over AABB corners c of ( lateral_f(c) / tan(fov/2) + (c − center)·f )
+ * (lateral_f is convex in c, so the corner maximum is exact for a box; every
+ * content point lies inside the AABB). The distance grows to the max over
+ * front/top/left/right + the 9-combo orbit band — the same directions
+ * canonicalViews enumerates for non-graph scenes — so the gate's I5 verdict
+ * and the rendered frame agree in every canonical view.
  */
 export function perspectiveDistance(
   aabb: ContentExtent,
@@ -461,8 +473,75 @@ export function perspectiveDistance(
   const halfY = (aabb.max.y - aabb.min.y) / 2;
   const half = Math.max(halfX, halfY, halfX / aspect);
   const margin = frameMarginFor(half);
-  const distance = (half + margin) / Math.tan((fovDeg * Math.PI) / 360);
+  let distance = (half + margin) / Math.tan((fovDeg * Math.PI) / 360);
+  distance = Math.max(distance, perspectiveCanonicalDistance(aabb, fovDeg));
   return clampNum(distance, 4, 120);
+}
+
+/** The exact distance that keeps every AABB corner inside the frustum for the
+ * canonical non-graph view set (front/top/left/right + the ±band worst). */
+export function perspectiveCanonicalDistance(
+  aabb: ContentExtent,
+  fovDeg: number
+): number {
+  if (aabb.max.x < aabb.min.x) return 0; // empty extent — nothing to frame
+  const tanHalfFov = Math.tan((fovDeg * Math.PI) / 360);
+  const center = contentExtentCenter(aabb);
+  const corners: Vec3[] = [];
+  for (const dx of [aabb.min.x, aabb.max.x]) {
+    for (const dy of [aabb.min.y, aabb.max.y]) {
+      for (const dz of [aabb.min.z, aabb.max.z]) {
+        corners.push({ x: dx, y: dy, z: dz });
+      }
+    }
+  }
+  const dirs = perspectiveCanonicalViewDirs();
+  let required = 0;
+  for (const { azimuth, polar } of dirs) {
+    const f = viewDir(azimuth, polar);
+    let req = 0;
+    for (const c of corners) {
+      const v = { x: c.x - center.x, y: c.y - center.y, z: c.z - center.z };
+      const along = v.x * f.x + v.y * f.y + v.z * f.z;
+      const latX = v.x - along * f.x;
+      const latY = v.y - along * f.y;
+      const latZ = v.z - along * f.z;
+      const lateral = Math.hypot(latX, latY, latZ);
+      req = Math.max(req, lateral / tanHalfFov + along);
+    }
+    required = Math.max(required, req);
+  }
+  return required;
+}
+
+/** Canonical view directions for non-graph (perspective) scenes — mirrors the
+ * azimuth/polar formulas canonicalViews uses (default dir (1, 0.65, 1.35),
+ * top polar 0.05, left/right ± π/2, worst over the ±band 9-combo). */
+function perspectiveCanonicalViewDirs(): Array<{ azimuth: number; polar: number }> {
+  const azimuth = Math.atan2(1, 1.35);
+  const polar = Math.acos(0.65 / Math.hypot(1, 0.65, 1.35));
+  const dirs: Array<{ azimuth: number; polar: number }> = [
+    { azimuth, polar },
+    { azimuth, polar: 0.05 },
+    { azimuth: azimuth - Math.PI / 2, polar },
+    { azimuth: azimuth + Math.PI / 2, polar },
+  ];
+  for (const da of [-GRAPH_AZIMUTH_BAND, 0, GRAPH_AZIMUTH_BAND]) {
+    for (const dp of [-GRAPH_POLAR_BAND, 0, GRAPH_POLAR_BAND]) {
+      dirs.push({ azimuth: azimuth + da, polar: polar + dp });
+    }
+  }
+  return dirs;
+}
+
+/** Unit view direction from the orbit azimuth/polar (mirror of the gate's
+ * viewDirection — the camera sits along +f from the target). */
+function viewDir(azimuth: number, polar: number): { x: number; y: number; z: number } {
+  return {
+    x: Math.sin(polar) * Math.sin(azimuth),
+    y: Math.cos(polar),
+    z: Math.sin(polar) * Math.cos(azimuth),
+  };
 }
 
 // ---------------------------------------------------------------------------

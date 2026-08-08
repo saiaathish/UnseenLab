@@ -217,6 +217,11 @@ const threeStub = vi.hoisted(() => {
     side = 0;
     emissive = new Color();
     emissiveIntensity = 0;
+    constructor() {
+      // MUST-FIX 3: the group-opacity test inspects per-node materials, so
+      // every material instance (shared cache + per-node clones) is recorded.
+      createdMaterials.push(this);
+    }
     clone() {
       const c = new (this.constructor as new () => Material)();
       c.color = this.color.copy(new Color());
@@ -312,6 +317,16 @@ const threeStub = vi.hoisted(() => {
     }
   }
 
+  // Distinct subclasses so tests can identify a mesh's shape by
+  // `geometry.constructor.name` (the group-opacity test needs the box meshes).
+  class SphereGeometry extends Geometry {}
+  class BoxGeometry extends Geometry {}
+  class PlaneGeometry extends Geometry {}
+  class RingGeometry extends Geometry {}
+  class CylinderGeometry extends Geometry {}
+  class ConeGeometry extends Geometry {}
+  class OctahedronGeometry extends Geometry {}
+
   class Mesh extends Object3D {
     geometry: BufferGeometry;
     material: Material | Material[];
@@ -319,6 +334,7 @@ const threeStub = vi.hoisted(() => {
       super();
       this.geometry = geometry;
       this.material = material;
+      createdMeshes.push(this);
     }
   }
   class Line extends Mesh {}
@@ -347,6 +363,8 @@ const threeStub = vi.hoisted(() => {
   // Programmable raycast hits: tests plant objects here and the stub
   // Raycaster returns them (default: no hits).
   const raycastHits: Array<{ object: Object3D; distance: number; point: unknown }> = [];
+  const createdMaterials: Material[] = [];
+  const createdMeshes: Mesh[] = [];
 
   const THREE = {
     Color,
@@ -356,13 +374,13 @@ const threeStub = vi.hoisted(() => {
     Quaternion,
     BufferAttribute,
     BufferGeometry,
-    SphereGeometry: Geometry,
-    BoxGeometry: Geometry,
-    PlaneGeometry: Geometry,
-    RingGeometry: Geometry,
-    CylinderGeometry: Geometry,
-    ConeGeometry: Geometry,
-    OctahedronGeometry: Geometry,
+    SphereGeometry,
+    BoxGeometry,
+    PlaneGeometry,
+    RingGeometry,
+    CylinderGeometry,
+    ConeGeometry,
+    OctahedronGeometry,
     MeshBasicMaterial,
     MeshStandardMaterial,
     LineBasicMaterial,
@@ -392,10 +410,14 @@ const threeStub = vi.hoisted(() => {
   return {
     THREE,
     raycastHits,
+    createdMaterials,
+    createdMeshes,
     disposed,
     reset: () => {
       disposed.length = 0;
       raycastHits.length = 0;
+      createdMaterials.length = 0;
+      createdMeshes.length = 0;
     },
   };
 });
@@ -1275,6 +1297,116 @@ describe("primitive renderer lifecycle", () => {
     expect(threeStub.disposed).toContain("Geometry"); // scene A disposed
     renderer.dispose();
     expect(threeStub.disposed).toContain("WebGLRenderer");
+  });
+
+  it("group-targeted reveal propagates to descendants (MUST-FIX 3, tpl-before-after-02)", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const renderer = new PrimitiveSceneRenderer(canvas);
+    threeStub.reset();
+    renderer.setSpec(
+      makeSpec({
+        objects: [
+          { id: "before", kind: "group", children: ["b1"] },
+          { id: "b1", kind: "box", position: { x: -2.5, y: 0, z: 0 }, size: 1 },
+          { id: "after", kind: "group", children: ["b2"] },
+          { id: "b2", kind: "box", position: { x: 2.5, y: 0, z: 0 }, size: 1 },
+        ],
+        relationships: [
+          { id: "r1", type: "transforms_into", from: "b1", to: "b2" },
+        ],
+        animations: [
+          {
+            id: "a1", target: "after", operator: "reveal",
+            speed: 1, delayMs: 1500, amplitude: 1,
+          },
+        ],
+      })
+    );
+    const boxMeshes = threeStub.createdMeshes.filter(
+      (m: { geometry: { constructor: { name: string } } }) =>
+        m.geometry?.constructor?.name === "BoxGeometry"
+    );
+    expect(boxMeshes).toHaveLength(2);
+    // Drive to simTime 1.6s: the "after" group reveal (delay 1500ms, speed 1)
+    // is at opacity 0.1. dt is clamped to 0.05/frame, so step in 50ms frames.
+    fireFrame(1000); // clock frame
+    for (let t = 1050; t <= 2600; t += 50) fireFrame(t);
+    expect(renderer.getSimTime()).toBeCloseTo(1.6, 6);
+
+    // The mesh's own position is (0,0,0); the node position lives on the
+    // holder group (the mesh's parent) — written by applyTransforms in the
+    // frames above, so the lookup must come AFTER driving time.
+    const holderX = (m: { parent: { position: { x: number } } | null }) =>
+      (m.parent?.position?.x ?? 0) > 0 ? "after" : "before";
+    const afterBox = boxMeshes.find((m: { parent: { position: { x: number } } | null }) => holderX(m) === "after")!;
+    const beforeBox = boxMeshes.find((m: { parent: { position: { x: number } } | null }) => holderX(m) === "before")!;
+
+    // The child box material is multiplied by the group factor: 1.0 × 0.1.
+    // Before the fix the reveal was a visual no-op (no owned material on the
+    // child in a non-graph scene — the box stayed at full opacity).
+    const afterMaterial = afterBox.material as { opacity: number; transparent: boolean };
+    expect(afterMaterial.opacity).toBeCloseTo(0.1, 6);
+    expect(afterMaterial.transparent).toBe(true);
+    // The "before" group has no animation: its child's shared-cache material
+    // is never written (no clone, no propagation).
+    expect((beforeBox.material as { opacity: number }).opacity).toBe(1);
+    expect((beforeBox.material as { transparent: boolean }).transparent).toBe(false);
+
+    // After the reveal completes (elapsed ≥ 1) the child is fully visible.
+    for (let t = 2650; t <= 4650; t += 50) fireFrame(t);
+    expect((afterBox.material as { opacity: number }).opacity).toBe(1);
+    renderer.dispose();
+  });
+
+  it("nested group reveals compose through the graph's max depth (MUST-FIX 3 depth limit)", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const renderer = new PrimitiveSceneRenderer(canvas);
+    threeStub.reset();
+    renderer.setSpec(
+      makeSpec({
+        objects: [
+          { id: "g1", kind: "group", children: ["g2"] },
+          { id: "g2", kind: "group", children: ["g3"] },
+          { id: "g3", kind: "group", children: ["leaf"] },
+          // leaf is at graph depth 4 = SPEC_LIMITS.maxGroupDepth, the deepest
+          // legal chain with content (depth 5 would be flattened by the graph
+          // builder) — the propagation walk must compose through it, bounded.
+          { id: "leaf", kind: "box", position: { x: 3, y: 0, z: 0 }, size: 1 },
+        ],
+        animations: [
+          {
+            id: "a1", target: "g1", operator: "reveal",
+            speed: 1, delayMs: 0, amplitude: 1,
+          },
+          {
+            id: "a2", target: "g3", operator: "reveal",
+            speed: 1, delayMs: 0, amplitude: 1,
+          },
+        ],
+      })
+    );
+    const boxMeshes = threeStub.createdMeshes.filter(
+      (m: { geometry: { constructor: { name: string } } }) =>
+        m.geometry?.constructor?.name === "BoxGeometry"
+    );
+    expect(boxMeshes).toHaveLength(1);
+    // Drive to simTime 0.5s: both reveals are at opacity 0.5.
+    fireFrame(1000); // clock frame
+    for (let t = 1050; t <= 1500; t += 50) fireFrame(t);
+    expect(renderer.getSimTime()).toBeCloseTo(0.5, 6);
+    const box = boxMeshes[0];
+    // The propagation multiplies EVERY group ancestor into the leaf: 0.5 ×
+    // 0.5 = 0.25. A non-recursive fix (nearest group only) would read 0.5.
+    expect((box.material as { opacity: number }).opacity).toBeCloseTo(0.25, 6);
+    expect((box.material as { transparent: boolean }).transparent).toBe(true);
+    // g2 (no animation) between two animated groups still composes: g2's
+    // factor is 1, so the product is exactly g1 × g3 — no off-by-one in the
+    // recursion. After the full reveal the leaf returns to full opacity.
+    for (let t = 1550; t <= 2550; t += 50) fireFrame(t);
+    expect((box.material as { opacity: number }).opacity).toBe(1);
+    renderer.dispose();
   });
 
   it("advances time and applies operators over frames (smoke, no rasterization)", () => {

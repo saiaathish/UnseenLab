@@ -269,19 +269,40 @@ describe("template builder — canonical graph invariants (A1)", () => {
         expect(anim!.axis).toBe("x");
       });
 
-      it("before_after comparison is a visible child-to-child transforms_into", () => {
+      it("before_after is a visible child-to-child edge on BOTH surfaces (MUST-FIX 2)", () => {
         if (templateId !== "before_after_comparison") return;
-        const rel = relationships.find((r) => r.type === "transforms_into");
-        expect(rel, "transforms_into relationship must exist").toBeDefined();
+        // tpl-before-after-01: transforms_into rendered on 2D but NOT 3D (the
+        // legacy edge path only drew flows_to/transfers_to). The template now
+        // uses flows_to — drawn by BOTH surfaces — with the label carrying the
+        // original "transforms into" intent.
+        const rel = relationships.find((r) => r.type === "flows_to");
+        expect(rel, "flows_to relationship must exist").toBeDefined();
+        expect(rel!.label).toBe("transforms into");
         // Child-to-child (b1 → b2, both boxes) — groups render no edge on
-        // either surface, so the group-to-group form was invisible
-        // (tpl-before-after-01). Both surfaces can draw box→box edges.
+        // either surface, so the group-to-group form was invisible.
         expect(rel!.from).toBe("b1");
         expect(rel!.to).toBe("b2");
         const from = objects.find((o) => o.id === rel!.from)!;
         const to = objects.find((o) => o.id === rel!.to)!;
         expect(from.kind).toBe("box");
         expect(to.kind).toBe("box");
+        // 3D parity: flows_to is in the renderer's legacy drawn-edge set (the
+        // buildFlowEdge path draws it for non-graph scenes like this one).
+        const { graph } = buildSceneGraph(spec);
+        const relOnGraph = graph.relationships.find((r) => r.id === rel!.id)!;
+        expect(relOnGraph.type).toBe("flows_to");
+        expect(relOnGraph.label).toBe("transforms into");
+        // The scene stays non-graph (boxes) — identity layout, no repair.
+        expect(graph.layout?.repaired).toBe(false);
+        // A8-era observation/prediction copy never references the raw type
+        // name (the 2D surface would otherwise render "transforms_into").
+        const copy = [
+          spec.learningObjective,
+          ...spec.observationPrompts.map((p) => p.prompt),
+          spec.prediction.prompt,
+          ...spec.prediction.options,
+        ].join(" ");
+        expect(copy).not.toContain("transforms_into");
       });
 
       it("node ids, labels, positions and relationships are unchanged by the cleanup", () => {

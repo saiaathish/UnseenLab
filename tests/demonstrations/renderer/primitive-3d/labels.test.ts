@@ -527,7 +527,14 @@ describe("node label anchor selection", () => {
 // ---------------------------------------------------------------------------
 
 describe("edge label placement", () => {
-  it("cause_effect_network r2 (activates) clears node B and Effect C's label", () => {
+  it("cause_effect_network r2 (activates, vertical b→c) is skipped with the honest reason (MUST-FIX 6)", () => {
+    // FIXED FIXTURE (Wave-4b MUST-FIX 6): the old test built r2 as a
+    // HORIZONTAL a→b edge — that is r1 "causes"; the real r2 is the VERTICAL
+    // b→c edge (0,1)→(0,−1). On the vertical edge, any label with halfW +
+    // halfH > 0.12/√2 (every "activates"-length text) dips into the
+    // LABEL_EDGE_CLEAR band around its own shaft for both sides and all five
+    // t-values — the honest outcome is a SKIP (the pipeline emits
+    // edge_label_skipped_no_space), never a placement that does not happen.
     const nodes = [
       item("a", "sphere", "Cause A", { x: -3, y: 1, z: 0 }),
       item("b", "sphere", "Effect B", { x: 0, y: 1, z: 0 }),
@@ -537,27 +544,20 @@ describe("edge label placement", () => {
     const envelopes = nodes.map((n) => env(n.id, n.position));
     const plans = placeLabelItems({ items: nodes, envelopes, edgePolylines: [] }, []);
 
+    // The REAL r2: b → c, vertical (0,1)→(0,−1).
     const edge: RoutedEdge = {
       id: "r2",
-      fromId: "a",
-      toId: "b",
-      from: { x: -3, y: 1, z: 0 },
-      to: { x: 0, y: 1, z: 0 },
+      fromId: "b",
+      toId: "c",
+      from: { x: 0, y: 1, z: 0 },
+      to: { x: 0, y: -1, z: 0 },
       label: "activates",
     };
-    const plan = placeEdgeLabel(edge, envelopes, plans.map((p) => p.rect));
-    expect(plan).not.toBeNull();
-    // First candidate wins: t = 0.5, d = +1 → 0.299 above the midpoint.
-    expect(plan!.position.x).toBeCloseTo(-1.5, 6);
-    expect(plan!.position.y).toBeCloseTo(1 + GLYPH_HALF_H_EDGE + 0.22, 6);
-    expect(plan!.position.z).toBeCloseTo(0, 6);
-    // The accepted rect must be collision-free under the full context.
-    const ctx = {
-      nodeEnvelopes: envelopes.map((e) => inflateEnvelope(e, LABEL_ENV_CLEAR)),
-      edgePolylines: [{ id: edge.id, pts: [{ ...edge.from }, { ...edge.to }] }],
-      placedRects: plans.map((p) => p.rect),
-    };
-    expect(labelRectCollides(plan!.rect, ctx)).toBe(false);
+    // The honest outcome is a SKIP — the scene-level placement pass emits
+    // edge_label_skipped_no_space (reason emission is covered in
+    // edges.test.ts); asserting a placement that never happens is the
+    // false-evidence the old fixture produced.
+    expect(placeEdgeLabel(edge, envelopes, plans.map((p) => p.rect))).toBeNull();
   });
 
   it("returns null with no safe spot on a 0.6u edge (F-04)", () => {

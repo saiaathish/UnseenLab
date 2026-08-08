@@ -51,6 +51,14 @@ import { engineMappingForSpec } from "@/demonstrations/showcases/coupling";
 // The shared layout repair (C1's module; both surfaces consume the SAME pure
 // resolveLayout so the 2D projection mirrors the 3D layout — design-2 §6).
 import { resolveLayout } from "@/demonstrations/renderers/primitive-3d/layout/resolve-layout";
+// The production geometry-gate runner (MUST-FIX 1): the 2D surface runs the
+// SAME runner the 3D renderer invokes at setSpec, over the same laid-out
+// graph, and surfaces the verdict deterministically via data attributes
+// (design-2 §7.2 "where cheap" — no user-facing text change, frozen rail
+// copy untouched). degrade: false — the 2D surface surfaces the same gate
+// verdict without mutating its laid-out graph (its own spread handles 2D
+// projection residuals; 2D geometry behavior is unchanged).
+import { runGeometryGate } from "@/demonstrations/renderers/primitive-3d/presentation/pipeline";
 // The single source of all presentation geometry (design-2 §6.4).
 import {
   DIAMOND_HALF_PX,
@@ -629,6 +637,40 @@ export function AccessibleDiagram({
   // Same seed derivation as the 3D layout stage (design-1 §2.2.5) so both
   // surfaces repair the same scene deterministically.
   const laidOutGraph = graph ? resolveLayout(graph, hashString(`${spec.id}|${spec.generationId}`)).graph : null;
+  // MUST-FIX 1 (2D surface): the SAME production runner the 3D renderer
+  // invokes at setSpec, over the same laid-out graph — surfaced as
+  // deterministic data attributes on the diagram (I1–I5 major counts plus
+  // the surfaced reason codes). The diagram's own spread/projection handles
+  // 2D-specific residuals on top of this; degrade is off so the 2D surface
+  // never mutates its laid-out graph.
+  const gateRun = graph
+    ? runGeometryGate(laidOutGraph ?? graph, {
+        graphMode:
+          engineMappingForSpec(spec) === null && isGraphLikeScene(graph),
+        degrade: false,
+      })
+    : null;
+  const gate = gateRun
+    ? {
+        i1: gateRun.violations.filter(
+          (v) => v.invariant === "I1" && (v.severity === "critical" || v.severity === "major")
+        ).length,
+        i2: gateRun.violations.filter(
+          (v) => v.invariant === "I2" && (v.severity === "critical" || v.severity === "major")
+        ).length,
+        i3: gateRun.violations.filter(
+          (v) => v.invariant === "I3" && (v.severity === "critical" || v.severity === "major")
+        ).length,
+        i4: gateRun.violations.filter(
+          (v) => v.invariant === "I4" && (v.severity === "critical" || v.severity === "major")
+        ).length,
+        i5: gateRun.violations.filter(
+          (v) => v.invariant === "I5" && (v.severity === "critical" || v.severity === "major")
+        ).length,
+        unverified: !gateRun.ok,
+        reasons: gateRun.reasons,
+      }
+    : null;
   const resolvedPositions = new Map(
     (laidOutGraph?.nodes ?? graph?.nodes ?? []).map((n) => [n.id, n.position])
   );
@@ -704,7 +746,17 @@ export function AccessibleDiagram({
     .join(", ")}.`;
 
   return (
-    <figure className="text-foreground" data-z-collapse={zCollapsed ? "true" : undefined}>
+    <figure
+      className="text-foreground"
+      data-z-collapse={zCollapsed ? "true" : undefined}
+      data-gate-i1={gate?.i1 ?? 0}
+      data-gate-i2={gate?.i2 ?? 0}
+      data-gate-i3={gate?.i3 ?? 0}
+      data-gate-i4={gate?.i4 ?? 0}
+      data-gate-i5={gate?.i5 ?? 0}
+      data-gate-unverified={gate?.unverified ? "true" : undefined}
+      data-gate-reasons={gate && gate.reasons.length > 0 ? gate.reasons.join(" ") : undefined}
+    >
       <svg
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         role="img"

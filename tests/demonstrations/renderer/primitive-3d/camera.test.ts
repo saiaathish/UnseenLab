@@ -7,7 +7,8 @@
  * these tests do not exercise.
  *
  * "Design fixture" tests reproduce the worked checks of design-2 §3.2/§3.3
- * (process_flow 4.30, layered_system 5.68, particle_population 4, the swing
+ * (process_flow 4.30, layered_system 5.68, particle_population ~4.098 with
+ * the Wave-4b canonical-coverage override of the old 4 floor, the swing
  * margin) using the design's stated content geometry. The graph-side
  * estimator (contentAABBFromGraph) is tested against real scene graphs
  * through labels.ts's placed plans (the current renderer placement).
@@ -316,14 +317,18 @@ describe("perspectiveDistance", () => {
     expect(distance).toBeLessThanOrEqual(5.69);
   });
 
-  it("particle_population fixture → clamped to the 4 floor", () => {
-    // Single field size 2 → half 1.0, margin 0.45, distance 1.45/tan(25°)
-    // = 3.11 → floor 4 (unchanged clamp).
+  it("particle_population fixture → canonical coverage raises distance above the 4 floor", () => {
+    // Single field size 2 → half 1.0, margin 0.45, naive 1.45/tan(25°) = 3.11.
+    // Wave-4b canonical coverage (perspectiveCanonicalDistance — every AABB
+    // corner inside the frustum for front/top/left/right + ±band views, I5)
+    // raises this to ≈4.098; the 4 floor remains the lower bound.
     const aabb: ContentExtent = {
       min: { x: -1, y: -1, z: -1 },
       max: { x: 1, y: 1, z: 1 },
     };
-    expect(perspectiveDistance(aabb, DEFAULT_FOV_DEG, ASPECT_4_3)).toBe(4);
+    const distance = perspectiveDistance(aabb, DEFAULT_FOV_DEG, ASPECT_4_3);
+    expect(distance).toBeGreaterThan(4);
+    expect(distance).toBeLessThan(4.2);
   });
 });
 

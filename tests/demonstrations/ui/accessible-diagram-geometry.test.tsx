@@ -276,6 +276,30 @@ describe("AccessibleDiagram — duplicate spread (live process_flow repro)", () 
     expect(Number(circle.getAttribute("cx"))).toBeCloseTo(400, 6);
     expect(Number(circle.getAttribute("cy"))).toBeCloseTo(230, 6);
   });
+
+  it("draws transforms_into on the 2D surface (MUST-FIX 2 parity with 3D)", () => {
+    // before_after's b1→b2 transformation: the 2D diagram draws every
+    // declared relationship (no type filter), and since Wave-4b the 3D
+    // surface draws transforms_into through the legacy edge path too
+    // (edges.test.ts "transforms_into renders a legacy 3D edge...") — the
+    // relationship is visible on BOTH surfaces (the audit-1 parity breach is
+    // closed). This test pins the 2D half of the contract.
+    const spec = makeSpec({
+      objects: [
+        node("b1", -2.5, 0, 0, "box", "Before"),
+        node("b2", 2.5, 0, 0, "box", "After"),
+      ],
+      relationships: [
+        { id: "r1", type: "transforms_into", from: "b1", to: "b2" },
+      ],
+      animations: [],
+    });
+    const { container } = render(<AccessibleDiagram spec={spec} />);
+    const group = container.querySelector("[data-edge-type='transforms_into']");
+    expect(group).not.toBeNull();
+    expect(group!.querySelector("line")).not.toBeNull();
+    expect(group!.querySelector("polygon")).not.toBeNull(); // arrowhead
+  });
 });
 
 describe("AccessibleDiagram — label truncation parity (P4)", () => {

@@ -2,6 +2,22 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
+// Wave 4 (D2) mechanical swap, design-2 §3.5/§8: the click-target projection
+// now consumes the renderer's own camera math — content-AABB framing
+// (design-2 §3.1/§3.2) + the single-source CSS projection — instead of the
+// in-file `diagonal*0.72` mirror. Rail assertions are untouched (frozen).
+import {
+  contentAABBFromGraph,
+  contentExtentCenter,
+  FRAME_ASPECT_DEFAULT,
+  graphFrameHalfHeight,
+  projectOrthoToCSS,
+  type CanvasBox,
+} from "@/demonstrations/renderers/primitive-3d/camera";
+import { buildSceneGraph } from "@/demonstrations/renderers/primitive-3d/scene-graph";
+import { buildConceptualSpec } from "@/demonstrations/generation/offline/template-builder";
+import { createDefaultPreferences } from "@/domain/learner";
+
 /**
  * Lesson workspace redesign — browser verification of the demo lesson rail
  * (A5). Covers the frozen UX contract items 1, 2, 3 and the rail mechanics
@@ -135,46 +151,49 @@ const GRAPH_NODES: WorldNode[] = [
 const NODE_A: WorldNode = { position: { x: -3, y: 1 } };
 
 /**
+ * The canonical graph frame, derived ONCE from the renderer's own camera
+ * math so the projection below is the exact math the stage uses:
+ *   - the spec is the same offline-catalog build the seeding flow produces
+ *     for the "cause and effect" query (same spec id → same layout seed →
+ *     identical final node positions and label placement);
+ *   - buildSceneGraph runs the deterministic layout pass internally;
+ *   - contentAABBFromGraph measures the true content AABB (envelopes +
+ *     placed label rects, design-2 §3.1);
+ *   - graphFrameHalfHeight computes the ortho half-height at the renderer's
+ *     build aspect (FRAME_ASPECT_DEFAULT — frameCamera is called without a
+ *     live aspect at build, renderer.ts); the per-frame CSS projection uses
+ *     the live canvas aspect, exactly like applyCamera (halfW = halfH ·
+ *     cameraAspect).
+ */
+const RAIL_SPEC = buildConceptualSpec(
+  "cause_effect_network",
+  "cause and effect",
+  "cause and effect",
+  createDefaultPreferences(),
+);
+const { graph: RAIL_GRAPH } = buildSceneGraph(RAIL_SPEC);
+const RAIL_CONTENT = contentAABBFromGraph(RAIL_GRAPH, { graphMode: true });
+const RAIL_CENTER = contentExtentCenter(RAIL_CONTENT);
+const RAIL_HALF_H = graphFrameHalfHeight(RAIL_CONTENT, FRAME_ASPECT_DEFAULT).halfH;
+
+/**
  * Project a world position to CSS-pixel canvas coordinates using the
- * renderer's deterministic graph camera:
- *   center = bounds center; diagonal = bounds diagonal;
- *   distance = clamp(diagonal * 2.2, 4, 120); orthoBaseHalf = max(diagonal * 0.72, 1.4);
- *   camera = center + normalize(0, 0.55, 1) * distance, lookAt(center), up (0,1,0);
- *   halfH = orthoBaseHalf (zoom 1); halfW = halfH * aspect.
+ * renderer's deterministic graph camera — the single-source
+ * `projectOrthoToCSS` from camera.ts (math-identical replacement of the
+ * former in-file mirror; see the header comment above the frame constants).
  * Graph scenes never auto-orbit, so the projection is stable.
  */
 function projectNode(
-  canvasBox: { x: number; y: number; width: number; height: number },
+  canvasBox: CanvasBox,
   world: { x: number; y: number },
-  nodes: WorldNode[],
+  _nodes: WorldNode[],
 ): { x: number; y: number } {
-  const xs = nodes.map((n) => n.position.x);
-  const ys = nodes.map((n) => n.position.y);
-  const zs = nodes.map((n) => n.position.z ?? 0);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const minZ = Math.min(...zs);
-  const maxZ = Math.max(...zs);
-  const diagonal = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ);
-  // distance = clamp(diagonal * 2.2, 4, 120); at default zoom the frustum
-  // half-height is orthoBaseHalf regardless of distance, so only halfH matters.
-  const halfH = Math.max(diagonal * 0.72, 1.4);
-  const halfW = halfH * (canvasBox.width / canvasBox.height);
-  // View basis from lookAt: zAxis = normalize(pos - target) = (0, dy, dz),
-  // xAxis = normalize(cross(up, zAxis)) = (1, 0, 0),
-  // yAxis = cross(zAxis, xAxis) = (0, dz, -dy).
-  const len = Math.hypot(0, 0.55, 1);
-  const dz = 1 / len;
-  const viewX = world.x; // dot with xAxis
-  const viewY = dz * world.y; // dot with yAxis
-  const ndcX = viewX / halfW;
-  const ndcY = viewY / halfH;
-  return {
-    x: canvasBox.x + ((ndcX + 1) / 2) * canvasBox.width,
-    y: canvasBox.y + ((1 - ndcY) / 2) * canvasBox.height,
-  };
+  return projectOrthoToCSS({ x: world.x, y: world.y, z: 0 }, {
+    center: RAIL_CENTER,
+    halfH: RAIL_HALF_H,
+    aspect: canvasBox.width / canvasBox.height,
+    canvasBox,
+  });
 }
 
 /**

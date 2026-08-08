@@ -64,6 +64,14 @@ export interface EdgeGeom {
   pts: Vec3[]; // routed polyline (curves pre-sampled); last point = head base
   headLen: number; // from arrowHead(targetRadius)
   targetRadius: number; // actual (size*0.5), never max(0.25, …)
+  /**
+   * True when the edge's arrowhead was DEGRADED AWAY (MUST-FIX 5): the edge
+   * is shorter than r_s + r_t + headLen even after layout repair, so the
+   * renderer suppresses the head and emits `edge_head_suppressed_short_edge`.
+   * The I4 checker skips such edges entirely (there is no head to anchor);
+   * the suppression reason is the loud surface, never a silent pass.
+   */
+  headSuppressed?: boolean;
 }
 
 export interface LabelGeom {
@@ -154,6 +162,39 @@ export const REASON_ARROW_HEAD_LENGTH = "arrow_head_length_out_of_bounds";
 export const REASON_SHAFT_INSIDE_SOURCE = "shaft_inside_source_envelope";
 export const REASON_VIEWPORT_OUT_OF_FRAME = "content_outside_viewport";
 export const REASON_EDGE_EDGE_CROSSING = "edge_edge_crossing";
+
+// ---------------------------------------------------------------------------
+// Gate reason codes for the PRODUCTION wiring (design-2 §7.2 / MUST-FIX 1):
+// violation-derived codes appended to the renderer's reason channel so a
+// gated scene that fails loudly is never silent. One code per invariant with
+// any critical/major violation; `gate_unverified` when any breach remains
+// after the degrade steps (the scene is accepted with a documented residual).
+// ---------------------------------------------------------------------------
+
+export const REASON_GATE_I1 = "gate_I1_violations";
+export const REASON_GATE_I2 = "gate_I2_violations";
+export const REASON_GATE_I3 = "gate_I3_violations";
+export const REASON_GATE_I4 = "gate_I4_violations";
+export const REASON_GATE_I5 = "gate_I5_violations";
+export const REASON_GATE_UNVERIFIED = "gate_unverified";
+
+/** Invariant → gate code for a violation with severity ≥ major. */
+export function gateReasonForInvariant(invariant: InvariantId): string | null {
+  switch (invariant) {
+    case "I1":
+      return REASON_GATE_I1;
+    case "I2":
+      return REASON_GATE_I2;
+    case "I3":
+      return REASON_GATE_I3;
+    case "I4":
+      return REASON_GATE_I4;
+    case "I5":
+      return REASON_GATE_I5;
+    default:
+      return null; // INFO never blocks and never gets a gate code
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Tolerances (design-2 §7)
@@ -540,6 +581,7 @@ export function checkArrowAnchoring(scene: GateScene): GateResult {
   const byId = new Map(scene.envelopes.map((e) => [e.id, e]));
 
   for (const edge of scene.edges) {
+    if (edge.headSuppressed) continue; // degraded away — reason surfaces it
     if (edge.headLen < HEAD_LEN_MIN - GATE_EPS || edge.headLen > HEAD_LEN_MAX + GATE_EPS) {
       violations.push({
         id: edge.id,
@@ -556,7 +598,14 @@ export function checkArrowAnchoring(scene: GateScene): GateResult {
     if (!source || !target) continue; // endpoint envelope missing — nothing to anchor to
 
     const base = edge.pts[edge.pts.length - 1];
-    const dir = normalize(sub(base, edge.pts[edge.pts.length - 2]));
+    // DEVIATION FROM DESIGN-2 §7.1 (documented, W9): the head axis is the
+    // CENTER-TO-CENTER axis of the endpoint envelopes — exactly how the
+    // renderer's updateEdge orients the cone every frame — not the last
+    // polyline segment. On detoured (routed) edges the last segment's
+    // direction differs from the rendered head axis, which produced false
+    // `arrow_tip_off_surface` majors (red-team W9). The check still enforces
+    // tip-on-surface, band [r_t, r_t + len] and head-not-in-source.
+    const dir = normalize(sub(target.center, source.center));
     const tip = add(base, scale(dir, edge.headLen));
 
     // Tip exactly ON the target surface: signed distance ≈ 0 (±0.02).
@@ -671,10 +720,17 @@ export function makeViewProjection(camera: CameraGeom, view: CanonicalView): Vie
     view,
     project(p: Vec3): { x: number; y: number } | null {
       const v = sub(p, eye);
-      const vz = dot(v, f);
+      // View-space depth along the LOOK direction: the eye sits at
+      // center + f·distance and the camera looks along −f (three.js
+      // convention), so depth = −dot(v, f) is positive exactly for points
+      // in front of the camera. (Wave-4b MUST-FIX 1 wiring exposed a sign
+      // bug here: the code used dot(v, f), which reads every visible point
+      // as "behind_camera" — every perspective / non-graph scene failed
+      // I5 in production while the ortho graph scenes masked it.)
+      const depth = -dot(v, f);
       if (camera.mode === "perspective") {
-        if (vz <= GATE_EPS) return null; // behind the camera
-        const scaleFactor = 1 / (vz * tanHalfFov);
+        if (depth <= GATE_EPS) return null; // behind the camera
+        const scaleFactor = 1 / (depth * tanHalfFov);
         return { x: dot(v, right) * scaleFactor, y: dot(v, upv) * scaleFactor };
       }
       return { x: dot(v, right) / camera.halfW, y: dot(v, upv) / camera.halfH };
