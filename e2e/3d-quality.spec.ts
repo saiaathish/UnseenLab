@@ -9,19 +9,16 @@ import path from "node:path";
  * Two layers:
  *
  * 1. Pure gate run (no browser): for the 10 conceptual templates + 3
- *    showcases + the stress corpus, assemble the GateScene from the SAME
- *    pure building blocks the renderer consumes at build (buildSceneGraph
- *    with the deterministic layout pass → nodeEnvelopes → deriveGraphEdges +
- *    routeEdge + edgeHeadFor shaft spans → planNodeLabels glyph rects →
- *    placeSceneEdgeLabels → contentAABBFromGraph + graphFrameHalfHeight /
- *    perspectiveDistance + canonicalViews) and run checkScene (I1–I5).
- *
- *    DEVIATION FROM DESIGN-2 §8.1 (documented): the design assumes a
- *    `resolvePresentation` aggregate export; no such export exists in app
- *    code (the pipeline is C1–C5 module-scattered), and app source is frozen
- *    to D2 — so the assembly lives in this spec, feeding the identical
- *    inputs to the identical modules. Templates/showcases must pass
- *    (ok === true); corpus cases assert their expected violation profile.
+ *    showcases + the stress corpus, run the PRODUCTION gate runner
+ *    (presentation/pipeline.ts `runGeometryGate` — the single wired call
+ *    site the renderer executes at setSpec; red-team MUST-FIX 1 closure).
+ *    The stress corpus was re-pinned at Wave-4b against exactly this path
+ *    (tests/demonstrations/renderer/presentation-pipeline.test.ts); this
+ *    e2e gate run asserts the same contract at browser-suite level —
+ *    templates/showcases gate-clean (ok === true), corpus cases match their
+ *    pinned violation profile and loud reason surface. (The spec's local
+ *    GateScene assembly survives only as the camera/projection source for
+ *    the browser leg's screen-space checks — same pure camera math.)
  *
  * 2. Browser bounding-box QA: every demo is seeded through the app's own
  *    ask-to-demo flow (POST /api/demonstrations/generate stubbed to 500 →
@@ -90,6 +87,7 @@ import {
   WAVE_INTERFERENCE_SHOWCASE_QUERY,
 } from "@/demonstrations/showcases/wave-interference/build-spec";
 import { engineMappingForSpec } from "@/demonstrations/showcases/coupling";
+import { runGeometryGate } from "@/demonstrations/renderers/primitive-3d/presentation/pipeline";
 import {
   buildSceneGraph,
   deriveGraphEdges,
@@ -114,10 +112,6 @@ import {
   projectOrthoToCSS,
 } from "@/demonstrations/renderers/primitive-3d/camera";
 import {
-  checkScene,
-  checkEnvelopeIntersections,
-  REASON_ENVELOPE_OVERLAP,
-  REASON_ARROW_HEAD_IN_SOURCE,
   type GateScene,
   type EdgeGeom,
   type LabelGeom,
@@ -431,16 +425,26 @@ test("gate run: all 10 templates + 3 showcases pass I1–I5 (critical/major = 0)
   const failures: Array<{ id: string; violations: Violation[] }> = [];
   const infoReasons = new Set<string>();
   for (const seed of ALL_SEEDS) {
-    const { scene, graphMode } = assemblePipelineScene(seed.build());
-    const result = checkScene(scene);
-    for (const v of result.violations) {
+    const spec = seed.build();
+    const { graph } = buildSceneGraph(spec);
+    const graphMode =
+      engineMappingForSpec(spec) === null && isGraphLikeScene(graph);
+    const pres = runGeometryGate(graph, { graphMode });
+    for (const v of pres.violations) {
       if (v.invariant === "INFO") infoReasons.add(v.reason);
     }
-    if (!result.ok) failures.push({ id: seed.id, violations: result.violations });
+    const majors = pres.violations.filter(
+      (v) => v.severity === "critical" || v.severity === "major",
+    );
+    if (majors.length > 0) failures.push({ id: seed.id, violations: majors });
     expect(
       graphMode,
       `${seed.id}: renderer camera mode (graph-like, no engine coupling)`,
     ).toBe(seed.graphMode);
+    expect(
+      pres.ok,
+      `${seed.id}: production gate verdict must pass (runGeometryGate)`,
+    ).toBe(true);
   }
   expect(
     failures,
@@ -459,39 +463,44 @@ test("gate run: all 10 templates + 3 showcases pass I1–I5 (critical/major = 0)
 });
 
 test("gate run: stress corpus reports the expected violation profile", () => {
+  // The corpus (tests/demonstrations/renderer/presentation-gate.corpus.ts) was
+  // re-pinned at Wave-4b against the WIRED pipeline — the exact contract
+  // presentation-pipeline.test.ts asserts at unit level. This e2e gate run
+  // asserts the same counts/reasons through the SAME production runner
+  // (runGeometryGate), so the browser-suite evidence matches the unit pins.
   for (const entry of STRESS_CORPUS) {
-    const { scene, pipelineReasons } = assemblePipelineScene(entry.spec);
-    const result = checkScene(scene);
-    const critical = result.violations.filter((v) => v.severity === "critical");
-    expect(critical, `${entry.id}: zero critical violations`).toEqual([]);
-    expect(
-      result.ok,
-      `${entry.id}: ok should be ${entry.expect.major === 0} (expected major=${entry.expect.major})`,
-    ).toBe(entry.expect.major === 0);
-    // Gate-emitted reason codes must surface.
-    const gateReasons = new Set(result.violations.map((v) => v.reason));
-    const pipelineSet = new Set(pipelineReasons);
+    const { graph, reasons } = buildSceneGraph(entry.spec);
+    const graphMode =
+      engineMappingForSpec(entry.spec) === null && isGraphLikeScene(graph);
+    const pres = runGeometryGate(graph, { graphMode });
+    const violations = pres.gate.violations;
+    const critical = violations.filter((v) => v.severity === "critical").length;
+    const major = violations.filter((v) => v.severity === "major").length;
+    const minor = violations.filter((v) => v.severity === "minor").length;
+    expect(critical, `${entry.id}: critical count`).toBe(entry.expect.critical);
+    expect(major, `${entry.id}: major count`).toBe(entry.expect.major);
+    expect(minor, `${entry.id}: minor count`).toBe(entry.expect.minor);
+    // Gate-emitted reason codes must surface (gate violations OR pipeline
+    // reasons — the same contract as presentation-pipeline.test.ts).
+    const gateReasons = new Set(violations.map((v) => v.reason));
+    const pipelineReasons = new Set([...reasons, ...pres.reasons]);
     for (const reason of entry.expect.reasons) {
       expect(
-        gateReasons.has(reason) || pipelineSet.has(reason),
+        gateReasons.has(reason) || pipelineReasons.has(reason),
         `${entry.id}: expected reason "${reason}" in gate violations or pipeline reasons`,
       ).toBe(true);
     }
-    if (entry.id === "dense_80_lattice") {
-      const i1 = checkEnvelopeIntersections(scene);
-      expect(i1.violations.length).toBeGreaterThanOrEqual(70);
-    }
-    if (entry.id === "size5_1u_spacing") {
-      const reasons = result.violations.map((v) => v.reason);
-      expect(reasons).toContain(REASON_ENVELOPE_OVERLAP);
-      // NOTE: the corpus annotation also expects content_outside_viewport
-      // (I5) here, but C4's content-AABB framing covers the whole AABB by
-      // construction, so I5 may pass; only the guaranteed I1 outcome is
-      // asserted. (Counts beyond that are pipeline-annotation-derived and
-      // depend on the nonexistent resolvePresentation aggregate.)
-    }
-    if (entry.id === "short_edges") {
-      expect(result.violations.some((v) => v.reason === REASON_ARROW_HEAD_IN_SOURCE)).toBe(true);
+    // Unpinned documented limitations still fail loudly — never silent.
+    if (entry.documentedLimitation) {
+      const majors = violations.filter(
+        (v) => v.severity === "critical" || v.severity === "major",
+      );
+      if (majors.length > 0) {
+        expect(
+          pres.reasons,
+          `${entry.id}: documented limitation must surface gate_unverified`,
+        ).toContain("gate_unverified");
+      }
     }
   }
 });
@@ -633,7 +642,10 @@ interface DomShape {
 
 interface EdgeDom {
   type: string;
-  tip: { x: number; y: number };
+  /** Arrowhead polygon tip (CSS px) — null when the edge renders no polygon:
+   * the 2D surface draws inhibits edges as a `—|` bar, not an arrowhead
+   * (accessible-representation.tsx, design-2 §6.1). */
+  tip: { x: number; y: number } | null;
   labelBox: Box2D | null;
 }
 
@@ -687,28 +699,30 @@ async function readDiagramDom(svg: Locator): Promise<{
     const g = edgeGroups.nth(i);
     const type = (await g.getAttribute("data-edge-type")) ?? "unknown";
     const polygon = g.locator("polygon").first();
-    const polygonBox = await polygon.boundingBox();
-    expect(polygonBox, `edge ${i} arrowhead must exist`).not.toBeNull();
-    // The arrowhead polygon's first vertex is the tip (viewBox units); map it
-    // to CSS px through the svg client rect.
-    const points = ((await polygon.getAttribute("points")) ?? "").trim();
-    const first = points.split(/\s+/)[0];
-    const [vbX, vbY] = first.split(",").map((s) => parseFloat(s));
-    const scaleX = svgBox.w / VIEW_W;
-    const scaleY = svgBox.h / VIEW_H;
+    const hasPolygon = (await polygon.count()) > 0;
+    let tip: { x: number; y: number } | null = null;
+    if (hasPolygon) {
+      const polygonBox = await polygon.boundingBox();
+      expect(polygonBox, `edge ${i} arrowhead must have a box`).not.toBeNull();
+      // The arrowhead polygon's first vertex is the tip (viewBox units); map
+      // it to CSS px through the svg client rect.
+      const points = ((await polygon.getAttribute("points")) ?? "").trim();
+      const first = points.split(/\s+/)[0];
+      const [vbX, vbY] = first.split(",").map((s) => parseFloat(s));
+      const scaleX = svgBox.w / VIEW_W;
+      const scaleY = svgBox.h / VIEW_H;
+      tip = {
+        x: svgBox.x + vbX * scaleX,
+        y: svgBox.y + vbY * scaleY,
+      };
+    }
     const edgeLabel = g.locator("text").first();
-    const labelBoxRaw = await edgeLabel.boundingBox();
+    const hasLabel = (await edgeLabel.count()) > 0;
+    const labelBoxRaw = hasLabel ? await edgeLabel.boundingBox() : null;
     const labelBox: Box2D | null = labelBoxRaw
       ? { x: labelBoxRaw.x, y: labelBoxRaw.y, w: labelBoxRaw.width, h: labelBoxRaw.height }
       : null;
-    edges.push({
-      type,
-      tip: {
-        x: svgBox.x + vbX * scaleX,
-        y: svgBox.y + vbY * scaleY,
-      },
-      labelBox,
-    });
+    edges.push({ type, tip, labelBox });
   }
   return { shapes, edges, svgBox };
 }
@@ -717,7 +731,9 @@ async function assertDiagramQa(page: Page, spec: DemoSpecV1, seedId: string): Pr
   const svg = await openDiagramTab(page);
   expect(svg, "templates must offer the Diagram representation").not.toBeNull();
   const { shapes, edges, svgBox } = await readDiagramDom(svg!);
-  expect(shapes.length).toBeGreaterThan(1);
+  // particle_population is a single-field scene (one root shape); every other
+  // template renders at least two shapes.
+  expect(shapes.length).toBeGreaterThanOrEqual(1);
 
   // 1. Shape body vs shape body: no on-screen overlap (1 px tolerance).
   const shapePairs: string[] = [];
@@ -803,7 +819,19 @@ async function assertDiagramQa(page: Page, spec: DemoSpecV1, seedId: string): Pr
     const matches = shapes.filter((s) => s.label === targetLabel);
     if (matches.length !== 1) continue; // non-unique target label: skip
     const target = matches[0];
-    const dist = Math.hypot(edges[i].tip.x - target.center.x, edges[i].tip.y - target.center.y);
+    const edge = edges[i];
+    if (!edge.tip) {
+      // The 2D surface draws inhibits edges as a `—|` bar, never an arrowhead
+      // (accessible-representation.tsx) — no tip to measure. A NON-inhibits
+      // edge without an arrowhead polygon, however, is a real 2D defect.
+      if (edge.type !== "inhibits") {
+        tipMismatches.push(
+          `edge ${relationship.id} (${relationship.type}): no arrowhead polygon rendered`,
+        );
+      }
+      continue;
+    }
+    const dist = Math.hypot(edge.tip.x - target.center.x, edge.tip.y - target.center.y);
     const expected = SHAPE_RADIUS_PX * scale;
     if (Math.abs(dist - expected) > 3 * scale) {
       tipMismatches.push(
