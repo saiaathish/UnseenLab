@@ -86,6 +86,7 @@ export interface DemonstrationShellProps {
 
   // canonical interaction surface (graph scenes only): the rail's interact
   // step completes on the referenced node's onNodeManipulate event.
+  onNodeSelect?: (nodeId: string | null) => void;
   onNodeManipulate?: (nodeId: string) => void;
   /** Node ids actually manipulated after the prediction was committed. */
   manipulatedNodeIds?: string[];
@@ -156,6 +157,8 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
             readouts={props.readouts}
             parameters={props.parameters}
             onRepresentationChange={props.onRepresentationChange}
+            onNodeSelect={props.onNodeSelect}
+            onNodeManipulate={props.onNodeManipulate}
             stage={{
               spec,
               parameters: props.parameters,
@@ -168,6 +171,7 @@ export function DemonstrationShell(props: DemonstrationShellProps) {
               onVisualState: props.onVisualState,
               visualState: props.visualState ?? null,
               engineMapping: props.engineMapping ?? null,
+              onNodeSelect: props.onNodeSelect,
               onNodeManipulate: props.onNodeManipulate,
             }}
           />
