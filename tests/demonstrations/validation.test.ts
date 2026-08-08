@@ -1926,4 +1926,81 @@ describe("sanitizeDemoSpec — lesson-action contract (legacy free-text control 
     expect(result.status).toBe("valid");
     expect(result.spec!.observationPrompts).toHaveLength(1);
   });
+
+  // Red-team P1: free-text filter evasion via verb variants ("boost", "crank
+  // up", "reduce") and trailing adverbial words ("gravity down", "pull to
+  // zero"). Each probe names a known gravity control that the orbit spec does
+  // NOT expose, so each must be dropped; the same probes must be kept the
+  // moment a gravity control IS available.
+  const EVASION_PROBES = [
+    "Turn the gravity down.",
+    "Boost the gravitational constant.",
+    "Reduce the gravitational pull to zero.",
+    "Crank up the gravity.",
+  ];
+  const WATCH_PROBES = [
+    "Watch the arrows: how does the direction of the gravity force compare to the direction of motion?",
+    "Watch how the orbit changes when you adjust the Launch speed.",
+  ];
+
+  it("drops verb-variant and trailing-word evasion phrasings when no gravity control is available", () => {
+    const spec = orbitSpecWithLaunchSpeedOnly([
+      ...EVASION_PROBES.map((prompt) => ({ prompt })),
+      ...WATCH_PROBES.map((prompt) => ({ prompt })),
+    ]);
+    const result = sanitizeDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain(
+      "repaired:observation_prompt_unavailable_control"
+    );
+    // All four evasions are dropped; purely observational/watch prompts stay.
+    expect(result.spec!.observationPrompts).toEqual(
+      WATCH_PROBES.map((prompt) => ({ prompt }))
+    );
+  });
+
+  it("keeps the same evasion phrasings when a Gravity strength control IS available", () => {
+    const spec = orbitSpecWithLaunchSpeedOnly([
+      ...EVASION_PROBES.map((prompt) => ({ prompt })),
+      ...WATCH_PROBES.map((prompt) => ({ prompt })),
+    ]);
+    spec.controls.push({
+      id: "param_g",
+      type: "slider",
+      label: "Gravity strength",
+      target: { kind: "parameter", ref: "g" },
+      min: 0.5,
+      max: 200,
+      step: 0.5,
+      defaultValue: 10,
+    });
+    const result = sanitizeDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+    // Nothing dropped: every probe resolves to an available control.
+    expect(result.spec!.observationPrompts).toHaveLength(
+      EVASION_PROBES.length + WATCH_PROBES.length
+    );
+  });
+
+  it("keeps the evasion phrasings when a control label itself contains the phrase", () => {
+    // A control literally labeled "Gravitational pull" must keep
+    // "Reduce the gravitational pull to zero." — the drop happens ONLY when
+    // the underlying control is unavailable.
+    const spec = orbitSpecWithLaunchSpeedOnly([
+      { prompt: "Reduce the gravitational pull to zero." },
+    ]);
+    spec.controls.push({
+      id: "param_g",
+      type: "slider",
+      label: "Gravitational pull",
+      target: { kind: "parameter", ref: "g" },
+      min: 0.5,
+      max: 200,
+      step: 0.5,
+      defaultValue: 10,
+    });
+    const result = sanitizeDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+    expect(result.spec!.observationPrompts).toHaveLength(1);
+  });
 });
