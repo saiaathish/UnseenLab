@@ -1677,4 +1677,54 @@ describe("validateDemoSpec — model geometry rejections (design-1 §7.2)", () =
     expect(["valid", "repaired"]).toContain(result.status);
     expect(result.reasons.some((r) => r.startsWith("geometry:"))).toBe(false);
   });
+
+  it("W4 density class as MODEL output is rejected: 25 size-1 nodes on a 1u grid (geometry:envelope_overlap)", () => {
+    // Red-team hostile question 1: the W4 attack spec (25 process_node, size
+    // 1, at (c−2, r−2)·1 spacing, 120-char labels). Adjacent pairs sit at
+    // exactly the envelope-touching distance — inside the layout engine's
+    // own minimum clearance (ENVELOPE_CLEARANCE = 0.1) — so the class cannot
+    // be relied on to repair. The sanitizer backstop must reject it with
+    // `geometry:envelope_overlap` (a raw-penetration-only test let this class
+    // through; the threshold is the layout's clearance, E1 wave 5).
+    const objects: unknown[] = [];
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        objects.push({
+          id: `n${r}_${c}`,
+          kind: "process_node",
+          position: { x: c - 2, y: r - 2, z: 0 },
+          size: 1,
+          label: "A".repeat(120),
+        });
+      }
+    }
+    const result = validateDemoSpec(modelSpecWithObjects(objects));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("geometry:envelope_overlap");
+  });
+
+  it("the SAME W4 density class as curated output is exempt (layout repairs it)", () => {
+    // Curated provenance: the geometric rejections do not run (the layout
+    // engine is the repair path for curated specs — process_flow's pn1/ep1
+    // duplicate and the W4 grid class both stay valid and carry no
+    // geometry:* reason).
+    const spec = verifiedSimulationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    const objects: unknown[] = [];
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        objects.push({
+          id: `n${r}_${c}`,
+          kind: "process_node",
+          position: { x: c - 2, y: r - 2, z: 0 },
+          size: 1,
+          label: "A".repeat(120),
+        });
+      }
+    }
+    (raw.scene3d as { objects: unknown[] }).objects = objects;
+    const result = validateDemoSpec(JSON.stringify(raw));
+    expect(["valid", "repaired"]).toContain(result.status);
+    expect(result.reasons.some((r) => r.startsWith("geometry:"))).toBe(false);
+  });
 });

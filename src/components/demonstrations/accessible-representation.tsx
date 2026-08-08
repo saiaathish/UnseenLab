@@ -634,9 +634,23 @@ export function AccessibleDiagram({
 
   // --- Layout: shared resolveLayout (3D parity) -> projection -> spread. ---
 
-  // Same seed derivation as the 3D layout stage (design-1 §2.2.5) so both
-  // surfaces repair the same scene deterministically.
-  const laidOutGraph = graph ? resolveLayout(graph, hashString(`${spec.id}|${spec.generationId}`)).graph : null;
+  // ATK-14 (2D/3D parity on residual scenes): buildSceneGraph above already
+  // ran the deterministic seeded layout and wrote the final positions back
+  // into the node objects (graph.layout is always attached), so `graph` IS
+  // the laid-out graph — the same one the 3D renderer renders. Re-running
+  // resolveLayout on it would drift residual scenes a second time (~0.29u,
+  // red-team ATK-14). Consume the laid-out graph as-is; only resolve when a
+  // graph arrives without a layout (defensive — same seed derivation as the
+  // 3D layout stage, design-1 §2.2.5).
+  const laidOutGraph =
+    graph && graph.layout
+      ? graph
+      : graph
+        ? resolveLayout(
+            graph,
+            hashString(`${spec.id}|${spec.generationId}`),
+          ).graph
+        : null;
   // MUST-FIX 1 (2D surface): the SAME production runner the 3D renderer
   // invokes at setSpec, over the same laid-out graph — surfaced as
   // deterministic data attributes on the diagram (I1–I5 major counts plus

@@ -1691,4 +1691,45 @@ describe("graph interaction surface", () => {
     expect(onNodeManipulate).not.toHaveBeenCalled();
     renderer.dispose();
   });
+
+  it("getLastReasons() carries each reason code at most once (dedup at the setSpec join)", () => {
+    // Red-team 4c survivor 7: the gate runner (runGeometryGate at setSpec) and
+    // buildScene each compute the same placement reasons (routing blocks,
+    // label ellipsis/anchor fallbacks, edge-label skips, suppressed heads), so
+    // the joined surface used to carry every code twice. The join point
+    // dedupes: first occurrence wins, pipeline order preserved. This pins the
+    // dense-chain class the duplication was observed on (13 nodes, 12 edges).
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const renderer = new PrimitiveSceneRenderer(canvas);
+    const objects: NonNullable<Scene3D["objects"]> = [];
+    for (let i = 0; i < 13; i++) {
+      objects.push({
+        id: `n${i}`,
+        kind: "process_node",
+        position: { x: -6 + i, y: 0, z: 0 },
+        size: 1,
+        label: `label number ${i} padded`,
+      });
+    }
+    const relationships: NonNullable<Scene3D["relationships"]> = [];
+    for (let i = 0; i < 12; i++) {
+      relationships.push({
+        id: `r${i}`,
+        type: "causes",
+        from: `n${i}`,
+        to: `n${i + 1}`,
+      });
+    }
+    renderer.setSpec(makeSpec({ objects, relationships, animations: [] }));
+    const reasons = renderer.getLastReasons();
+    // The chain is dense enough that placement reasons fire (the class the
+    // duplication was observed on) — the dedupe must not have emptied the
+    // surface into silence.
+    expect(reasons.length).toBeGreaterThan(0);
+    const dups = reasons.filter((r, i) => reasons.indexOf(r) !== i);
+    expect(dups).toEqual([]);
+    expect(new Set(reasons).size).toBe(reasons.length);
+    renderer.dispose();
+  });
 });

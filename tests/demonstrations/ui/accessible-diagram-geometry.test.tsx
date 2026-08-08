@@ -33,6 +33,9 @@ import {
   labelBudgetPx,
   resolveLabelText,
 } from "@/demonstrations/renderers/primitive-3d/presentation/constants";
+import { buildSceneGraph } from "@/demonstrations/renderers/primitive-3d/scene-graph";
+import { resolveLayout } from "@/demonstrations/renderers/primitive-3d/layout/resolve-layout";
+import { hashString } from "@/demonstrations/renderers/primitive-3d/geometry/rng";
 
 function makeSpec(
   scene?: Partial<NonNullable<DemoSpecV1["scene3d"]>>
@@ -389,6 +392,125 @@ describe("AccessibleDiagram — short edges (F1 no-inversion at the DOM level)",
     // The label sits 14px off the shaft (perpendicular), not on it.
     expect(Math.abs(Number(text.getAttribute("y")) - midY)).toBeCloseTo(14, 6);
     expect(container.textContent).toContain("causes");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2D/3D layout parity (ATK-14, E1 wave 5)
+// ---------------------------------------------------------------------------
+
+describe("AccessibleDiagram — 2D/3D layout parity (ATK-14)", () => {
+  /** Rendered circle centers as (cx, cy) pairs, in render order. */
+  function readCenters(container: HTMLElement): Array<[number, number]> {
+    return Array.from(container.querySelectorAll("circle")).map((el) => [
+      Number(el.getAttribute("cx")),
+      Number(el.getAttribute("cy")),
+    ]);
+  }
+
+  /**
+   * The parity oracle: a non-graph variant of a spec whose objects carry a
+   * GIVEN set of positions. Non-graph scenes get the identity layout, so
+   * rendering this variant produces exactly the projection of those
+   * positions — no resolveLayout, no second pass. Comparing a graph scene's
+   * render against its oracle pins which positions the 2D surface consumed.
+   */
+  function oracleSpec(
+    spec: DemoSpecV1,
+    positions: ReadonlyMap<string, { x: number; y: number; z: number }>
+  ): DemoSpecV1 {
+    return makeSpec({
+      objects: (spec.scene3d?.objects ?? []).map((o) => ({
+        id: o.id,
+        kind: o.kind,
+        position: { ...(positions.get(o.id) ?? o.position!) },
+        size: o.size ?? 1,
+        ...(o.label !== undefined ? { label: o.label } : {}),
+      })),
+      relationships: [],
+      animations: [],
+    });
+  }
+
+  it("gate-clean scene: 2D renders the SAME positions the 3D laid-out graph renders", () => {
+    // Well-separated graph scene — the layout leaves authored positions
+    // untouched (gate-clean), so the 3D graph is exactly the authored scene
+    // and the 2D projection of it must equal the authored projection.
+    const spec = makeSpec({
+      objects: [
+        node("a", -3, 0, 0, "process_node", "Cause A"),
+        node("b", 0, 1, 0, "process_node", "Effect B"),
+        node("c", 3, -1, 0, "process_node", "Effect C"),
+      ],
+      relationships: [
+        { id: "r1", type: "causes", from: "a", to: "b" },
+        { id: "r2", type: "causes", from: "b", to: "c" },
+      ],
+      animations: [],
+    });
+    const graph = buildSceneGraph(spec).graph;
+    // Gate-clean: every laid-out position equals the authored position.
+    for (const n of graph.nodes) {
+      const o = spec.scene3d!.objects.find((x) => x.id === n.id)!;
+      expect(n.position.x).toBeCloseTo(o.position!.x, 9);
+      expect(n.position.y).toBeCloseTo(o.position!.y, 9);
+    }
+    const laidOut = new Map(graph.nodes.map((n) => [n.id, n.position]));
+    const { container: graphRender } = render(<AccessibleDiagram spec={spec} />);
+    const { container: oracle } = render(
+      <AccessibleDiagram spec={oracleSpec(spec, laidOut)} />
+    );
+    expect(readCenters(oracle)).toEqual(readCenters(graphRender));
+  });
+
+  it("residual scene: 2D renders the laid-out graph — no second-pass drift (ATK-14)", () => {
+    // W4 density class: 25 process_node, size 1, on a 1-unit grid with
+    // 120-char labels. The layout cannot fully repair this class
+    // (layout_collision_remaining) — a SECOND resolveLayout pass over the
+    // already-laid-out graph would drift every node (up to ~0.48u at this
+    // spec's seed). The 2D surface must consume the laid-out graph as-is so
+    // it agrees with 3D on residual scenes.
+    const objects: PrimitiveObjectSpec[] = [];
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        objects.push({
+          id: `n${r}_${c}`,
+          kind: "process_node",
+          position: { x: c - 2, y: r - 2, z: 0 },
+          size: 1,
+          label: "A".repeat(120),
+        });
+      }
+    }
+    const spec = makeSpec({
+      objects,
+      relationships: [{ id: "r1", type: "causes", from: "n0_0", to: "n0_1" }],
+      animations: [],
+    });
+    const graph = buildSceneGraph(spec).graph;
+    // Fixture sanity: the scene is genuinely residual — a second pass moves
+    // nodes (this is the drift the parity fix must prevent).
+    const seed = hashString(`${spec.id}|${spec.generationId}`);
+    const secondPass = resolveLayout(graph, seed).graph;
+    const drifted = graph.nodes.filter((n) => {
+      const m = secondPass.nodes.find((x) => x.id === n.id)!;
+      return (
+        Math.abs(m.position.x - n.position.x) > 1e-6 ||
+        Math.abs(m.position.y - n.position.y) > 1e-6
+      );
+    });
+    expect(drifted.length).toBeGreaterThan(0);
+    // The 2D diagram renders the projection of the FIRST laid-out graph (the
+    // graph the 3D renderer builds): byte-identical to rendering those exact
+    // positions as authored (identity-layout oracle). Under the pre-fix
+    // behavior (re-resolve on the already-laid-out graph) every node drifted
+    // and this comparison failed.
+    const laidOut = new Map(graph.nodes.map((n) => [n.id, n.position]));
+    const { container: graphRender } = render(<AccessibleDiagram spec={spec} />);
+    const { container: oracle } = render(
+      <AccessibleDiagram spec={oracleSpec(spec, laidOut)} />
+    );
+    expect(readCenters(oracle)).toEqual(readCenters(graphRender));
   });
 });
 

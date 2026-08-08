@@ -446,6 +446,19 @@ export class PrimitiveSceneRenderer {
       }).reasons,
     );
     this.buildScene(graph);
+    // Red-team 4c survivor 7: the gate runner and buildScene each compute the
+    // same placement reasons (edge_unroutable, label_truncated_ellipsis,
+    // label_anchor_fallback, edge_label_skipped_no_space,
+    // edge_label_suppressed_density, edge_head_suppressed_short_edge), so the
+    // joined surface carried every code twice. Dedupe at the join point:
+    // first occurrence wins, pipeline order preserved, getLastReasons() is
+    // unique per code.
+    const seenReasons = new Set<string>();
+    this.lastReasons = this.lastReasons.filter((reason) => {
+      if (seenReasons.has(reason)) return false;
+      seenReasons.add(reason);
+      return true;
+    });
   }
 
   /**

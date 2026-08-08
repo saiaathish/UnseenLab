@@ -27,6 +27,7 @@ import {
 } from "@/demonstrations/spec/demo-spec";
 import type { DemoSpecV1, PrimitiveObjectSpec, Vec3 } from "@/demonstrations/spec/demo-spec";
 import {
+  ENVELOPE_CLEARANCE,
   SCENE_POSITION_BOUND,
   SCENE_SIZE_MAX,
   SCENE_SIZE_MIN,
@@ -725,6 +726,15 @@ export const demoSpecSchema: z.ZodType<DemoSpecV1> = demoSpecBaseSchema
     // curated_engine), and a reject would break the live corpus.
     // Subject scope: GEOMETRY_SUBJECT_KINDS only — the colliding bodies whose
     // coincidence is a genuine defect on both surfaces.
+    // Overlap threshold (E1, hostile-question 1): the pairwise test uses the
+    // layout engine's own minimum clearance (ENVELOPE_CLEARANCE = 0.1 — the
+    // layout's collision predicate is OVERLAP_MARGIN = ENVELOPE_CLEARANCE −
+    // OVERLAP_EPS), NOT raw penetration. A pair at exactly-touching distance
+    // (e.g. the W4 density class: size-1 nodes on a 1-unit grid) is already
+    // inside the clearance the layout guarantees, cannot be relied on to
+    // repair, and must be rejected up front — the raw-penetration margin
+    // (0) let that class through. Any pair within 0.1 world units of
+    // touching is `geometry:envelope_overlap`.
     if (spec.provenance.source === "model_generated_spec") {
       const objects = (spec.scene3d?.objects ?? []).filter((o) =>
         GEOMETRY_SUBJECT_KINDS.has(o.kind)
@@ -756,7 +766,7 @@ export const demoSpecSchema: z.ZodType<DemoSpecV1> = demoSpecBaseSchema
             addIssue(ctx, "geometry:z_collapse", ["scene3d", "objects"]);
             zCollapseIssue = true;
           }
-          if (!overlapIssue && envelopeOverlap(toEnvelope(a, pa), toEnvelope(b, pb), 0)) {
+          if (!overlapIssue && envelopeOverlap(toEnvelope(a, pa), toEnvelope(b, pb), ENVELOPE_CLEARANCE)) {
             addIssue(ctx, "geometry:envelope_overlap", ["scene3d", "objects"]);
             overlapIssue = true;
           }
