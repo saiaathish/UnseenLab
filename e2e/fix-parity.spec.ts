@@ -17,13 +17,15 @@ import path from "node:path";
  *  (resolved by the renderer's own raycast against the projected position)
  *  completes interact immediately — no Enter, no second click.
  *
- *  FIX 3 — Lesson actions may reference only real controls. The captured
- *  orbit fixture (e2e/fixtures/orbit-spec.json) declares an observation
- *  prompt about the "gravitational constant" while spec.controls only ships
- *  Launch speed / Play / Speed / Reset — no gravity control. After Fix 3 that
- *  prompt must not render; the observe checkbox list contains only prompts
- *  resolvable to the visible Controls panel. Red/green: baseline renders both
- *  fixture prompts, so this journey FAILS until Fix 3 lands.
+ *  FIX 3 — Lesson actions may reference only real controls. The orbit
+ *  fixture (e2e/fixtures/orbit-spec.json) ships exactly two valid observation
+ *  prompts — a pure arrows observation and a Launch-speed control prompt
+ *  (controlId "param_speed" exists in spec.controls) — while spec.controls
+ *  exposes Launch speed / Play / Speed / Reset with NO gravity control. The
+ *  observe checkbox list must therefore be EXACTLY those two prompts, with
+ *  zero "gravitational constant" text anywhere in the rail. E2E 4 asserts
+ *  that list identity (every rendered checkbox resolves to a real control),
+ *  not a bare count.
  *
  * Plus the no-relock guard (E2E 5): completed steps survive Back → re-advance
  * with Continue enabled and the completed marker — never a second interaction.
@@ -33,7 +35,8 @@ import path from "node:path";
  *  - E2E 2 (3D pointer): contract guard — one click, no Enter. The event
  *    surface exists on main; this pins the "one activation function" contract.
  *  - E2E 3 (3D keyboard): contract guard — arrow-key focus + Enter/Space.
- *  - E2E 4 (orbit observe): FAILS on baseline (red proof for Fix 3).
+ *  - E2E 4 (orbit observe): contract guard for Fix 3 — the observe checkbox
+ *    list is exactly the fixture's two valid prompts, never a count.
  *  - E2E 5 (back no-relock): contract guard — completed steps never relock.
  *
  * Seeding mirrors demo-lesson-rail.spec.ts: every demo is created through the
@@ -41,11 +44,10 @@ import path from "node:path";
  * /api/demonstrations/generate with HTTP 500 → deterministic offline catalog
  * (demo-cause_effect_network-*; canonical nodes a="Cause A", b="Effect B",
  * c="Effect C", d="Inhibited D"; a→b causes, b→c activates, c→d inhibits).
- * The orbit journey injects the captured verified-simulation fixture via the
- * 200-stub contract (the demo-journey hosted path proves it renders in the
- * harness) — the offline orbit template does NOT contain the offending
- * gravitational-constant prompt, so the fixture path is the real red/green
- * proof for Fix 3.
+ * The orbit journey injects the verified-simulation fixture via the 200-stub
+ * contract (the demo-journey hosted path proves it renders in the harness).
+ * The fixture is the contract source: its observation prompts are the exact
+ * two valid options E2E 4 expects to render.
  *
  * Gating: requires a production build baked with
  * NEXT_PUBLIC_GENERATIVE_DEMOS_ENABLED=1 (ask-demo flow + /demos/[id]). The
@@ -526,9 +528,9 @@ test("E2E 3 3D keyboard: Space activates the focused node (same contract)", asyn
 
 // ---------------------------------------------------------------------------
 // E2E 4 — ORBIT REAL CONTROLS (Fix 3: lesson actions reference only controls
-// present in the Controls panel)
-// Red/green: FAILS on baseline (the fixture's gravitational-constant prompt
-// renders as an observe checkbox), passes after Fix 3.
+// present in the Controls panel). The fixture ships exactly two valid
+// observation prompts; the observe checkbox list must be exactly those two —
+// nothing dropped, nothing added, no unavailable-control prompt anywhere.
 // ---------------------------------------------------------------------------
 
 test("E2E 4 orbit observe: prompts resolve only to controls present in the Controls panel", async ({
@@ -563,18 +565,29 @@ test("E2E 4 orbit observe: prompts resolve only to controls present in the Contr
   await expect(controls.getByText(/gravity/i)).toHaveCount(0);
 
   // Fix 3 contract: no learner-facing action may reference a control that is
-  // not in the Controls panel. The fixture's "gravitational constant" prompt
-  // must not render anywhere in the rail (observe checkbox list included).
+  // not in the Controls panel, and every rendered observe checkbox must
+  // resolve to a real control. Zero "gravitational constant" text anywhere
+  // in the rail (observe checkbox list included) — this assertion stays.
   await expect(lessonRail(page).getByText(/gravitational constant/i)).toHaveCount(0);
   await expect(observeStep.getByText(/gravitational constant/i)).toHaveCount(0);
 
-  // The observe checkbox list contains only prompts resolvable to the final
-  // filtered set: the pure observation prompt ("Watch the arrows…") stays,
-  // the control-driven prompt with no matching control is dropped.
+  // The observe checkbox list must be EXACTLY the fixture's two valid
+  // observation prompts: the pure arrows observation (no control binding)
+  // and the Launch-speed control prompt (controlId "param_speed" exists in
+  // spec.controls). List identity — not a count — is the contract.
   const checkboxes = observeStep.getByRole("checkbox");
-  await expect(checkboxes).toHaveCount(1);
+  await expect(checkboxes).toHaveCount(2);
   await expect(
-    observeStep.getByRole("checkbox", { name: /Watch the arrows/ }),
+    observeStep.getByRole("checkbox", {
+      name: "Watch the arrows: how does the direction of the gravity force compare to the direction of motion?",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    observeStep.getByRole("checkbox", {
+      name: "Watch how the orbit changes when you adjust the Launch speed.",
+      exact: true,
+    }),
   ).toBeVisible();
   await shot(page, "FIX3-orbit-observe-filtered.png");
 
