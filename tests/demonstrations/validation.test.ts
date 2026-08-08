@@ -1588,3 +1588,192 @@ describe("focusParameterKeys boundary", () => {
     expect(readFocusKeys(result.spec!)).toEqual(["length"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lesson-action contract — legacy free-text control references (alias layer)
+//
+// An observation prompt WITHOUT controlId that instructs the learner to
+// manipulate a control must still resolve to an available control. Free-text
+// phrasings that alias a catalog control (e.g. "the gravitational constant"
+// for the gravity catalog entries) are resolved through the curated alias
+// layer: dropped when the aliased catalog control is unavailable, kept when
+// it is available. Purely observational prompts are never touched.
+// ---------------------------------------------------------------------------
+
+/** Orbit spec exposing ONLY the Launch speed control (no gravity control). */
+function orbitSpecWithLaunchSpeedOnly(
+  prompts: DemoSpecV1["observationPrompts"]
+): DemoSpecV1 {
+  return {
+    schemaVersion: 1,
+    id: "demo-orbit-alias",
+    generationId: "gen-orbit-alias",
+    userQuery: "why do planets stay in orbit?",
+    normalizedConcept: "Gravity and orbital motion",
+    title: "Orbits",
+    learningObjective: "See how launch speed shapes the orbit.",
+    trust: {
+      level: "verified_simulation",
+      label: "Verified simulation of gravitational orbits",
+      limitations: ["Simplified two-body system."],
+      engineId: "orbits",
+      engineVersion: "1.0",
+    },
+    renderer: {
+      kind: "primitive_3d",
+      fallbackKind: "timeline",
+      preferredAspectRatio: 1.6,
+      background: "dark",
+    },
+    simulation: {
+      engineId: "orbits",
+      engineVersion: "1.0",
+      seed: 42,
+      parameters: [
+        {
+          key: "g",
+          label: "Gravity strength",
+          min: 0.5,
+          max: 200,
+          step: 0.5,
+          value: 10,
+        },
+        {
+          key: "speed",
+          label: "Launch speed",
+          min: 0.05,
+          max: 3,
+          step: 0.05,
+          value: 1,
+        },
+      ],
+      readouts: [
+        { key: "period", label: "Orbital period", format: "fixed2" },
+        { key: "speed", label: "Current speed", format: "fixed2" },
+      ],
+    },
+    scene3d: {
+      objects: [
+        {
+          id: "star",
+          kind: "sphere",
+          position: { x: 0, y: 0, z: 0 },
+          size: 0.5,
+          color: "#ffaa00",
+        },
+        {
+          id: "planet",
+          kind: "sphere",
+          position: { x: 1, y: 0, z: 0 },
+          size: 0.2,
+          color: "#4488ff",
+        },
+      ],
+      relationships: [
+        { id: "attract", type: "attracts", from: "star", to: "planet" },
+      ],
+      animations: [
+        { id: "orbit", target: "planet", operator: "orbit", speed: 1, axis: "y" },
+      ],
+    },
+    controls: [
+      {
+        id: "param_speed",
+        type: "slider",
+        label: "Launch speed",
+        target: { kind: "parameter", ref: "speed" },
+        min: 0.05,
+        max: 3,
+        step: 0.05,
+        defaultValue: 1,
+      },
+    ],
+    prediction: {
+      prompt: "What happens to the orbit if the launch speed increases?",
+      options: ["It widens", "It shrinks", "It stays the same"],
+      correctIndex: 0,
+    },
+    observationPrompts: prompts,
+    representations: [{ id: "rep-stage", kind: "stage_3d", label: "Stage" }],
+    adaptationContext: { allowed: false, oneVariableMode: false },
+    provenance: {
+      source: "curated_engine",
+      templateIds: [],
+      generatedAt: "2026-08-07T00:00:00.000Z",
+      model: "test-model",
+    },
+    limits: baseLimits(),
+  };
+}
+
+describe("sanitizeDemoSpec — lesson-action contract (legacy free-text control references)", () => {
+  it("drops a free-text observation prompt that implies a missing control (catalog alias)", () => {
+    // The canonical defect phrase: no controlId, and "the gravitational
+    // constant" only names gravity catalog controls that are not exposed.
+    const spec = orbitSpecWithLaunchSpeedOnly([
+      {
+        prompt:
+          "What happens to the orbit when you increase the gravitational constant?",
+      },
+    ]);
+    const result = sanitizeDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    expect(result.reasons).toContain(
+      "repaired:observation_prompt_unavailable_control"
+    );
+    expect(result.spec!.observationPrompts).toEqual([]);
+  });
+
+  it("drops sibling gravity aliases when no gravity control is available", () => {
+    const spec = orbitSpecWithLaunchSpeedOnly([
+      { prompt: "Try increasing the gravitational pull and watch the orbit." },
+      { prompt: "Adjust the gravitational acceleration of the star." },
+    ]);
+    const result = sanitizeDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    expect(result.spec!.observationPrompts).toEqual([]);
+  });
+
+  it("keeps a purely observational free-text prompt", () => {
+    const spec = orbitSpecWithLaunchSpeedOnly([
+      {
+        prompt:
+          "Watch the arrows: how does the direction of the gravity force compare to the direction of motion?",
+      },
+    ]);
+    const result = sanitizeDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+    expect(result.spec!.observationPrompts).toHaveLength(1);
+  });
+
+  it("keeps a free-text prompt whose control IS available", () => {
+    const spec = orbitSpecWithLaunchSpeedOnly([
+      { prompt: "Watch how the orbit changes when you adjust the Launch speed." },
+    ]);
+    const result = sanitizeDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+    expect(result.spec!.observationPrompts).toHaveLength(1);
+  });
+
+  it("keeps a catalog-alias prompt when the aliased control IS available", () => {
+    const spec = orbitSpecWithLaunchSpeedOnly([
+      {
+        prompt:
+          "What happens to the orbit when you increase the gravitational constant?",
+      },
+    ]);
+    spec.controls.push({
+      id: "param_g",
+      type: "slider",
+      label: "Gravity strength",
+      target: { kind: "parameter", ref: "g" },
+      min: 0.5,
+      max: 200,
+      step: 0.5,
+      defaultValue: 10,
+    });
+    const result = sanitizeDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+    expect(result.spec!.observationPrompts).toHaveLength(1);
+  });
+});
