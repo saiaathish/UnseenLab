@@ -23,7 +23,14 @@
  *
  * Pure DOM — no Three.js, no React state, no per-frame work. The stage keeps
  * its React state on hover CHANGES only (hover is low-rate by nature).
+ *
+ * Wave 3 (FIX 17/18) additive export: `resolveGraphEdgeContent` — the
+ * learner-friendly readout for a graph edge hover (the 2D-parity notation
+ * plus a plain-word sentence). The existing orbit/identity resolver above is
+ * untouched.
  */
+
+import type { GraphEdgePlan } from "@/demonstrations/renderers/primitive-3d/scene-graph";
 
 export interface TooltipContent {
   /** Display name, e.g. "Planet". */
@@ -202,6 +209,65 @@ export class TooltipController {
       this.hideTimer = null;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Wave 3 — graph edge hover content (FIX 17/18, ADDITIVE — nothing above is
+// touched). The stage feeds onEdgeHover ids through this resolver so the
+// tooltip shows the same readout the 2D surface renders ("Cause A → Effect B"
+// / "Effect C ┤ Inhibited D" — red-team finding 3: the 3D stage must say the
+// exact same thing at a glance) plus a plain-word learner-friendly sentence.
+// ---------------------------------------------------------------------------
+
+/** Relationship operator → learner-friendly plain-word verb ("activates" for
+ * causes — the word a learner maps the arrow glyph to; "inhibits" for the
+ * ┤ bar). Unmapped operators fall back to the relationship label. */
+export const GRAPH_EDGE_VERBS: Readonly<Record<string, string>> = {
+  causes: "activates",
+  activates: "activates",
+  inhibits: "inhibits",
+  flows_to: "flows to",
+  transfers_to: "transfers to",
+  transforms_into: "transforms into",
+  attracts: "attracts",
+  repels: "repels",
+  orbits: "orbits",
+  collides_with: "collides with",
+  oscillates_with: "oscillates with",
+  contains: "contains",
+};
+
+export interface GraphEdgeTooltipContent {
+  /**
+   * The 2D-parity graph readout — "Cause A → Effect B" for causes/activates
+   * edges, "Effect C ┤ Inhibited D" for inhibits. The arrow glyph "→" and
+   * the inhibition bar "┤" are exactly what the 2D surface renders.
+   */
+  title: string;
+  /** A complete learner-friendly sentence, e.g. "Cause A activates Effect B."
+   * Falls back to the relationship label when the operator maps to no plain
+   * word. */
+  body: string;
+}
+
+/** Graph-edge hover content for the tooltip: 2D-parity title + plain-word
+ * sentence. `nodeLabels` maps node ids to their learner-facing labels
+ * (missing ids fall back to the raw id). Purely additive — the orbit/identity
+ * resolver above is untouched. */
+export function resolveGraphEdgeContent(
+  plan: GraphEdgePlan,
+  nodeLabels: Record<string, string>
+): GraphEdgeTooltipContent {
+  const from = nodeLabels[plan.fromId] ?? plan.fromId;
+  const to = nodeLabels[plan.toId] ?? plan.toId;
+  const glyph = plan.inhibits ? "┤" : "→";
+  const verb = GRAPH_EDGE_VERBS[plan.type];
+  const body = verb
+    ? `${from} ${verb} ${to}.`
+    : plan.label && plan.label !== plan.type
+      ? plan.label
+      : `${from} ${plan.type.replace(/_/g, " ")} ${to}.`;
+  return { title: `${from} ${glyph} ${to}`, body };
 }
 
 function clampNum(value: number, min: number, max: number): number {

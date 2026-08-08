@@ -53,6 +53,11 @@ export interface Readout {
 //    y = row/GH - 0.5 (row = grid row j), matching the surface sampling
 //    convention used by the renderer (see renderer.ts applyEngineSurface).
 //  - waves surface: row-major u-field values (index j*width + i).
+//  - newton scalarBodies: the block's one-dimensional kinematic state in
+//    engine units (position/velocity in m, m/s; acceleration = force/mass in
+//    m/s²; force/mass the current parameters). The 2D stage's semantic
+//    identity layer (labels, hover regions, details card) reads ONLY this
+//    state, so the overlay can never diverge from the canonical engine.
 //
 // All numbers must be finite.
 
@@ -129,6 +134,30 @@ export interface EngineVisualState {
     width: number;
     height: number;
   };
+  /**
+   * newton_second_law only (ADDITIVE — semantic overlay): per-body
+   * one-dimensional kinematic state at snapshot time. The block's values are
+   * the engine's OWN numbers — the same position/velocity the readouts
+   * summarize and the same force/mass parameters the sliders hold — so a
+   * coupled identity surface (persistent labels, hover regions, details card)
+   * is anchored to canonical engine state, never to anything invented. All
+   * numbers finite.
+   */
+  scalarBodies?: Record<
+    string,
+    {
+      /** Integrated position, m (true kinematics, not the clamped draw frac). */
+      position: number;
+      /** Semi-implicit-Euler integrated velocity, m/s. */
+      velocity: number;
+      /** force / mass at snapshot time, m/s². */
+      acceleration: number;
+      /** Current force parameter, N. */
+      force: number;
+      /** Current mass parameter, kg. */
+      mass: number;
+    }
+  >;
 }
 
 export interface SimPointer {

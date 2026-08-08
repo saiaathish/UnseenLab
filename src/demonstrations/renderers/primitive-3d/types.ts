@@ -219,6 +219,17 @@ export interface PrimitiveSceneRendererOptions {
    * picks for SELECTION).
    */
   onHoverIdentity?: (nodeId: string | null) => void;
+  /**
+   * Graph-edge hover surface (Wave 3 — FIX 17/18, additive): the graph
+   * EDGE under the pointer (the relationship id, never a mesh), or null
+   * when the pointer is over a node / empty space / has left the stage.
+   * Emitted only on CHANGES, never per frame. Hover is visual-only: the
+   * existing edge-path dimming is unchanged, and this callback never fires
+   * selection or manipulation events (frozen contract). The stage consumes
+   * it to show the edge's learner-facing readout (see
+   * resolveGraphEdgeContent in presentation/tooltip-controller.ts).
+   */
+  onEdgeHover?: (edgeId: string | null) => void;
 }
 
 // ---------------------------------------------------------------------------

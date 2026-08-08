@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 
 import { SimRunner } from "@/demonstrations/renderers/lumina-2d/runner";
 import type {
   EngineVisualState,
   Readout,
 } from "@/demonstrations/renderers/lumina-2d/types";
+import { MAX_SIM_TIME } from "@/demonstrations/renderers/lumina-2d/engines/newton-second-law";
 import { PrimitiveSceneRenderer } from "@/demonstrations/renderers/primitive-3d";
 import {
   presentationSpecForStage,
@@ -15,6 +17,7 @@ import {
   type StageGuide,
 } from "@/demonstrations/renderers/primitive-3d/presentation";
 import {
+  resolveGraphEdgeContent,
   TooltipController,
   type TooltipContent,
 } from "@/demonstrations/renderers/primitive-3d/presentation/tooltip-controller";
@@ -145,6 +148,7 @@ function Lumina2DStage({
   playing,
   speed,
   resetSignal,
+  reducedMotion,
   readouts,
   onReadouts,
   onVisualState,
@@ -163,6 +167,26 @@ function Lumina2DStage({
 
   const simulation = spec.simulation;
   const paramsAtMountRef = useRef(parameters);
+  // Wave 3 (FIX 17): Newton's semantic identity layer — the 2D stage's
+  // DOM-over-canvas surface is fed by the engine's own canonical visual state
+  // (scalarBodies) at the existing ~15 Hz visual-state cadence, never
+  // per-frame. Everything below is gated on this engine id, so every other
+  // lumina-2d stage renders exactly as before.
+  const isNewton = simulation?.engineId === "newton_second_law";
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const tooltipRef = useRef<TooltipController | null>(null);
+  /** Latest canonical engine state (15 Hz) — null until the first emission. */
+  const [engineState, setEngineState] = useState<EngineVisualState | null>(null);
+  /** Measured canvas box in CSS px (the engine draw space maps 1:1 to it). */
+  const [stageSize, setStageSize] = useState<{ width: number; height: number } | null>(null);
+  /** Hover/tap identity region — React state only on CHANGES. */
+  const [hoverRegionId, setHoverRegionId] = useState<NewtonRegionId | null>(null);
+  const engineStateRef = useRef(engineState);
+  const stageSizeRef = useRef(stageSize);
+  useEffect(() => {
+    engineStateRef.current = engineState;
+    stageSizeRef.current = stageSize;
+  });
 
   useEffect(() => {
     if (!simulation) return;
@@ -172,7 +196,12 @@ function Lumina2DStage({
     try {
       runner = new SimRunner(canvas);
       runner.onReadouts = (r) => onReadoutsRef.current(r);
-      runner.onVisualState = (s) => onVisualStateRef.current?.(s);
+      runner.onVisualState = (s) => {
+        onVisualStateRef.current?.(s);
+        // Newton's identity layer consumes the same canonical state at the
+        // same 15 Hz cadence (bounded, never per-frame).
+        if (isNewton) setEngineState(s);
+      };
       runner.setScene({
         engineId: simulation.engineId,
         parameters: paramsAtMountRef.current,
@@ -193,6 +222,114 @@ function Lumina2DStage({
     // through setParam, never through setScene.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec.id, simulation?.engineId]);
+
+  // Measure the canvas box so the overlay can mirror the engine's draw-space
+  // layout (the canvas fills this wrapper; the runner sizes it from the same
+  // parent rect). Fires only on actual size changes.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const measure = () => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setStageSize({ width: rect.width, height: rect.height });
+      }
+    };
+    measure();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver((entries) => {
+        const entry = entries[entries.length - 1];
+        const cr = entry?.contentRect;
+        if (cr && cr.width > 0 && cr.height > 0) {
+          setStageSize({ width: cr.width, height: cr.height });
+        } else {
+          measure();
+        }
+      });
+      ro.observe(container);
+    }
+    window.addEventListener("resize", measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
+  // Hover/tap identity: pointer over the block or a vector region resolves to
+  // a name + one-line description (FIX 17 — the 3D stage's identity surface
+  // generalized to Newton). Hit-testing is pure math over the engine's layout,
+  // done here on the wrapper so the overlay itself never intercepts pointers.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !isNewton) return;
+    const resolve = (clientX: number, clientY: number): NewtonRegionId | null => {
+      const state = engineStateRef.current;
+      const size = stageSizeRef.current;
+      const body = state?.scalarBodies?.block;
+      if (!body || !size) return null;
+      const rect = container.getBoundingClientRect();
+      return newtonRegionAt(body, size.width, size.height, clientX - rect.left, clientY - rect.top);
+    };
+    const onMove = (e: PointerEvent) => setHoverRegionId(resolve(e.clientX, e.clientY));
+    const onDown = (e: PointerEvent) => setHoverRegionId(resolve(e.clientX, e.clientY));
+    const onLeave = () => setHoverRegionId(null);
+    container.addEventListener("pointermove", onMove, { passive: true });
+    container.addEventListener("pointerdown", onDown, { passive: true });
+    container.addEventListener("pointerleave", onLeave);
+    return () => {
+      container.removeEventListener("pointermove", onMove);
+      container.removeEventListener("pointerdown", onDown);
+      container.removeEventListener("pointerleave", onLeave);
+    };
+  }, [isNewton]);
+
+  // Tooltip (FIX 4 pattern, canvas-2D-anchored): one role="tooltip" per stage
+  // container, resolved from the region's canonical name + one sentence and
+  // anchored at the region's canvas position.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !isNewton) return;
+    const controller = new TooltipController(container, {
+      reducedMotion,
+      resolveContent: (id) => newtonRegionContent(id),
+      anchorFor: (id) => {
+        const state = engineStateRef.current;
+        const size = stageSizeRef.current;
+        const body = state?.scalarBodies?.block;
+        if (!body || !size) return null;
+        const anchors = newtonLayout(body, size.width, size.height).anchors;
+        // Unknown ids resolve to no anchor (null) — same membership guard
+        // newtonRegionContent applies to content.
+        return anchors[id as keyof typeof anchors] ?? null;
+      },
+    });
+    tooltipRef.current = controller;
+    return () => {
+      tooltipRef.current = null;
+      controller.dispose();
+    };
+  }, [isNewton, reducedMotion]);
+
+  useEffect(() => {
+    const controller = tooltipRef.current;
+    if (!controller) return;
+    if (hoverRegionId) {
+      controller.show(hoverRegionId);
+    } else {
+      controller.hide();
+    }
+  }, [hoverRegionId]);
+
+  // Keep the tooltip anchored while the pointer moves (cheap imperative
+  // reposition — never React state, never per-frame).
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const onPointerMove = () => tooltipRef.current?.reposition();
+    container.addEventListener("pointermove", onPointerMove, { passive: true });
+    return () => container.removeEventListener("pointermove", onPointerMove);
+  }, []);
 
   useEffect(() => {
     const runner = runnerRef.current;
@@ -232,13 +369,17 @@ function Lumina2DStage({
     );
   }
 
+  const body = engineState?.scalarBodies?.block ?? null;
+  const hasLayout = body !== null && stageSize !== null;
+
   return (
     <div>
       <p className="sr-only">
         Interactive stage: {spec.title}. {spec.learningObjective}
       </p>
       <div
-        className="w-full overflow-hidden rounded-xl border border-border bg-[#0b0f13]"
+        ref={containerRef}
+        className="relative w-full overflow-hidden rounded-xl border border-border bg-[#0b0f13]"
         style={{ aspectRatio: `${spec.renderer.preferredAspectRatio}` }}
       >
         <canvas
@@ -246,9 +387,347 @@ function Lumina2DStage({
           aria-label={`${spec.title} simulation canvas`}
           className="block h-full w-full"
         />
+
+        {isNewton && hasLayout ? (
+          <NewtonIdentityOverlay
+            body={body}
+            width={stageSize.width}
+            height={stageSize.height}
+          />
+        ) : null}
       </div>
+
+      {/* Keyboard-accessible identity surface (FIX 17): the same names as the
+          overlay labels — focusable without a tab trap, Enter/Space pins the
+          details card. aria-hidden overlay stays out of the SR tree. */}
+      {isNewton && body ? (
+        <>
+          <NewtonObjectList activeId={hoverRegionId} onActivate={setHoverRegionId} />
+          {hoverRegionId ? (
+            <NewtonDetailsCard regionId={hoverRegionId} body={body} />
+          ) : null}
+        </>
+      ) : null}
       <ReadoutDisplay readouts={readouts} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Newton identity layer (Wave 3, FIX 17 — root-cause seam 5 generalized to
+// the pure-2D engine). The block and vector regions, their persistent labels
+// and the details card are ALL derived from the engine's canonical visual
+// state (scalarBodies — the closure's real position/velocity/acceleration/
+// force/mass) and the engine's own draw-space layout, mirrored below so the
+// DOM overlay can never disagree with the canvas. The engine canvas itself is
+// untouched — this is a DOM-over-canvas layer only.
+// ---------------------------------------------------------------------------
+
+/** One scalar body as emitted by the newton engine's getVisualState(). */
+export interface NewtonScalarBody {
+  position: number;
+  velocity: number;
+  acceleration: number;
+  force: number;
+  mass: number;
+}
+
+export const NEWTON_REGION_IDS = [
+  "block",
+  "force",
+  "velocity",
+  "acceleration",
+] as const;
+
+export type NewtonRegionId = (typeof NEWTON_REGION_IDS)[number];
+
+interface NewtonRegionMeta {
+  name: string;
+  type: string;
+  description: string;
+}
+
+/** Canonical identity: hover object/vector → Mass / Applied force / Velocity
+ * / Acceleration (the engine draws no acceleration vector — the label region
+ * is its identity anchor). The same names feed the overlay labels, the
+ * tooltip, the keyboard list and the details card. */
+export const NEWTON_REGIONS: Record<NewtonRegionId, NewtonRegionMeta> = {
+  block: {
+    name: "Mass m",
+    type: "Block",
+    description:
+      "The pushed block — its mass m sets how much a given applied force accelerates it (a = F/m).",
+  },
+  force: {
+    name: "Applied force F",
+    type: "Force vector",
+    description: "The constant horizontal push acting on the block.",
+  },
+  velocity: {
+    name: "Velocity v",
+    type: "Velocity vector",
+    description: "How fast the block is moving right now.",
+  },
+  acceleration: {
+    name: "Acceleration a",
+    type: "Kinematic quantity",
+    description:
+      "How quickly the block speeds up — a = F/m, constant while the force and mass stay fixed.",
+  },
+};
+
+export interface NewtonLayout {
+  /** Block rect in canvas CSS px (mirrors draw(): rounded rect at
+   * (bx, by, blockW, blockW·0.9)). */
+  block: { x: number; y: number; w: number; h: number };
+  /** Applied-force arrow segment (mirrors draw(): from the block's right
+   * edge, length 24 + (F/50)·90, at block vertical center). */
+  force: { x: number; y: number; w: number; h: number };
+  /** Velocity arrow segment (mirrors draw(): from the block's horizontal
+   * center, below the track, length min(140, 10 + v·6)). */
+  velocity: { x: number; y: number; w: number; h: number };
+  /** Acceleration identity region — the persistent label anchor above the
+   * block (the engine draws no 'a' vector; the label is the anchor). */
+  acceleration: { x: number; y: number; w: number; h: number };
+  /** Label anchor points (CSS px, label centers). */
+  anchors: Record<NewtonRegionId, { x: number; y: number }>;
+}
+
+function clampNum(value: number, lo: number, hi: number): number {
+  return value < lo ? lo : value > hi ? hi : value;
+}
+
+/**
+ * Mirrors the engine's draw() position mapping (newton-second-law.ts) exactly:
+ * pad = min(W,H)·0.08, track at H·0.62, block width max(34, W·0.05), position
+ * fraction clamped over maxTravel = max(1, F/m·MAX_SIM_TIME²/2), force arrow
+ * length ∝ F, velocity arrow length clamped ∝ v. The engine draw space maps
+ * 1:1 to canvas CSS px, so the DOM overlay anchors land on the canvas.
+ */
+export function newtonLayout(
+  body: NewtonScalarBody,
+  width: number,
+  height: number
+): NewtonLayout {
+  const pad = Math.min(width, height) * 0.08;
+  const trackY = height * 0.62;
+  const x0 = pad;
+  const x1 = width - pad;
+  const trackLen = Math.max(1, width - pad * 2);
+  const blockW = Math.max(34, width * 0.05);
+  const maxTravel = Math.max(
+    1,
+    (body.force / body.mass) * MAX_SIM_TIME * MAX_SIM_TIME * 0.5
+  );
+  const frac = clampNum(body.position / maxTravel, 0, 1);
+  const bx = x0 + frac * (trackLen - blockW);
+  const by = trackY - blockW * 0.55;
+  const block = { x: bx, y: by, w: blockW, h: blockW * 0.9 };
+
+  const arrowLen = 24 + (body.force / 50) * 90;
+  const vLen = Math.min(140, 10 + body.velocity * 6);
+  const force = { x: bx + blockW + 4, y: by + blockW / 2 - 8, w: arrowLen, h: 16 };
+  const velocity = {
+    x: bx + blockW / 2,
+    y: trackY + 22 - 8,
+    w: Math.max(24, vLen),
+    h: 16,
+  };
+  // The 'Acceleration a' label floats above the block; its region is the
+  // label's nominal footprint so a pointer can hit it.
+  const acceleration = { x: bx + blockW / 2 - 60, y: by - 34 - 8, w: 120, h: 16 };
+
+  const clampX = (x: number) => clampNum(x, pad, x1);
+  return {
+    block,
+    force,
+    velocity,
+    acceleration,
+    anchors: {
+      block: { x: bx + blockW / 2, y: by + blockW * 0.45 },
+      force: { x: clampX(bx + blockW + 4 + arrowLen / 2), y: by + blockW / 2 - 32 },
+      velocity: { x: clampX(bx + blockW / 2 + vLen / 2), y: trackY + 60 },
+      acceleration: { x: clampX(bx + blockW / 2), y: by - 34 },
+    },
+  };
+}
+
+function hitTest(
+  region: { x: number; y: number; w: number; h: number },
+  x: number,
+  y: number
+): boolean {
+  return x >= region.x && x <= region.x + region.w && y >= region.y && y <= region.y + region.h;
+}
+
+/**
+ * Region hit-testing in the engine's draw space (canvas CSS px) — the same
+ * layout the overlay labels are anchored at. Block first (it is the largest
+ * surface), then the two arrows, then the acceleration label region.
+ */
+export function newtonRegionAt(
+  body: NewtonScalarBody,
+  width: number,
+  height: number,
+  x: number,
+  y: number
+): NewtonRegionId | null {
+  const layout = newtonLayout(body, width, height);
+  if (hitTest(layout.block, x, y)) return "block";
+  if (hitTest(layout.force, x, y)) return "force";
+  if (hitTest(layout.velocity, x, y)) return "velocity";
+  if (hitTest(layout.acceleration, x, y)) return "acceleration";
+  return null;
+}
+
+/** Tooltip content: canonical NAME + one learner-facing sentence (FIX 4
+ * pattern). */
+function newtonRegionContent(regionId: string): TooltipContent | null {
+  const meta = NEWTON_REGIONS[regionId as NewtonRegionId];
+  if (!meta) return null;
+  return { name: meta.name, sentence: meta.description };
+}
+
+/** The details card's live readouts — Mass / Applied force / Acceleration,
+ * formatted in the engine's units and fed from the canonical state at the
+ * existing 15 Hz visual-state cadence (never per-frame). */
+function newtonScalarReadouts(body: NewtonScalarBody): Array<{ label: string; value: string }> {
+  return [
+    { label: "Mass", value: `${body.mass.toFixed(1)} kg` },
+    { label: "Applied force", value: `${body.force.toFixed(1)} N` },
+    { label: "Acceleration", value: `${body.acceleration.toFixed(2)} m/s²` },
+  ];
+}
+
+/** Persistent labels, positioned over the canvas at the engine's own layout
+ * anchors. aria-hidden — the keyboard list + details card carry the same
+ * names for assistive tech. Pointer-events-none: hover hit-testing happens on
+ * the wrapper, never here. */
+function NewtonIdentityOverlay({
+  body,
+  width,
+  height,
+}: {
+  body: NewtonScalarBody;
+  width: number;
+  height: number;
+}) {
+  const layout = newtonLayout(body, width, height);
+  const labelStyle = (anchor: { x: number; y: number }, color: string): CSSProperties => ({
+    left: `${anchor.x}px`,
+    top: `${anchor.y}px`,
+    color,
+  });
+  const pill =
+    "whitespace-nowrap rounded border border-white/10 bg-black/45 px-1.5 py-0.5 text-[11px] font-medium backdrop-blur-[2px]";
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+      {/* Block identity: the engine leaves the block face blank; the DOM 'm'
+          matches the in-canvas F/v glyph convention. */}
+      <span
+        className="absolute -translate-x-1/2 -translate-y-1/2 text-[12px] font-semibold text-white"
+        style={labelStyle(layout.anchors.block, "#ffffff")}
+      >
+        m
+      </span>
+      <span
+        className={`absolute -translate-x-1/2 -translate-y-1/2 ${pill}`}
+        style={labelStyle(layout.anchors.force, "#5eead4")}
+      >
+        Applied force F
+      </span>
+      <span
+        className={`absolute -translate-x-1/2 -translate-y-1/2 ${pill}`}
+        style={labelStyle(layout.anchors.velocity, "rgba(255,255,255,0.92)")}
+      >
+        Velocity v
+      </span>
+      <span
+        className={`absolute -translate-x-1/2 -translate-y-1/2 ${pill}`}
+        style={labelStyle(layout.anchors.acceleration, "#a78bfa")}
+      >
+        Acceleration a
+      </span>
+    </div>
+  );
+}
+
+/** Keyboard surface (FIX 17): the same region names as the overlay labels, in
+ * a focusable role=list — Enter/Space pins the details card. No tab trap, no
+ * live region (the lesson rail owns announcements). */
+function NewtonObjectList({
+  activeId,
+  onActivate,
+}: {
+  activeId: NewtonRegionId | null;
+  onActivate: (id: NewtonRegionId) => void;
+}) {
+  return (
+    <ul
+      role="list"
+      tabIndex={0}
+      aria-label="Model objects"
+      className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-surface-raised/50 p-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+    >
+      {NEWTON_REGION_IDS.map((id) => {
+        const region = NEWTON_REGIONS[id];
+        return (
+          <li
+            key={id}
+            role="listitem"
+            tabIndex={0}
+            aria-label={region.name}
+            aria-current={activeId === id ? "true" : undefined}
+            onClick={() => onActivate(id)}
+            onKeyDown={(event: KeyboardEvent<HTMLLIElement>) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onActivate(id);
+              }
+            }}
+            className="cursor-pointer rounded-full border border-border/70 bg-surface px-2.5 py-1 text-xs font-medium text-foreground hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            {region.name}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** FIX 17 details surface: compact — the selected identity's name, type, one
+ * line, plus the Mass / Applied force / Acceleration live readouts from the
+ * canonical engine state at the 15 Hz visual-state cadence. */
+function NewtonDetailsCard({
+  regionId,
+  body,
+}: {
+  regionId: NewtonRegionId;
+  body: NewtonScalarBody;
+}) {
+  const region = NEWTON_REGIONS[regionId];
+  const rows = newtonScalarReadouts(body);
+  return (
+    <section
+      aria-label={`Details: ${region.name}`}
+      className="mt-2 rounded-lg border border-border bg-surface-raised/70 px-3 py-2.5"
+    >
+      <p className="text-sm font-semibold">{region.name}</p>
+      <p className="mt-0.5 text-xs font-semibold uppercase tracking-widest text-muted">
+        {region.type}
+      </p>
+      <p className="mt-0.5 text-xs leading-5 text-muted">{region.description}</p>
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        {rows.map((row) => (
+          <span key={row.label}>
+            <span className="font-semibold uppercase tracking-widest text-muted">
+              {row.label}
+            </span>{" "}
+            <span className="font-mono">{row.value}</span>
+          </span>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -282,8 +761,10 @@ function Primitive3DStage({
   const [startError, setStartError] = useState(false);
   // FIX 4/FIX 14 hover identity: React state only on hover CHANGES (hover is
   // low-rate by nature — no per-frame state); the tooltip controller does the
-  // per-pointer positioning imperatively.
+  // per-pointer positioning imperatively. Wave 3 (FIX 17/18) adds the graph
+  // EDGE hover surface on the same change-only contract.
   const [hoverIdentityId, setHoverIdentityId] = useState<string | null>(null);
+  const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null);
   const [mobile] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 768
   );
@@ -333,6 +814,9 @@ function Primitive3DStage({
         onEdgeSelect: (edgeId) => onEdgeSelectRef.current?.(edgeId),
         onNodeManipulate: (nodeId) => onNodeManipulateRef.current?.(nodeId),
         onHoverIdentity: (id) => setHoverIdentityId(id),
+        // Wave 3 (FIX 17/18): graph edge hover — state on change only; the
+        // tooltip shows the edge's learner-friendly readout.
+        onEdgeHover: (id) => setHoverEdgeId(id),
       });
       renderer.setSpec(presentationSpec, { engineMapping: engineMapping ?? null });
       rendererRef.current = renderer;
@@ -367,13 +851,21 @@ function Primitive3DStage({
   // only by hover-identity changes. The controller owns the DOM; content
   // comes from the semantic data (W3: semantic.name/shortDescription) with
   // the plain label as fallback, anchored at the object's projected coords.
+  // Wave 3 (FIX 17/18): graph EDGE ids resolve through
+  // resolveGraphEdgeContent (2D-parity readout + plain-word sentence) and
+  // anchor at the edge midpoint (renderer.getEdgeAnchor).
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const controller = new TooltipController(container, {
       reducedMotion,
-      resolveContent: (id) => resolveTooltipContent(id, presentationSpec, guide),
-      anchorFor: (id) => rendererRef.current?.getIdentityAnchor(id) ?? null,
+      resolveContent: (id) => resolveStageTooltipContent(id, presentationSpec, guide),
+      anchorFor: (id) => {
+        const renderer = rendererRef.current;
+        if (!renderer) return null;
+        // Node anchor first; edge ids fall through to the edge midpoint.
+        return renderer.getIdentityAnchor(id) ?? renderer.getEdgeAnchor(id) ?? null;
+      },
     });
     tooltipRef.current = controller;
     return () => {
@@ -386,12 +878,17 @@ function Primitive3DStage({
   useEffect(() => {
     const controller = tooltipRef.current;
     if (!controller) return;
-    if (hoverIdentityId) {
+    // An edge under the pointer wins over a node (the renderer emits exactly
+    // one at a time — this ordering is a defensive tie-break for id spaces
+    // that could overlap).
+    if (hoverEdgeId) {
+      controller.show(hoverEdgeId);
+    } else if (hoverIdentityId) {
       controller.show(hoverIdentityId);
     } else {
       controller.hide();
     }
-  }, [hoverIdentityId]);
+  }, [hoverIdentityId, hoverEdgeId]);
 
   // Keep the tooltip anchored while the pointer moves (cheap imperative
   // reposition — never React state, never per-frame).
@@ -563,6 +1060,51 @@ function resolveTooltipContent(
   const name = semantic?.name?.trim() || object?.label?.trim() || guideLabel || nodeId;
   const sentence = semantic?.shortDescription?.trim();
   return { name, sentence: sentence || undefined };
+}
+
+/**
+ * Wave 3 (FIX 17/18): the stage's tooltip content dispatcher. A graph EDGE id
+ * resolves through resolveGraphEdgeContent — the 2D-parity readout ("Cause A
+ * → Effect B" / "Effect C ┤ Inhibited D") as the name plus the plain-word
+ * sentence ("Cause A activates Effect B.") — mapping the edge's endpoints to
+ * their learner-facing node labels. Everything else falls through to the
+ * untouched orbit/identity resolver above. Edge ids win over node ids so an
+ * id-space collision can never show node content for an edge.
+ */
+function resolveStageTooltipContent(
+  id: string,
+  spec: DemoSpecV1,
+  guide: StageGuide
+): TooltipContent | null {
+  const rel = spec.scene3d?.relationships.find((r) => String(r.id) === id);
+  if (rel) {
+    const nodeLabels: Record<string, string> = {};
+    const guideByEntity = new Map(guide.entities.map((e) => [e.id, e.label]));
+    for (const obj of spec.scene3d?.objects ?? []) {
+      const semantic = (obj as unknown as { semantic?: { name?: string } })
+        ?.semantic;
+      nodeLabels[String(obj.id)] =
+        semantic?.name?.trim() ||
+        obj.label?.trim() ||
+        guideByEntity.get(obj.id) ||
+        String(obj.id);
+    }
+    const edge = resolveGraphEdgeContent(
+      {
+        id: String(rel.id),
+        type: rel.type,
+        label: rel.label ?? rel.type,
+        fromId: String(rel.from),
+        toId: String(rel.to),
+        from: { x: 0, y: 0, z: 0 },
+        to: { x: 0, y: 0, z: 0 },
+        inhibits: rel.type === "inhibits",
+      },
+      nodeLabels
+    );
+    return { name: edge.title, sentence: edge.body };
+  }
+  return resolveTooltipContent(id, spec, guide);
 }
 
 // ---------------------------------------------------------------------------

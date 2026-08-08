@@ -344,6 +344,8 @@ export class PrimitiveSceneRenderer {
   private pinnedIdentityId: string | null = null;
   /** Last identity actually emitted (dedupe across hover/pin merges). */
   private lastEmittedIdentityId: string | null = null;
+  /** Last graph EDGE hover actually emitted (dedupe — Wave 3, FIX 17/18). */
+  private lastEmittedEdgeId: string | null = null;
   /** Node currently carrying identity visuals (for the restore pass). */
   private identityVisualNodeId: string | null = null;
   /** Timestamp of the last pin — drives the manipulated pulse. */
@@ -1621,6 +1623,24 @@ export class PrimitiveSceneRenderer {
       }
       return;
     }
+    // Wave 3 (FIX 17/18): a pointerleave clears the hover SURFACE (node
+    // identity + edge readout + the edge-path dim) — a leave is never a
+    // click and never a selection, so selection state is untouched.
+    if (leaving) {
+      if (
+        this.hoverIdentityId !== null ||
+        this.hoverEdgeId !== null ||
+        this.lastEmittedIdentityId !== null ||
+        this.lastEmittedEdgeId !== null
+      ) {
+        this.hoverIdentityId = null;
+        this.hoverEdgeId = null;
+        this.rebuildEdgePath(null);
+        this.emitIdentity();
+        this.emitEdgeHover();
+      }
+      return;
+    }
     if (this.pointerMoved < 6) {
       this.pickAt(e.clientX, e.clientY);
     }
@@ -1769,22 +1789,57 @@ export class PrimitiveSceneRenderer {
     return node !== undefined && this.isIdentityPickableNode(node);
   }
 
+  /**
+   * Graph-mode hover (Wave 2 dim + Wave 3 identity, FIX 17/18): resolve the
+   * node OR edge under the pointer — the same resolution pickAt uses, node
+   * first — then emit the hover surface on changes only:
+   *
+   *   - node hover → onHoverIdentity(nodeId) (W5's existing callback; graph
+   *     nodes are identity-pickable), onEdgeHover(null);
+   *   - edge hover → onEdgeHover(edgeId) (additive Wave-3 callback),
+   *     onHoverIdentity(null) — plus the existing edge-path dim;
+   *   - empty space → both null (never a phantom identity, L5 contract).
+   *
+   * Hover is VISUAL-ONLY: selection/manipulation callbacks are never fired
+   * from here (frozen contract), and the edge-path dim + keyboard focus
+   * visuals are untouched.
+   */
   private hoverPick(clientX: number, clientY: number): void {
     if (!this.graphMode) return;
     const ndc = this.ndcFromClient(clientX, clientY);
     if (!ndc) return;
-    let found: string | null = null;
+    let foundNode: string | null = null;
+    let foundEdge: string | null = null;
     for (const hit of this.raycastHits(ndc.x, ndc.y)) {
+      const nodeId = this.resolveNodePick(hit.object);
+      if (nodeId) {
+        foundNode = nodeId;
+        break;
+      }
       const edgeId = this.resolveEdgePick(hit.object);
       if (edgeId) {
-        found = edgeId;
+        foundEdge = edgeId;
         break;
       }
     }
-    if (found !== this.hoverEdgeId) {
-      this.hoverEdgeId = found;
-      this.rebuildEdgePath(found);
+    if (foundEdge !== this.hoverEdgeId) {
+      this.hoverEdgeId = foundEdge;
+      this.rebuildEdgePath(foundEdge);
     }
+    // Node identity uses the same hoverIdentityId surface as non-graph
+    // scenes (pinned ?? hover — the pin is graph-inert), so the existing
+    // dedupe/emission path applies unchanged.
+    this.hoverIdentityId = foundNode;
+    this.emitIdentity();
+    this.emitEdgeHover();
+  }
+
+  /** Emit the hovered graph edge on change only (Wave 3, FIX 17/18). */
+  private emitEdgeHover(): void {
+    const id = this.hoverEdgeId;
+    if (id === this.lastEmittedEdgeId) return;
+    this.lastEmittedEdgeId = id;
+    this.options.onEdgeHover?.(id);
   }
 
   private rebuildEdgePath(edgeId: string | null): void {
@@ -1812,6 +1867,12 @@ export class PrimitiveSceneRenderer {
     if (this.lastEmittedIdentityId !== null) {
       this.lastEmittedIdentityId = null;
       this.options.onHoverIdentity?.(null);
+    }
+    // Wave 3 (FIX 17/18): the graph edge-hover surface resets with the scene
+    // the same way — a stale edge readout must never survive a spec swap.
+    if (this.lastEmittedEdgeId !== null) {
+      this.lastEmittedEdgeId = null;
+      this.options.onEdgeHover?.(null);
     }
   }
 
@@ -2332,6 +2393,35 @@ export class PrimitiveSceneRenderer {
     const world = new THREE.Vector3();
     rn.group.getWorldPosition(world);
     const ndc = world.project(camera);
+    if (ndc.z > 1 || ndc.z < -1) return null; // behind the camera
+    const w = this.canvas.clientWidth || 1;
+    const h = this.canvas.clientHeight || 1;
+    return {
+      x: ((ndc.x + 1) / 2) * w,
+      y: ((1 - ndc.y) / 2) * h,
+    };
+  }
+
+  /**
+   * Project an edge's midpoint to CSS px within the canvas — the tooltip
+   * anchor for graph edge hover (Wave 3, FIX 17/18; additive twin of
+   * getIdentityAnchor). Graph scenes are orthographic, so the projected
+   * midpoint of the endpoints equals the midpoint of their projections.
+   * Returns null when an endpoint is missing or the midpoint is behind the
+   * camera.
+   */
+  getEdgeAnchor(edgeId: string): { x: number; y: number } | null {
+    const camera = this.camera;
+    const plan = this.edgePlans.find((p) => p.id === edgeId);
+    if (!plan || !camera) return null;
+    const from = this.runtime.get(plan.fromId);
+    const to = this.runtime.get(plan.toId);
+    if (!from || !to) return null;
+    const mid = new THREE.Vector3();
+    from.group.getWorldPosition(mid);
+    mid.add(to.group.getWorldPosition(new THREE.Vector3()));
+    mid.multiplyScalar(0.5);
+    const ndc = mid.project(camera);
     if (ndc.z > 1 || ndc.z < -1) return null; // behind the camera
     const w = this.canvas.clientWidth || 1;
     const h = this.canvas.clientHeight || 1;
