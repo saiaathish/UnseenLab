@@ -71,6 +71,10 @@ const Y_UP = new THREE.Vector3(0, 1, 0);
 const HIGHLIGHT_TINT = new THREE.Color("#ffe9a8"); // "lights up" color
 const CASCADE_STEP_MS = 260; // per-hop delay of the downstream cascade
 const CASCADE_FADE_MS = 180; // fade-in duration of each cascade step
+/** Focus events arriving this soon after a pointerdown are the click's own
+ * focus (the canvas is tabIndex=0), not a keyboard focus — they must not seed
+ * phantom keyboard focus or announce keyboard instructions. */
+const POINTER_FOCUS_WINDOW_MS = 500;
 
 /** Pure dt clamp — exported for direct unit testing (mirrors lumina-2d). */
 export function clampDt(dt: number, max: number = MAX_DT): number {
@@ -340,6 +344,10 @@ export class PrimitiveSceneRenderer {
   private cameraAspect = 1;
   private pointerDown = { x: 0, y: 0 };
   private pointerMoved = 0;
+  /** Timestamp of the last pointerdown (-1 = no pointer interaction yet).
+   * Consumed by onFocus to distinguish click-induced focus from keyboard
+   * focus. */
+  private pointerInteractedAt = -1;
 
   /** Object-id → engine body/grid mapping (hybrid showcases; set per spec). */
   private engineMapping: EngineMapping | null = null;
@@ -1640,6 +1648,7 @@ export class PrimitiveSceneRenderer {
   // -------------------------------------------------------------------------
 
   private onPointerDown(e: PointerEvent): void {
+    this.pointerInteractedAt = this.now();
     this.pointerDown = { x: e.clientX, y: e.clientY };
     this.pointerMoved = 0;
     // Clicks still work under reduced motion; only dragging is disabled.
@@ -1760,7 +1769,7 @@ export class PrimitiveSceneRenderer {
     for (const hit of this.raycastHits(ndc.x, ndc.y)) {
       const nodeId = this.resolveNodePick(hit.object);
       if (nodeId) {
-        this.selectNode(nodeId, true);
+        this.selectNode(nodeId, true, "pointer");
         return;
       }
       const edgeId = this.resolveEdgePick(hit.object);
@@ -1809,19 +1818,28 @@ export class PrimitiveSceneRenderer {
   }
 
   /** Select a node: highlight it, light up its outgoing edges, then cascade
-   * downstream (a brief wave, not a physics sim). Fires the event surface. */
-  private selectNode(nodeId: string, manipulated: boolean): void {
+   * downstream (a brief wave, not a physics sim). Fires the event surface.
+   * The single activation function — pointer clicks and keyboard both
+   * converge here; `source` only shapes focus seeding and the announcement. */
+  private selectNode(
+    nodeId: string,
+    manipulated: boolean,
+    source: "pointer" | "keyboard" = "keyboard"
+  ): void {
     const changed = this.selectedNodeId !== nodeId || this.selectedEdgeId !== null;
     const hadEdge = this.selectedEdgeId !== null;
     this.selectedNodeId = nodeId;
     this.selectedEdgeId = null;
     this.hoverEdgeId = null;
+    // Pointer activation seeds the keyboard focus so a later Enter/Space
+    // activates the node the learner clicked (predictable, no phantom focus).
+    if (source === "pointer") this.focusNodeId = nodeId;
     this.cascadeNodes = cascadeOrder(this.graph?.relationships ?? [], nodeId);
     this.cascadeStart = this.now();
     if (hadEdge) this.options.onEdgeSelect?.(null);
     if (changed) this.options.onNodeSelect?.(nodeId);
     if (manipulated) this.options.onNodeManipulate?.(nodeId);
-    this.announceNodeFocus(nodeId);
+    this.announceNodeFocus(nodeId, source);
   }
 
   /** Select an edge: dim everything outside its causal path. */
@@ -1864,6 +1882,15 @@ export class PrimitiveSceneRenderer {
 
   private onFocus(): void {
     if (!this.graphMode) return;
+    // A pointer click focuses the tabIndex=0 canvas on its own. Focus landing
+    // within the pointer-focus window is click-induced: never seed a phantom
+    // keyboard focus on the first node and never announce keyboard
+    // instructions — an empty-space click means clear-selection only.
+    const pointerInduced =
+      this.pointerInteractedAt >= 0 &&
+      this.now() - this.pointerInteractedAt <= POINTER_FOCUS_WINDOW_MS;
+    this.pointerInteractedAt = -1;
+    if (pointerInduced) return;
     if (!this.focusNodeId) {
       const first = this.firstGraphNodeId();
       if (first) {
@@ -1888,7 +1915,7 @@ export class PrimitiveSceneRenderer {
     } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
       idx = (idx - 1 + graphNodes.length) % graphNodes.length;
     } else if (e.key === "Enter" || e.key === " ") {
-      if (this.focusNodeId) this.selectNode(this.focusNodeId, true);
+      if (this.focusNodeId) this.selectNode(this.focusNodeId, true, "keyboard");
       e.preventDefault();
       return;
     } else {
@@ -1899,16 +1926,21 @@ export class PrimitiveSceneRenderer {
     e.preventDefault();
   }
 
-  /** Reflect the focused/selected node in the canvas's accessible name. */
-  private announceNodeFocus(nodeId: string): void {
+  /** Reflect the focused/selected node in the canvas's accessible name.
+   * Keyboard-driven focus/selection keeps the operation hint; a selection
+   * that already happened via pointer activation announces without it (the
+   * click already did the work — telling the learner to press Enter again
+   * would contradict the successful activation). */
+  private announceNodeFocus(
+    nodeId: string,
+    source: "pointer" | "keyboard" = "keyboard"
+  ): void {
     if (!this.graphMode) return;
     const node = this.nodeById.get(nodeId);
     const label = node?.label ?? nodeId;
     const selected = this.selectedNodeId === nodeId ? " Selected." : "";
-    this.canvas.setAttribute(
-      "aria-label",
-      `${label}.${selected} Use arrow keys to move focus, Enter to select.`
-    );
+    const hint = source === "keyboard" ? " Use arrow keys to move focus, Enter to select." : "";
+    this.canvas.setAttribute("aria-label", `${label}.${selected}${hint}`);
   }
 
   // -------------------------------------------------------------------------
