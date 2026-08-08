@@ -625,7 +625,7 @@ async function openDiagramTab(page: Page): Promise<Locator | null> {
   const tab = page.getByRole("tab", { name: "Diagram" });
   if (!(await tab.isVisible().catch(() => false))) return null;
   await tab.click();
-  const svg = page.locator('svg[role="img"][aria-label^="Relationship diagram"]');
+  const svg = page.locator('svg[aria-label^="Relationship diagram"]');
   await expect(svg).toBeVisible({ timeout: 10_000 });
   return svg;
 }
@@ -871,7 +871,7 @@ for (const seed of ALL_SEEDS) {
 
     if (seed.kind === "template") {
       await assertDiagramQa(page, spec, seed.id);
-      const svg = page.locator('svg[role="img"][aria-label^="Relationship diagram"]');
+      const svg = page.locator('svg[aria-label^="Relationship diagram"]');
       fs.mkdirSync(SHOT_DIR, { recursive: true });
       await svg.screenshot({ path: path.join(SHOT_DIR, `${seed.id}-diagram-2d.png`) });
     }
