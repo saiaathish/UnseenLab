@@ -33,6 +33,15 @@ import type { SciencePolicyResult } from "./science-policy";
 export { sanitizeDemoSpec, validateDemoSpec } from "./sanitize";
 import type { SanitizeOutcome, SanitizeStatus } from "./sanitize";
 
+export {
+  filterUnavailableControlPrompts,
+  knownControlVocabularyForEngine,
+  controlReferenceContextForSpec,
+  availableControlTerms,
+  extractManipulationNounPhrases,
+} from "./control-references";
+export type { ControlReferenceContext } from "./control-references";
+
 export { SPEC_LIMITS };
 
 export type { DemoSpecV1 };

@@ -568,8 +568,11 @@ describe("DemonstrationShell", () => {
     expect(
       await screen.findByText(/WebGL is not available here/)
     ).toBeInTheDocument();
+    // The fallback diagram is the interactive surface (callbacks wired), so
+    // its svg is a role="group" container (A10 role contract); a static
+    // diagram would keep role="img".
     expect(
-      screen.getByRole("img", { name: /Relationship diagram/ })
+      screen.getByRole("group", { name: /Relationship diagram/ })
     ).toBeInTheDocument();
   });
 

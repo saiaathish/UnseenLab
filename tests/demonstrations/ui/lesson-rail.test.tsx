@@ -691,6 +691,34 @@ describe("LessonRail", () => {
     expect(continueButton()).toBeEnabled();
   });
 
+  it("derives engine observeOptions only from prompts that reference real controls (dangling controlId filtered)", () => {
+    const spec = hybridOrbitsSpec();
+    // A controlId'd prompt may reference a control the spec does not ship
+    // (e.g. an AI generator emitting "gravity" while only launch speed is a
+    // real control). The lesson plan must never offer an instruction the
+    // learner cannot act on.
+    spec.observationPrompts = [
+      {
+        prompt: "Watch the period readout as you change the launch speed.",
+        controlId: "speed-control",
+      },
+      {
+        prompt: "Try increasing the gravitational constant.",
+        controlId: "gravity",
+      },
+    ] as unknown as DemoSpecV1["observationPrompts"];
+
+    const plan = deriveLessonPlan(spec);
+    expect(plan.mode).toBe("engine");
+    const observeLabels = plan.observeOptions.map((o) => o.label);
+    expect(observeLabels).toContain(
+      "Watch the period readout as you change the launch speed."
+    );
+    expect(observeLabels).not.toContain(
+      "Try increasing the gravitational constant."
+    );
+  });
+
   it("shows AboutThisModel provenance and save status (demoted, never deleted)", async () => {
     const spec = verifiedPendulumSpec();
     assertValidSpec(spec);

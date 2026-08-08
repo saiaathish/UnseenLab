@@ -773,7 +773,7 @@ export function AccessibleDiagram({
     >
       <svg
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-        role="img"
+        role={interactive ? "group" : "img"}
         aria-label={`Relationship diagram. ${summary}`}
         className="h-auto w-full rounded-lg border border-border bg-surface-raised"
       >

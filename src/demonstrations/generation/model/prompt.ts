@@ -58,7 +58,7 @@ const SCHEMA_SECTION = [
   "- timeline (optional): { events: 1-30 objects { title: 1-120 chars; description: 1-800 chars; startMs >= 0; durationMs >= 0 } }.",
   "- controls: 0-6 objects { id; type: a control type; label: 1-120 chars; target: { kind: \"parameter\", ref } | { kind: \"animation\", ref } | { kind: \"scene\", ref: \"speed\" | \"paused\" | \"reset\" | \"play_pause\" }; min?; max?; step? > 0; options? 1-8 strings; defaultValue? string or number }. A parameter target.ref MUST name a simulation parameter key; an animation target.ref MUST name a scene3d animation id.",
   "- prediction: { prompt: 1-800 chars; options: 1-4 strings of 1-240 chars }. NEVER include a correctIndex field — model-generated demonstrations are never graded; only curated engine code may assert prediction truth. Omitting it is mandatory.",
-  "- observationPrompts: 0-6 objects { prompt: 1-800 chars }.",
+  "- observationPrompts: 0-6 objects { prompt: 1-800 chars; controlId (optional): the EXACT id of a control in YOUR controls list }. When an observation prompt asks the learner to change a control, set controlId to that control's exact id — never reference a control that is not in your controls list. Purely observational prompts (watch/notice/describe only) omit controlId.",
   "- representations: 0-5 objects { id; kind: \"stage_2d\" | \"stage_3d\" | \"diagram\" | \"graph\" | \"table\" | \"timeline\" | \"text_sequence\" | \"causal_map\"; label: 1-120 chars }.",
   "- adaptationContext: { allowed: boolean; oneVariableMode: boolean }.",
   "- provenance: { source: MUST be \"model_generated_spec\"; templateIds: 0-10 strings; generatedAt: 1-64 chars (ISO timestamp); model (optional): 1-64 chars }.",

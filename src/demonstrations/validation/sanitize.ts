@@ -31,6 +31,10 @@ import {
   MOBILE_MAX_PARTICLES,
 } from "./demo-spec-schema";
 import { sciencePolicy } from "./science-policy";
+import {
+  controlReferenceContextForSpec,
+  filterUnavailableControlPrompts,
+} from "./control-references";
 
 export type SanitizeStatus = "valid" | "repaired" | "rejected" | "fallback";
 
@@ -518,6 +522,22 @@ export function sanitizeDemoSpec(raw: unknown): SanitizeOutcome {
       status: "rejected",
       reasons: dedupe(parsedSpec.error.issues.flatMap(describeIssue)),
     };
+  }
+
+  // Lesson-action contract: an observation prompt that instructs the learner
+  // to manipulate a control must resolve to an available control. Prompts
+  // referencing unavailable controls (bad controlId, or legacy free text
+  // naming a known control the spec does not expose) are dropped — an
+  // instruction the learner cannot perform is never shown. Meaning is
+  // preserved for every prompt that stays: nothing is remapped.
+  const filteredObservationPrompts = filterUnavailableControlPrompts(
+    parsedSpec.data.observationPrompts,
+    parsedSpec.data.controls,
+    controlReferenceContextForSpec(parsedSpec.data)
+  );
+  if (filteredObservationPrompts.length !== parsedSpec.data.observationPrompts.length) {
+    repairs.push("repaired:observation_prompt_unavailable_control");
+    parsedSpec.data.observationPrompts = filteredObservationPrompts;
   }
 
   const policy = sciencePolicy(parsedSpec.data);
