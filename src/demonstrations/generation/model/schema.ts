@@ -240,7 +240,12 @@ const predictionSchema = z
   .strict();
 
 const observationPromptSchema = z
-  .object({ prompt: explanationString })
+  .object({
+    prompt: explanationString,
+    // The model may bind an action prompt to a real control id from its own
+    // controls list; unresolvable ids are repaired away by the sanitizer.
+    controlId: idString.optional(),
+  })
   .strict();
 
 const representationSchema = z
