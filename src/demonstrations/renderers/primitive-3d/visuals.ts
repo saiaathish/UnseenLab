@@ -26,10 +26,17 @@ import type {
   SceneGraphNode,
 } from "./types";
 import type { RuntimeNode } from "./renderer";
+import type { Vec3 } from "@/demonstrations/spec/demo-spec";
 import { materialFor } from "./materials";
 import { clampNum } from "./operators";
+import { GRAPH_NODE_KINDS } from "./scene-graph";
 import { buildLabelKindVisual } from "./labels";
-import { pushTrailPoint } from "./edges";
+import {
+  buildLineGeometry,
+  lineFallbackGeometry,
+  pushTrailPoint,
+} from "./edges";
+import { REASON_FIELD_AUTO_FIT, REASON_LINE_NO_ENDPOINTS } from "./presentation/constants";
 
 const OPACITY_ANIMATORS = new Set(["fade", "pulse", "reveal"]);
 const COLOR_ANIMATORS = new Set(["change_color"]);
@@ -37,6 +44,161 @@ const COLOR_ANIMATORS = new Set(["change_color"]);
 /** Sentinel mapping body keys for grid-driven objects (see EngineMapping). */
 const FIELD_BODY = "@field";
 const SURFACE_BODY = "@surface";
+
+// Vector-field auto-fit (design-2 §5.2, F-15a): tick origins stop AT the
+// anchor surface; overhang lets tick LENGTH reach the surface from inside.
+const FIELD_OVERHANG = 0.15;
+const FIELD_AUTO_FIT_GAP = 0.35;
+
+// Vector-tick arrowhead tips (design-2 §5.3, F-17): two short barb segments at
+// each tick tip, proportional to the tick length (LineSegments only, no new
+// materials). Kept local to visuals.ts — the shared constants module is C5's
+// and this ratio is not in design-2's enumerated single-source list (§6.4).
+export const TICK_TIP_RATIO = 0.3;
+
+/**
+ * In-plane perpendicular of a tick direction (cross with up): for a direction
+ * in the field's x-z plane this is the 90° rotation (−dz, 0, dx); a purely
+ * vertical tick (no in-plane component) falls back to +x deterministically.
+ */
+function tickPerp(
+  dx: number,
+  dy: number,
+  dz: number
+): [number, number, number] {
+  const px = -dz;
+  const py = 0;
+  const pz = dx;
+  const len = Math.hypot(px, py, pz);
+  if (len < 1e-9) return [1, 0, 0];
+  return [px / len, py / len, pz / len];
+}
+
+/**
+ * Write one tick as 6 points (3 LineSegments): shaft base→tip plus two barbs
+ * tip→tip±perp·tipLen. Degenerate ticks (tip == base) collapse to a point.
+ * Layout per tick k (offset k*18): [0] base, [1] tip, [2] tip, [3] tip+barbs,
+ * [4] tip, [5] tip−barbs.
+ */
+function writeTickPoints(
+  out: { [index: number]: number },
+  k: number,
+  baseX: number,
+  baseY: number,
+  baseZ: number,
+  tipX: number,
+  tipY: number,
+  tipZ: number,
+  tipLen: number
+): void {
+  const o = k * 18;
+  const dx = tipX - baseX;
+  const dy = tipY - baseY;
+  const dz = tipZ - baseZ;
+  if (Math.hypot(dx, dy, dz) < 1e-9) {
+    for (let i = 0; i < 18; i++) out[o + i] = i % 3 === 0 ? baseX : i % 3 === 1 ? baseY : baseZ;
+    return;
+  }
+  const [px, py, pz] = tickPerp(dx, dy, dz);
+  out[o] = baseX;
+  out[o + 1] = baseY;
+  out[o + 2] = baseZ;
+  out[o + 3] = tipX;
+  out[o + 4] = tipY;
+  out[o + 5] = tipZ;
+  out[o + 6] = tipX;
+  out[o + 7] = tipY;
+  out[o + 8] = tipZ;
+  out[o + 9] = tipX + px * tipLen;
+  out[o + 10] = tipY + py * tipLen;
+  out[o + 11] = tipZ + pz * tipLen;
+  out[o + 12] = tipX;
+  out[o + 13] = tipY;
+  out[o + 14] = tipZ;
+  out[o + 15] = tipX - px * tipLen;
+  out[o + 16] = tipY - py * tipLen;
+  out[o + 17] = tipZ - pz * tipLen;
+}
+
+/**
+ * Resolve a `line`/`process_edge` connector's endpoints (design-2 §2.2):
+ * the first relationship touching this node whose OTHER endpoint is a graph
+ * node (process_node/sphere). Returns the two endpoints in the node's LOCAL
+ * frame (the holder sits at node.position); null when no endpoint node exists
+ * (the caller falls back to the local-frame stub + reason).
+ */
+function resolveLineEndpoints(
+  ctx: VisualContext,
+  node: SceneGraphNode
+): { a: Vec3; b: Vec3 } | null {
+  const graph = ctx.graph;
+  if (!graph) return null;
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  for (const rel of graph.relationships) {
+    let otherId: string | null = null;
+    if (rel.from === node.id) otherId = rel.to;
+    else if (rel.to === node.id) otherId = rel.from;
+    if (!otherId) continue;
+    const other = byId.get(otherId);
+    if (!other || !GRAPH_NODE_KINDS.has(other.kind)) continue;
+    return {
+      a: {
+        x: other.position.x - node.position.x,
+        y: other.position.y - node.position.y,
+        z: other.position.z - node.position.z,
+      },
+      b: { x: 0, y: 0, z: 0 },
+    };
+  }
+  return null;
+}
+
+/**
+ * Vector-field span auto-fit (design-2 §5.2, F-15a): anchors are the graph
+ * endpoints of relationships touching the field (non-graph mode) or, in graph
+ * mode, every GRAPH_NODE_KINDS node near the field. When the gap between the
+ * field edge and the nearest anchor envelope is ≤ FIELD_AUTO_FIT_GAP the span
+ * grows so the tick origins reach every anchor surface plus FIELD_OVERHANG.
+ * Returns the original span when nothing is anchored.
+ */
+function autoFitFieldSpan(
+  ctx: VisualContext,
+  node: SceneGraphNode,
+  span: number
+): number {
+  const graph = ctx.graph;
+  if (!graph) return span;
+  let half = span / 2;
+  const touching = new Set<string>();
+  if (!ctx.graphMode) {
+    for (const rel of graph.relationships) {
+      if (rel.from === node.id) touching.add(rel.to);
+      if (rel.to === node.id) touching.add(rel.from);
+    }
+  }
+  let nearestGap = Infinity;
+  let maxReach = half;
+  let anchorCount = 0;
+  for (const n of graph.nodes) {
+    if (n.id === node.id) continue;
+    const isAnchor = ctx.graphMode
+      ? GRAPH_NODE_KINDS.has(n.kind)
+      : touching.has(n.id) && GRAPH_NODE_KINDS.has(n.kind);
+    if (!isAnchor) continue;
+    anchorCount++;
+    const r = n.size * 0.5;
+    const dist = Math.hypot(
+      n.position.x - node.position.x,
+      n.position.z - node.position.z
+    );
+    nearestGap = Math.min(nearestGap, dist - r - half);
+    maxReach = Math.max(maxReach, dist - r + FIELD_OVERHANG);
+  }
+  if (anchorCount > 0 && nearestGap <= FIELD_AUTO_FIT_GAP && maxReach > half) {
+    return maxReach * 2;
+  }
+  return span;
+}
 
 // ---------------------------------------------------------------------------
 // Deterministic helpers (seeded PRNG for particles)
@@ -135,6 +297,8 @@ export interface VisualContext {
     animateOpacity: boolean,
     animateColor: boolean
   ): void;
+  /** Reason accumulator (renderer merges into lastReasons at build end). */
+  reasons?: string[];
 }
 
 /** Mapping entry for a vector_field node when a field grid is present. */
@@ -226,13 +390,18 @@ function applyEngineField(
         : 0;
     const dirX = mag > 1e-6 ? sample.ex / mag : 0;
     const dirY = mag > 1e-6 ? sample.ey / mag : 0;
-    vt.attribute.array[k * 6] = oxW;
-    vt.attribute.array[k * 6 + 1] = 0;
-    vt.attribute.array[k * 6 + 2] = ozW;
     // engine (ex, ey) → world (x, z): the field lives in the plane.
-    vt.attribute.array[k * 6 + 3] = oxW + dirX * len;
-    vt.attribute.array[k * 6 + 4] = 0;
-    vt.attribute.array[k * 6 + 5] = ozW + dirY * len;
+    writeTickPoints(
+      vt.attribute.array,
+      k,
+      oxW,
+      0,
+      ozW,
+      oxW + dirX * len,
+      0,
+      ozW + dirY * len,
+      len * TICK_TIP_RATIO
+    );
   }
   vt.attribute.needsUpdate = true;
 }
@@ -295,10 +464,21 @@ export function buildVisual(
     }
     case "line":
     case "process_edge": {
+      // Endpoint-oriented connector (F-07): when the node is a relationship
+      // endpoint with an adjacent graph node, the line runs from the other
+      // node's position to this node (local frame); process_edge bows as a
+      // quadratic curve. No endpoint nodes: the documented local-frame
+      // segment fallback + reason (never silent).
+      const resolved = resolveLineEndpoints(ctx, node);
+      const curved = node.kind === "process_edge";
+      const pts = resolved
+        ? buildLineGeometry(resolved.a, resolved.b, curved)
+        : lineFallbackGeometry(size);
+      if (!resolved) ctx.reasons?.push(REASON_LINE_NO_ENDPOINTS);
       const geo = new THREE.BufferGeometry();
       geo.setAttribute(
         "position",
-        new THREE.BufferAttribute(new Float32Array([0, 0, 0, 0, 0, size]), 3)
+        new THREE.BufferAttribute(pts, 3)
       );
       holder.add(new THREE.Line(geo, materialFor("line", color)));
       ctx.trackDisposable(geo);
@@ -328,7 +508,14 @@ export function buildVisual(
       geo.setAttribute("position", attribute);
       geo.setDrawRange(0, 0);
       const line = new THREE.Line(geo, materialFor("line", color));
-      holder.add(line);
+      // F-18: the trail Line lives in the SCENE (world space), not the moving
+      // holder — pushTrailPoint records world positions, so the history stays
+      // where it happened instead of being dragged along by the body.
+      if (ctx.scene) {
+        ctx.scene.add(line);
+      } else {
+        holder.add(line);
+      }
       rn.trail = {
         capacity,
         buffer,
@@ -413,11 +600,20 @@ export function buildVisual(
     }
     case "vector_field": {
       const grid = 4;
-      const span = size;
+      let span = size;
+      // Auto-fit to the anchor surfaces (design-2 §5.2, F-15a): extend the
+      // span so the tick grid reaches the envelopes it should emanate from.
+      const fitSpan = autoFitFieldSpan(ctx, node, span);
+      if (fitSpan > span) {
+        span = fitSpan;
+        ctx.reasons?.push(REASON_FIELD_AUTO_FIT);
+      }
       const len = span * 0.22;
       const ticks = grid * grid;
-      const pts = new Float32Array(ticks * 2 * 3);
+      // 6 points per tick (F-17): shaft base→tip + two arrowhead barbs.
+      const pts = new Float32Array(ticks * 6 * 3);
       const origins = new Float32Array(ticks * 3);
+      const tipLen = len * TICK_TIP_RATIO;
       for (let i = 0; i < grid; i++) {
         for (let j = 0; j < grid; j++) {
           const k = i * grid + j;
@@ -426,13 +622,8 @@ export function buildVisual(
           origins[k * 3] = ox;
           origins[k * 3 + 1] = 0;
           origins[k * 3 + 2] = oz;
-          // tick from base to base + (0, len, 0)
-          pts[k * 6] = ox;
-          pts[k * 6 + 1] = 0;
-          pts[k * 6 + 2] = oz;
-          pts[k * 6 + 3] = ox;
-          pts[k * 6 + 4] = len;
-          pts[k * 6 + 5] = oz;
+          // Default base vector (0,1,0): ticks point +y, barbs along +x.
+          writeTickPoints(pts, k, ox, 0, oz, ox, len, oz, tipLen);
         }
       }
       const geo = new THREE.BufferGeometry();
@@ -550,16 +741,22 @@ export function updateKind(
       applyEngineField(ctx, vt, fieldEntry);
     } else {
       const v = s.vector;
+      const tipLen = vt.len * TICK_TIP_RATIO;
       for (let k = 0; k < vt.origins.length / 3; k++) {
         const ox = vt.origins[k * 3];
         const oy = vt.origins[k * 3 + 1];
         const oz = vt.origins[k * 3 + 2];
-        vt.attribute.array[k * 6] = ox;
-        vt.attribute.array[k * 6 + 1] = oy;
-        vt.attribute.array[k * 6 + 2] = oz;
-        vt.attribute.array[k * 6 + 3] = ox + v.x * vt.len;
-        vt.attribute.array[k * 6 + 4] = oy + v.y * vt.len;
-        vt.attribute.array[k * 6 + 5] = oz + v.z * vt.len;
+        writeTickPoints(
+          vt.attribute.array,
+          k,
+          ox,
+          oy,
+          oz,
+          ox + v.x * vt.len,
+          oy + v.y * vt.len,
+          oz + v.z * vt.len,
+          tipLen
+        );
       }
       vt.attribute.needsUpdate = true;
     }

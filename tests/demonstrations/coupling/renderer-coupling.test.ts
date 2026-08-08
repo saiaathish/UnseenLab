@@ -620,14 +620,20 @@ describe("primitive renderer canonical-state coupling", () => {
     fireFrame(1100);
 
     // 4x4 grid of arrows: each now points along +x with the max length
-    // (vt.len = size * 0.22 = 1.98 at magnitude/maxMagnitude = 1).
+    // (vt.len = size * 0.22 = 1.98 at magnitude/maxMagnitude = 1), and each
+    // tick carries two arrowhead barbs perpendicular to its direction
+    // (design-2 §5.3, F-17 — 6 points per tick, barb length = 0.3·len).
     const len = 9 * 0.22;
     for (let k = 0; k < 16; k++) {
-      const ox = attr[k * 6];
-      const oz = attr[k * 6 + 2];
-      expect(attr[k * 6 + 3]).toBeCloseTo(ox + len, 4); // x tip
-      expect(attr[k * 6 + 4]).toBeCloseTo(0, 4); // in-plane
-      expect(attr[k * 6 + 5]).toBeCloseTo(oz, 4); // z unchanged (ey = 0)
+      const o = k * 18;
+      const ox = attr[o];
+      const oz = attr[o + 2];
+      expect(attr[o + 3]).toBeCloseTo(ox + len, 4); // x tip
+      expect(attr[o + 4]).toBeCloseTo(0, 4); // in-plane
+      expect(attr[o + 5]).toBeCloseTo(oz, 4); // z unchanged (ey = 0)
+      // barbs perpendicular (±z for a +x direction) at TICK_TIP_RATIO.
+      expect(attr[o + 11]).toBeCloseTo(oz + len * 0.3, 4);
+      expect(attr[o + 17]).toBeCloseTo(oz - len * 0.3, 4);
     }
     renderer.dispose();
   });

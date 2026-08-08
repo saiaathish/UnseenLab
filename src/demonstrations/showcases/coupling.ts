@@ -87,9 +87,12 @@ export const SHOWCASE_ENGINE_MAPPINGS: Record<CoupledShowcaseId, EngineMapping> 
     // "@field" sentinel: the renderer drives the arrows from state.field,
     // sampling the grid at each arrow's world position through this scale.
     "field-vectors": { body: "@field", scale: CHARGES_SCALE, offsetX: 0, offsetY: 0 },
-    // midpoint-marker intentionally NOT mapped: it sits at world origin,
-    // which is exactly the engine's midpoint (centered canvas origin); its
-    // pulse operator is a decorative highlight.
+    // "@midpoint" sentinel (additive, C3): the renderer resolves the live
+    // engine midpoint from the charge bodies each frame, so the marker tracks
+    // an asymmetric drag instead of sitting frozen at the world origin
+    // (sh-charge-03). At the curated default the midpoint IS the origin, so
+    // the marker never moves unless the charges do.
+    "midpoint-marker": { body: "@midpoint", scale: CHARGES_SCALE, offsetX: 0, offsetY: 0 },
   },
   "wave-interference": {
     "source-1": { body: "source1", scale: WAVES_SCALE, offsetX: 0, offsetY: 0 },

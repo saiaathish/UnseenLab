@@ -1588,3 +1588,93 @@ describe("focusParameterKeys boundary", () => {
     expect(readFocusKeys(result.spec!)).toEqual(["length"]);
   });
 });
+
+describe("validateDemoSpec — model geometry rejections (design-1 §7.2)", () => {
+  /** The pendulum fixture relabeled as model output with a given object set
+   * and no prediction truth (model specs are never graded — the science
+   * policy would otherwise reject before the geometry check can speak). */
+  function modelSpecWithObjects(objects: unknown[]): string {
+    const spec = verifiedSimulationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    (raw.provenance as Record<string, unknown>).source = "model_generated_spec";
+    (raw.prediction as Record<string, unknown>).correctIndex = undefined;
+    const scene3d = raw.scene3d as { objects: unknown[]; relationships: unknown[]; animations: unknown[] };
+    scene3d.objects = objects;
+    scene3d.relationships = [];
+    scene3d.animations = [];
+    return JSON.stringify(raw);
+  }
+
+  it("rejects two colliding bodies at the exact same position (geometry:duplicate_position)", () => {
+    const result = validateDemoSpec(
+      modelSpecWithObjects([
+        { id: "a", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 1 },
+        { id: "b", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 1 },
+      ])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("geometry:duplicate_position");
+  });
+
+  it("rejects overlapping body envelopes (geometry:envelope_overlap)", () => {
+    const result = validateDemoSpec(
+      modelSpecWithObjects([
+        { id: "a", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 3 },
+        { id: "b", kind: "sphere", position: { x: 1, y: 0, z: 0 }, size: 1 },
+      ])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("geometry:envelope_overlap");
+  });
+
+  it("rejects z-collapsed bodies (same x,y, differing z)", () => {
+    const result = validateDemoSpec(
+      modelSpecWithObjects([
+        { id: "a", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 1 },
+        { id: "b", kind: "sphere", position: { x: 0, y: 0, z: 5 }, size: 1 },
+      ])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("geometry:z_collapse");
+  });
+
+  it("accepts a concentric star + glow + ring composition (decorative kinds are not rejection subjects)", () => {
+    // The orbits-showcase composition: a body with its glow and orbit ring
+    // concentric at the origin. Decorative kinds legitimately coincide with
+    // bodies by construction — rejecting them would block the flagship scene
+    // whenever a model reproduces it.
+    const result = validateDemoSpec(
+      modelSpecWithObjects([
+        { id: "star", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 2.4 },
+        { id: "star-glow", kind: "particle_field", position: { x: 0, y: 0, z: 0 }, size: 5, particleCount: 100 },
+        { id: "orbit-path", kind: "orbit_path", position: { x: 0, y: 0, z: 0 }, size: 12 },
+        { id: "planet", kind: "sphere", position: { x: 6, y: 0, z: 0 }, size: 1 },
+      ])
+    );
+    expect(["valid", "repaired"]).toContain(result.status);
+    expect(result.reasons.some((r) => r.startsWith("geometry:"))).toBe(false);
+  });
+
+  it("decorative layers do not mask a genuine body collision", () => {
+    const result = validateDemoSpec(
+      modelSpecWithObjects([
+        { id: "star", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 5 },
+        { id: "planet", kind: "sphere", position: { x: 1, y: 0, z: 0 }, size: 2 },
+      ])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("geometry:envelope_overlap");
+  });
+
+  it("curated specs are exempt from the geometric rejections (layout repairs them)", () => {
+    const spec = verifiedSimulationSpec(); // provenance stays curated_engine
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    (raw.scene3d as { objects: unknown[] }).objects = [
+      { id: "a", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 1 },
+      { id: "b", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 1 },
+    ];
+    const result = validateDemoSpec(JSON.stringify(raw));
+    expect(["valid", "repaired"]).toContain(result.status);
+    expect(result.reasons.some((r) => r.startsWith("geometry:"))).toBe(false);
+  });
+});

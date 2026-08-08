@@ -13,6 +13,9 @@
 
 import { ANIMATION_OPERATORS } from "@/demonstrations/spec/demo-spec";
 import type { AnimationOperator, Vec3 } from "@/demonstrations/spec/demo-spec";
+import { clampPositionToBounds } from "./geometry/envelopes";
+import { REASON_UPDATE_VECTOR_IDENTITY } from "./presentation/constants";
+import type { SceneBounds } from "./types";
 
 export type Axis = "x" | "y" | "z";
 
@@ -32,6 +35,11 @@ export interface OperatorParams {
   /** orbit operator — center and radius, derived from `orbits` relationships. */
   orbitCenter?: Vec3;
   orbitRadius?: number;
+  /** translate operator — surface-to-surface slide path (design-1 §3.1): the
+   * packet walks the polyline monotonically by speed*amplitude*t clamped to
+   * the total length and HOLDS at the final surface. Absent → legacy
+   * unbounded drift semantics. */
+  slidePath?: Vec3[];
 }
 
 /** The parameter shape an operator accepts (others are ignored). */
@@ -232,7 +240,84 @@ export interface ActiveOperator {
 export interface StepOptions {
   /** Reduced motion: oscillate/pulse/emit freeze; fade/reveal jump discretely. */
   reducedMotion?: boolean;
+  /**
+   * Scene AABB floor (design-1 §3.2): after any position-returning operator
+   * (translate, oscillate, follow_path, orbit) the output position is clamped
+   * into the bounds — moving content can never leave the framed viewport
+   * (dynamic I5). Engine-owned bodies are untouched (applyTransforms
+   * overrides them afterward).
+   */
+  bounds?: SceneBounds;
 }
+
+/** Position-returning operators subject to the bounds floor. */
+const POSITION_RETURNING = new Set<AnimationOperator>([
+  "translate",
+  "oscillate",
+  "follow_path",
+  "orbit",
+]);
+
+/**
+ * Walk a slide path polyline by arc length `d` (clamped to the total length —
+ * monotonic, bounded, holds at the end). design-1 §3.1.
+ */
+function walkSlidePath(path: Vec3[], d: number): Vec3 {
+  if (path.length === 0) return { x: 0, y: 0, z: 0 };
+  if (path.length === 1) return { ...path[0] };
+  const segments: number[] = [];
+  let total = 0;
+  for (let i = 0; i + 1 < path.length; i++) {
+    const len = Math.hypot(
+      path[i + 1].x - path[i].x,
+      path[i + 1].y - path[i].y,
+      path[i + 1].z - path[i].z,
+    );
+    segments.push(len);
+    total += len;
+  }
+  let remaining = Math.min(Math.max(0, d), total);
+  for (let i = 0; i + 1 < path.length; i++) {
+    const len = segments[i];
+    if (remaining <= len || i + 2 === path.length) {
+      const t = len > 0 ? Math.min(1, remaining / len) : 0;
+      return {
+        x: path[i].x + (path[i + 1].x - path[i].x) * t,
+        y: path[i].y + (path[i + 1].y - path[i].y) * t,
+        z: path[i].z + (path[i + 1].z - path[i].z) * t,
+      };
+    }
+    remaining -= len;
+  }
+  return { ...path[path.length - 1] };
+}
+
+/**
+ * update_vector identity guard (design-1 §11.4 / audit-1 tpl-field-02): when
+ * the base vector is parallel to the rotation axis, rotating about it is a
+ * mathematical no-op. Returns a perpendicular axis instead (deterministic
+ * order x → y → z) plus `fallback: true` so callers can emit the shared
+ * `update_vector_identity_axis_fallback` reason.
+ */
+export function resolveUpdateVectorAxis(
+  base: Vec3,
+  axis: Axis,
+): { axis: Axis; fallback: boolean } {
+  const unit = { x: 0, y: 0, z: 0 };
+  unit[axis] = 1;
+  const crossLen = Math.hypot(
+    base.y * unit.z - base.z * unit.y,
+    base.z * unit.x - base.x * unit.z,
+    base.x * unit.y - base.y * unit.x,
+  );
+  if (crossLen > 1e-9) return { axis, fallback: false };
+  const perpendicular: Axis =
+    axis === "x" ? "y" : axis === "y" ? "x" : "x";
+  return { axis: perpendicular, fallback: true };
+}
+
+/** The shared reason emitted when the identity guard reroutes the axis. */
+export { REASON_UPDATE_VECTOR_IDENTITY };
 
 function elapsedAfterDelay(time: number, delayMs: number): number {
   const t = time * 1000 - delayMs;
@@ -418,12 +503,21 @@ export function stepOperator(
       break;
     }
     case "translate": {
-      const axis = params.axis ?? "x";
-      out.position = {
-        ...out.position,
-        [axis]:
-          state.base.position[axis] + params.speed * params.amplitude * elapsed,
-      };
+      if (params.slidePath && params.slidePath.length >= 2) {
+        // Surface-to-surface waypoints: walk by arc length, monotonic,
+        // holds at the destination surface (design-1 §3.1).
+        out.position = walkSlidePath(
+          params.slidePath,
+          params.speed * params.amplitude * elapsed,
+        );
+      } else {
+        const axis = params.axis ?? "x";
+        out.position = {
+          ...out.position,
+          [axis]:
+            state.base.position[axis] + params.speed * params.amplitude * elapsed,
+        };
+      }
       break;
     }
     case "oscillate": {
@@ -481,8 +575,9 @@ export function stepOperator(
       break;
     }
     case "update_vector": {
-      const axis = params.axis ?? "y";
-      out.vector = rotateVec3(state.base.vector, axis, params.speed * elapsed);
+      const requestedAxis = params.axis ?? "y";
+      const resolved = resolveUpdateVectorAxis(state.base.vector, requestedAxis);
+      out.vector = rotateVec3(state.base.vector, resolved.axis, params.speed * elapsed);
       break;
     }
     default: {
@@ -492,6 +587,11 @@ export function stepOperator(
       const never: never = op.operator;
       return out;
     }
+  }
+  // Dynamic I5 floor (design-1 §3.2): position-returning operators are
+  // clamped into the scene AABB; without bounds the output is unchanged.
+  if (opts?.bounds && POSITION_RETURNING.has(op.operator)) {
+    out.position = clampPositionToBounds(out.position, opts.bounds);
   }
   return out;
 }

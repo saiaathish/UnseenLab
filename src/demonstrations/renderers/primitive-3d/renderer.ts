@@ -54,8 +54,16 @@ import type {
   SceneGraphAnimation,
   SceneGraphNode,
 } from "./types";
-import { buildLabelSprite, type LabelContext } from "./labels";
 import {
+  applyLabelPlans,
+  buildLabelSprite,
+  planNodeLabels,
+  updateLabelOverlays,
+  type LabelContext,
+  type LabelOverlay,
+} from "./labels";
+import {
+  attachEdgeLabels,
   buildFlowEdge,
   buildGraphEdge,
   updateEdge,
@@ -204,6 +212,7 @@ export class PrimitiveSceneRenderer {
   private runtime = new Map<string, RuntimeNode>();
   private roots: RuntimeNode[] = [];
   private edges: RuntimeEdge[] = [];
+  private labels: LabelOverlay[] = [];
   private animationsByTarget = new Map<string, SceneGraphAnimation[]>();
   private disposables: Array<{ dispose(): void }> = [];
 
@@ -431,6 +440,28 @@ export class PrimitiveSceneRenderer {
         }
       }
     }
+    // C4 (design-2 §3.4, F-13): engine-state pushes re-fit the frame over the
+    // union of static graph content and engine dynamic extents (bodies, field
+    // span). Grow-only with REFRAME_HYSTERESIS; skipped while the orbit is
+    // user-controlled; the orbit record and camera are never reset.
+    const reframed = frameCamera(this.camera, this.graph, {
+      graphMode: this.graphMode,
+      orbit: this.orbit,
+      orthoBaseHalf: this.orthoBaseHalf,
+      reframe: {
+        graph: this.graph,
+        engineMapping: this.engineMapping,
+        engineState: state,
+        aspect: this.cameraAspect,
+      },
+    });
+    if (reframed) {
+      if (reframed.graphMode) {
+        this.orthoBaseHalf = reframed.orthoBaseHalf;
+      } else if (reframed.distance !== undefined) {
+        this.orbit.distance = reframed.distance;
+      }
+    }
   }
 
   private buildScene(graph: SceneGraph): void {
@@ -449,6 +480,7 @@ export class PrimitiveSceneRenderer {
 
     this.runtime = new Map();
     this.roots = [];
+    this.labels = [];
     this.pickTargets.clear();
     this.pickEdges.clear();
     const childSet = new Set<string>();
@@ -481,6 +513,24 @@ export class PrimitiveSceneRenderer {
       }
     }
 
+    // Node-label placement: deterministic collision-tested stage (labels.ts).
+    // Truncation / anchor-fallback reasons join the renderer's reason surface
+    // (never silent). Fresh world matrices first, so placement anchors measure
+    // real world positions (nested groups / engine nodes) and applyLabelPlans
+    // snaps the overlay sprites correctly before the first frame.
+    this.scene?.updateMatrixWorld(true);
+    const labelPlan = planNodeLabels(graph, {
+      edgePlans: this.graphMode ? this.edgePlans : undefined,
+    });
+    this.lastReasons.push(...labelPlan.reasons);
+    applyLabelPlans(this.labelCtx, labelPlan.plans);
+
+    // Edge-label placement (C3, design-2 §1.4): collision-tested candidates
+    // with skip+density reasons; consumes the node-label plans placed above
+    // so edge labels never overlap a node label. Runs after all edges and
+    // node labels exist.
+    attachEdgeLabels(this.edgeCtx, labelPlan.plans);
+
     // Keyboard interaction: graph nodes are reachable via the focused canvas.
     this.canvas.tabIndex = this.graphMode ? 0 : this.canvas.tabIndex;
 
@@ -509,7 +559,7 @@ export class PrimitiveSceneRenderer {
 
     if (node.kind !== "group") buildVisual(this.visualCtx, rn, node, holder);
     if (node.kind !== "label" && node.label !== undefined) {
-      buildLabelSprite(this.labelCtx, rn, node, holder);
+      buildLabelSprite(this.labelCtx, rn, node);
     }
     if (this.graphMode && node.kind !== "group") {
       // Pointer picking: the holder and every mesh it owns hit-test as the
@@ -551,6 +601,10 @@ export class PrimitiveSceneRenderer {
     return {
       graph: this.graph,
       graphMode: this.graphMode,
+      scene: this.scene,
+      labels: this.labels,
+      runtime: this.runtime,
+      edgePlans: this.edgePlans,
       trackDisposable: (d) => this.trackDisposable(d),
     };
   }
@@ -562,6 +616,9 @@ export class PrimitiveSceneRenderer {
       trackDisposable: (d) => this.trackDisposable(d),
       edges: this.edges,
       pickEdges: this.pickEdges,
+      // Edge reasons (routing/head/label skips) join the same reason surface
+      // as scene-graph and label reasons.
+      reasons: this.lastReasons,
     };
   }
 
@@ -578,6 +635,9 @@ export class PrimitiveSceneRenderer {
       trackDisposable: (d) => this.trackDisposable(d),
       cloneMaterials: (holder, rn, animateOpacity, animateColor) =>
         this.cloneMaterials(holder, rn, animateOpacity, animateColor),
+      // Visual reasons (field auto-fit, line/process_edge endpoint fallback)
+      // join the same reason surface as scene-graph/edge reasons.
+      reasons: this.lastReasons,
     };
   }
 
@@ -735,10 +795,13 @@ export class PrimitiveSceneRenderer {
   private updateScene(dt: number, time: number): void {
     if (!this.scene || !this.graph) return;
     for (const rn of this.runtime.values()) this.applyAnimations(rn, dt, time);
-    this.scene.updateMatrixWorld(true);
     for (const rn of this.runtime.values()) this.applyTransforms(rn);
+    // Fresh world matrices: edges, trails and labels read world positions
+    // every frame (a stale matrix would trail a moving body by one frame).
+    this.scene.updateMatrixWorld(true);
     for (const rn of this.runtime.values()) updateKind(this.visualCtx, rn, dt);
     for (const edge of this.edges) updateEdge(edge);
+    updateLabelOverlays(this.labelCtx, dt);
     if (this.graphMode) this.applySelectionVisuals();
     if (!this.options.reducedMotion && !this.orbit.userControlled && !this.graphMode) {
       this.orbit.azimuth += AUTO_ORBIT_RATE * dt;
@@ -754,6 +817,15 @@ export class PrimitiveSceneRenderer {
   private engineBodyPosition(rn: RuntimeNode): { x: number; y: number } | null {
     const mapping = this.engineMapping?.[rn.graph.id];
     if (!mapping || !this.engineState?.bodies) return null;
+    if (mapping.body === "@midpoint") {
+      // C3 sentinel (sh-charge-03): the live engine midpoint of the charge
+      // pair — the marker tracks an asymmetric drag instead of sitting frozen
+      // at the world origin. Missing charge bodies → not driven (decorative).
+      const c1 = this.engineState.bodies["charge1"];
+      const c2 = this.engineState.bodies["charge2"];
+      if (!c1 || !c2) return null;
+      return { x: (c1.x + c2.x) / 2, y: (c1.y + c2.y) / 2 };
+    }
     const body = this.engineState.bodies[mapping.body];
     if (!body) return null;
     return { x: body.x, y: body.y };
@@ -777,12 +849,18 @@ export class PrimitiveSceneRenderer {
       if (anim.path) params.path = anim.path;
       if (anim.orbitCenter) params.orbitCenter = anim.orbitCenter;
       if (anim.orbitRadius !== undefined) params.orbitRadius = anim.orbitRadius;
+      if (anim.slidePath) params.slidePath = anim.slidePath;
       state = stepOperator(
         { operator: anim.operator, params },
         state,
         dt,
         time,
-        { reducedMotion: this.options.reducedMotion }
+        {
+          reducedMotion: this.options.reducedMotion,
+          // Dynamic I5 floor (design-1 §3.2): position operators clamp into
+          // the deterministic post-layout bounds.
+          bounds: this.graph?.layout?.bounds,
+        }
       );
     }
     rn.state = state;

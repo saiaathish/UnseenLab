@@ -188,6 +188,79 @@ function parseJson(content: string): unknown | null {
   }
 }
 
+/** One bounded model round: build the chat request, fetch, parse, first-pass
+ * gate and sanitize. Returns the sanitizer outcome or null on transport
+ * failure / unparseable output (caller decides the fallback reason). */
+async function runModelRound(
+  systemPrompt: string,
+  userMessage: string,
+  model: string,
+  baseUrl: string,
+  apiKey: string,
+  controller: AbortController,
+): Promise<
+  | { kind: "spec"; outcome: ReturnType<typeof sanitizeDemoSpec> }
+  | { kind: "failure"; reason: string }
+> {
+  const body: Record<string, unknown> = {
+    model,
+    temperature: 0,
+    max_tokens: GENERIC_MAX_OUTPUT_TOKENS,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ],
+  };
+  if (process.env.LLM_DISABLE_THINKING === "1") {
+    body.thinking = { type: "disabled" };
+  }
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal: controller.signal,
+  });
+
+  if (!response.ok) {
+    return { kind: "failure", reason: `generic_provider_${response.status}` };
+  }
+
+  const payload = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const content = payload.choices?.[0]?.message?.content;
+  if (!content) {
+    return { kind: "failure", reason: "generic_empty_response" };
+  }
+
+  const parsed = parseJson(content);
+  if (parsed === null) {
+    return { kind: "failure", reason: "generic_invalid_json" };
+  }
+
+  const firstPass = firstPassModelCheck(parsed);
+  if (!firstPass.ok) {
+    return { kind: "failure", reason: "generic_schema_rejected" };
+  }
+
+  return { kind: "spec", outcome: sanitizeDemoSpec(firstPass.value) };
+}
+
+/** True when every rejection code is a model-fixable geometry code
+ * (design-1 §7.2): the model can spread/reposition its own objects, so the
+ * pipeline gives it ONE bounded repair retry with a safe directive. */
+function isGeometryOnlyRejection(outcome: {
+  status: string;
+  reasons: string[];
+}): boolean {
+  if (outcome.status !== "rejected" || outcome.reasons.length === 0) return false;
+  return outcome.reasons.every((r) => r.startsWith("geometry:"));
+}
+
 /**
  * Generate a qualitative demonstration for a safe request that had no curated
  * route. The model is never allowed to upgrade this fallback into a verified
@@ -220,66 +293,44 @@ export async function generateGenericConceptDemo(
       {},
       "conceptual_demonstration",
     );
-    const body: Record<string, unknown> = {
-      model,
-      temperature: 0,
-      max_tokens: GENERIC_MAX_OUTPUT_TOKENS,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: JSON.stringify({
-            query: normalizedQuery,
-            preferences: {
-              reducedMotion: prefs.reducedMotion,
-              oneVariableMode: prefs.oneVariableMode,
-              preferredRepresentations: prefs.preferredRepresentations,
-            },
-          }),
-        },
-      ],
-    };
-    if (process.env.LLM_DISABLE_THINKING === "1") {
-      body.thinking = { type: "disabled" };
-    }
-
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+    const userMessage = JSON.stringify({
+      query: normalizedQuery,
+      preferences: {
+        reducedMotion: prefs.reducedMotion,
+        oneVariableMode: prefs.oneVariableMode,
+        preferredRepresentations: prefs.preferredRepresentations,
       },
-      body: JSON.stringify(body),
-      signal: controller.signal,
     });
 
-    if (!response.ok) {
-      return offlineGeneric(
-        normalizedQuery,
-        prefs,
-        `generic_provider_${response.status}`,
+    const attempt1 = await runModelRound(
+      systemPrompt,
+      userMessage,
+      model,
+      baseUrl,
+      apiKey,
+      controller,
+    );
+    if (attempt1.kind === "failure") {
+      return offlineGeneric(normalizedQuery, prefs, attempt1.reason);
+    }
+    let sanitized = attempt1.outcome;
+
+    // ONE bounded repair retry when the model alone can fix the geometry
+    // (design-1 §7.2 rejections, §11.6): the directive echoes only safe
+    // codes. Structural/policy rejections are never retried.
+    if (isGeometryOnlyRejection(sanitized)) {
+      const directive = `Your previous response was rejected (safe codes: ${sanitized.reasons.join(", ")}). Fix every violation — separate overlapping objects, remove duplicate positions, and resend ONE complete corrected spec.`;
+      const attempt2 = await runModelRound(
+        systemPrompt,
+        `${userMessage}\n\n${directive}`,
+        model,
+        baseUrl,
+        apiKey,
+        controller,
       );
+      if (attempt2.kind === "spec") sanitized = attempt2.outcome;
     }
 
-    const payload = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const content = payload.choices?.[0]?.message?.content;
-    if (!content) {
-      return offlineGeneric(normalizedQuery, prefs, "generic_empty_response");
-    }
-
-    const parsed = parseJson(content);
-    if (parsed === null) {
-      return offlineGeneric(normalizedQuery, prefs, "generic_invalid_json");
-    }
-
-    const firstPass = firstPassModelCheck(parsed);
-    if (!firstPass.ok) {
-      return offlineGeneric(normalizedQuery, prefs, "generic_schema_rejected");
-    }
-
-    const sanitized = sanitizeDemoSpec(firstPass.value);
     if (
       (sanitized.status !== "valid" && sanitized.status !== "repaired") ||
       !sanitized.spec

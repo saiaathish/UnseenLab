@@ -122,16 +122,21 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
       obj("pn1", "process_node", { label: "Step 1", position: { x: -3, y: 0, z: 0 }, size: 1 }),
       obj("pn2", "process_node", { label: "Step 2", position: { x: 0, y: 0, z: 0 }, size: 1 }),
       obj("pn3", "process_node", { label: "Step 3", position: { x: 3, y: 0, z: 0 }, size: 1 }),
-      // Travels along the r1 (pn1 → pn2) edge path; edges themselves derive
-      // from relationships (canonical graph), never from objects.
+      // Travels the derived r0 (ep1 → pn2) → r1 (pn2 → pn3) → back chain via
+      // follow_path: it leaves Step 1, stops at Step 2 and Step 3, and
+      // returns — it never flies out of the frame (F-19).
       obj("ep1", "energy_packet", { position: { x: -3, y: 0, z: 0 }, size: 0.3 }),
     ],
     relationships: [
+      // r0 routes the packet onto the flows_to chain (follow_path derives its
+      // waypoints from flows_to/transfers_to edges). energy_packet is not a
+      // graph node, so r0 never renders as a canonical edge.
+      rel("r0", "flows_to", "ep1", "pn2"),
       rel("r1", "flows_to", "pn1", "pn2"),
       rel("r2", "flows_to", "pn2", "pn3"),
     ],
     animations: [
-      anim("a1", "ep1", "translate", { axis: "x", speed: 1.5 }),
+      anim("a1", "ep1", "follow_path", { speed: 1.5 }),
     ],
     limitations: ["Steps are shown in sequence; in real processes, steps can overlap in time."],
     prediction: {
@@ -153,14 +158,24 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
     objects: [
       obj("src", "process_node", { label: "Source", position: { x: -3, y: 0, z: 0 }, size: 1 }),
       obj("sink", "process_node", { label: "Sink", position: { x: 3, y: 0, z: 0 }, size: 1 }),
-      // Both packets travel along the r1 (src → sink) edge path.
-      obj("ep1", "energy_packet", { position: { x: -1.5, y: 0, z: 0 }, size: 0.3 }),
-      obj("ep2", "energy_packet", { position: { x: 1.5, y: 0, z: 0 }, size: 0.3 }),
+      // Both packets start AT the source (inside the opaque sphere, so they
+      // visibly emerge from it) and traverse the derived r0/r2 (ep → sink)
+      // chains via follow_path: source → sink → return, never past the sink
+      // or out of the frame (F-19, tpl-energy-01/02).
+      obj("ep1", "energy_packet", { position: { x: -3, y: 0, z: 0 }, size: 0.3 }),
+      obj("ep2", "energy_packet", { position: { x: -3, y: 0, z: 0 }, size: 0.3 }),
     ],
-    relationships: [rel("r1", "transfers_to", "src", "sink")],
+    relationships: [
+      // r0/r2 route the packets onto the transfers_to chain (follow_path
+      // derives its waypoints from flows_to/transfers_to edges). energy_packet
+      // is not a graph node, so they never render as canonical edges.
+      rel("r0", "transfers_to", "ep1", "sink"),
+      rel("r1", "transfers_to", "src", "sink"),
+      rel("r2", "transfers_to", "ep2", "sink"),
+    ],
     animations: [
-      anim("a1", "ep1", "translate", { axis: "x", speed: 1.2 }),
-      anim("a2", "ep2", "translate", { axis: "x", speed: 1.2, delayMs: 800 }),
+      anim("a1", "ep1", "follow_path", { speed: 1.2 }),
+      anim("a2", "ep2", "follow_path", { speed: 1.2, delayMs: 800 }),
     ],
     limitations: ["Energy is shown as packets; real energy transfers are continuous."],
     prediction: {
@@ -305,7 +320,13 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
       obj("b2", "box", { label: "After", position: { x: 2.5, y: 0, z: 0 }, size: 1 }),
       obj("lbA", "label", { label: "After state", position: { x: 2.5, y: -1.6, z: 0 } }),
     ],
-    relationships: [rel("r1", "transforms_into", "before", "after")],
+    relationships: [
+      // The transformation is a CHILD-to-CHILD relationship (b1 → b2), not a
+      // group-to-group one: groups render no edge on either surface, so the
+      // before→after transformation was invisible (tpl-before-after-01). Both
+      // surfaces can draw box→box edges.
+      rel("r1", "transforms_into", "b1", "b2"),
+    ],
     animations: [anim("a1", "after", "reveal", { delayMs: 1500 })],
     limitations: ["The change is simplified; the real process may involve many intermediate steps."],
     prediction: {
@@ -331,7 +352,10 @@ const TEMPLATE_SCENES: Record<ConceptualTemplateId, TemplateScene> = {
     ],
     relationships: [rel("r1", "attracts", "s1", "s2")],
     animations: [
-      anim("a1", "vf1", "update_vector"),
+      // Axis "x" (design-2 §5.1, F-15b): rotating the default base vector
+      // (0,1,0) about y is the identity — the arrows never moved. About x the
+      // arrows sweep between +y and z so the field visibly responds.
+      anim("a1", "vf1", "update_vector", { axis: "x" }),
     ],
     limitations: ["The field is shown in one plane; real fields extend in three dimensions."],
     prediction: {

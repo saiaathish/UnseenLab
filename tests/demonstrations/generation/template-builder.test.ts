@@ -35,6 +35,11 @@ import {
   buildConceptualSpec,
   buildTimelineSpec,
 } from "@/demonstrations/generation/offline/template-builder";
+import { buildSceneGraph } from "@/demonstrations/renderers/primitive-3d/scene-graph";
+import {
+  makeNodeState,
+  stepOperator,
+} from "@/demonstrations/renderers/primitive-3d/operators";
 import type { TimelineTopic } from "@/demonstrations/generation/intent/types";
 
 const prefs: LearnerPreferences = {
@@ -149,8 +154,10 @@ describe("template builder — canonical graph invariants (A1)", () => {
           const from = objects.find((o) => o.id === rel.from)!;
           const to = objects.find((o) => o.id === rel.to)!;
           // Endpoints are real node-style objects, not decorative primitives.
-          expect(["process_node", "sphere", "group", "box", "particle_field"].includes(from.kind)).toBe(true);
-          expect(["process_node", "sphere", "group", "box", "particle_field"].includes(to.kind)).toBe(true);
+          // energy_packet is allowed since C3: packets carry a relationship
+          // that ROUTES their follow_path chain (process_flow/energy_transfer).
+          expect(["process_node", "sphere", "group", "box", "particle_field", "energy_packet"].includes(from.kind)).toBe(true);
+          expect(["process_node", "sphere", "group", "box", "particle_field", "energy_packet"].includes(to.kind)).toBe(true);
         }
       });
 
@@ -161,21 +168,120 @@ describe("template builder — canonical graph invariants (A1)", () => {
         }
       });
 
-      it("energy packets sit on a relationship edge path and travel along the edge", () => {
+      it("energy packets sit on a relationship edge path and travel via follow_path", () => {
         for (const o of objects) {
           if (o.kind !== "energy_packet") continue;
           expect(
             onEdgePath(o.position, relationships, objects),
             `energy_packet ${o.id} must be on a relationship edge path`
           ).toBe(true);
-          // Travel direction follows the edge (translate on x for horizontal
-          // edges is the allowed form).
+          // F-19: packets traverse the derived flows_to/transfers_to chain
+          // (follow_path is bounded — they arrive at the destination and
+          // return instead of flying out of the frame).
           const anim = (spec.scene3d?.animations ?? []).find(
             (a) => a.target === o.id
           );
           expect(anim, `energy_packet ${o.id} must animate along its edge`).toBeDefined();
-          expect(anim!.operator).toBe("translate");
+          expect(anim!.operator).toBe("follow_path");
         }
+      });
+
+      it("energy packets follow the derived path: arrival times + frame bounds (F-19)", () => {
+        if (templateId !== "process_flow" && templateId !== "energy_transfer") {
+          return;
+        }
+        const { graph } = buildSceneGraph(spec);
+        for (const o of objects) {
+          if (o.kind !== "energy_packet") continue;
+          const anim = graph.animations.find((a) => a.target === o.id)!;
+          expect(anim.operator).toBe("follow_path");
+          expect(anim.path!.length).toBeGreaterThanOrEqual(2);
+          // The packet starts at its own position and never leaves the
+          // bounding box of its path (it can no longer exit the frame).
+          const xs = anim.path!.map((p) => p.x);
+          const state = makeNodeState({ position: o.position });
+          const step = (t: number) =>
+            stepOperator(
+              {
+                operator: "follow_path",
+                params: {
+                  speed: anim.speed,
+                  delayMs: anim.delayMs,
+                  amplitude: 1,
+                  path: anim.path!,
+                },
+              },
+              state,
+              0.016,
+              t
+            );
+          for (const t of [0, 0.2, 0.5, 1, 2, 4, 8, 16]) {
+            const p = step(t).position;
+            expect(p.x).toBeGreaterThanOrEqual(Math.min(...xs) - 1e-9);
+            expect(p.x).toBeLessThanOrEqual(Math.max(...xs) + 1e-9);
+          }
+        }
+        // Exact arrival times: process_flow ep1 reaches Step 2 at t = 1/1.5
+        // and Step 3 at t = 2/1.5; energy_transfer ep1 reaches the sink
+        // (x=3) at t = 1/1.2.
+        if (templateId === "process_flow") {
+          const anim = graph.animations.find((a) => a.target === "ep1")!;
+          const state = makeNodeState({ position: { x: -3, y: 0, z: 0 } });
+          const step = (t: number) =>
+            stepOperator(
+              {
+                operator: "follow_path",
+                params: { speed: anim.speed, delayMs: anim.delayMs, amplitude: 1, path: anim.path! },
+              },
+              state,
+              0.016,
+              t
+            );
+          expect(step(1 / 1.5).position.x).toBeCloseTo(0, 5); // Step 2
+          expect(step(2 / 1.5).position.x).toBeCloseTo(3, 5); // Step 3
+        }
+        if (templateId === "energy_transfer") {
+          const anim = graph.animations.find((a) => a.target === "ep1")!;
+          const state = makeNodeState({ position: { x: -3, y: 0, z: 0 } });
+          const step = (t: number) =>
+            stepOperator(
+              {
+                operator: "follow_path",
+                params: { speed: anim.speed, delayMs: anim.delayMs, amplitude: 1, path: anim.path! },
+              },
+              state,
+              0.016,
+              t
+            );
+          expect(step(1 / 1.2).position.x).toBeCloseTo(3, 5); // arrives at the sink
+        }
+      });
+
+      it("field_relationship sweeps arrows about axis x (F-15b)", () => {
+        if (templateId !== "field_relationship") return;
+        const anim = (spec.scene3d?.animations ?? []).find(
+          (a) => a.target === "vf1" && a.operator === "update_vector"
+        );
+        expect(anim, "vf1 must carry an update_vector animation").toBeDefined();
+        // Rotating the default base vector (0,1,0) about y is the identity —
+        // the template must use a non-parallel axis so the arrows visibly
+        // respond (design-2 §5.1).
+        expect(anim!.axis).toBe("x");
+      });
+
+      it("before_after comparison is a visible child-to-child transforms_into", () => {
+        if (templateId !== "before_after_comparison") return;
+        const rel = relationships.find((r) => r.type === "transforms_into");
+        expect(rel, "transforms_into relationship must exist").toBeDefined();
+        // Child-to-child (b1 → b2, both boxes) — groups render no edge on
+        // either surface, so the group-to-group form was invisible
+        // (tpl-before-after-01). Both surfaces can draw box→box edges.
+        expect(rel!.from).toBe("b1");
+        expect(rel!.to).toBe("b2");
+        const from = objects.find((o) => o.id === rel!.from)!;
+        const to = objects.find((o) => o.id === rel!.to)!;
+        expect(from.kind).toBe("box");
+        expect(to.kind).toBe("box");
       });
 
       it("node ids, labels, positions and relationships are unchanged by the cleanup", () => {

@@ -25,7 +25,15 @@ import {
   FALLBACK_KINDS,
   ENGINE_CATALOG,
 } from "@/demonstrations/spec/demo-spec";
-import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
+import type { DemoSpecV1, PrimitiveObjectSpec, Vec3 } from "@/demonstrations/spec/demo-spec";
+import {
+  SCENE_POSITION_BOUND,
+  SCENE_SIZE_MAX,
+  SCENE_SIZE_MIN,
+  envelopeOverlap,
+  nodeEnvelope,
+} from "@/demonstrations/renderers/primitive-3d/geometry/envelopes";
+import type { SceneGraphNode } from "@/demonstrations/renderers/primitive-3d/types";
 
 // ---------------------------------------------------------------------------
 // Exported policy constants (consumers may tune their own layers with these)
@@ -41,6 +49,22 @@ export const MAX_SPEC_DEPTH = 8;
 /** Global sanity envelope for any number in the spec. */
 export const GLOBAL_NUM_MIN = -1_000_000_000;
 export const GLOBAL_NUM_MAX = 1_000_000_000;
+
+/**
+ * Object kinds whose envelope overlap / duplicate position / z-collapse is a
+ * genuine model defect (design-1 §7.2, §1.2 — the colliding BODY kinds:
+ * movable graph-node kinds minus `label`). Decorative / structural kinds —
+ * particle_field, orbit_path, ring, plane, wave_surface, graph_surface,
+ * vector_field, arrow, line, trail, process_edge, label, camera_marker —
+ * legitimately coincide with bodies by construction (a star's glow and orbit
+ * ring surround the star; design-2 §5.3 treats field-overlaps-node as
+ * informational, and the 2D spread absorbs their projections), so they are
+ * NOT rejection subjects: rejecting them would block legitimate scenes (e.g.
+ * the orbits showcase's star + glow + ring concentric at the origin) whenever
+ * a model reproduces that composition.
+ */
+const GEOMETRY_SUBJECT_KINDS: ReadonlySet<PrimitiveObjectSpec["kind"]> =
+  new Set(["sphere", "process_node", "energy_packet", "box"]);
 
 // ---------------------------------------------------------------------------
 // String bounds
@@ -90,11 +114,14 @@ const boundedNumber = z
 /** step must be finite, positive and sane. */
 const positiveStep = z.number().finite().positive().max(GLOBAL_NUM_MAX);
 
+/** Position axes are bounded to the renderer's world clamp (design-1 §7.1):
+ * accepted ⇒ renderable on BOTH surfaces (the 2D diagram reads raw spec
+ * positions, which are now guaranteed bounded). */
 const vec3Schema = z
   .object({
-    x: boundedNumber,
-    y: boundedNumber,
-    z: boundedNumber,
+    x: z.number().finite().min(-SCENE_POSITION_BOUND).max(SCENE_POSITION_BOUND),
+    y: z.number().finite().min(-SCENE_POSITION_BOUND).max(SCENE_POSITION_BOUND),
+    z: z.number().finite().min(-SCENE_POSITION_BOUND).max(SCENE_POSITION_BOUND),
   })
   .strict();
 
@@ -175,7 +202,12 @@ const primitiveObjectSchema = z
     kind: z.enum(PRIMITIVE_KINDS),
     label: labelString.optional(),
     position: vec3Schema.optional(),
-    size: z.number().finite().min(0.001).max(GLOBAL_NUM_MAX).optional(),
+    size: z
+      .number()
+      .finite()
+      .min(SCENE_SIZE_MIN)
+      .max(SCENE_SIZE_MAX)
+      .optional(),
     color: colorString.optional(),
     trailPoints: z
       .number()
@@ -684,4 +716,68 @@ export const demoSpecSchema: z.ZodType<DemoSpecV1> = demoSpecBaseSchema
     if (unsafeCode !== null) {
       addIssue(ctx, "unsafe_value:code", []);
     }
+
+    // Geometric checks (design-1 §7.2): the model must never emit duplicate /
+    // overlapping / z-collapsed geometry — the 2D surface reads raw spec
+    // positions and never runs layout, so these classes are rejected at the
+    // spec level. Curated specs are exempt: their residual geometry is
+    // repaired by the layout engine (provenance template_composition /
+    // curated_engine), and a reject would break the live corpus.
+    // Subject scope: GEOMETRY_SUBJECT_KINDS only — the colliding bodies whose
+    // coincidence is a genuine defect on both surfaces.
+    if (spec.provenance.source === "model_generated_spec") {
+      const objects = (spec.scene3d?.objects ?? []).filter((o) =>
+        GEOMETRY_SUBJECT_KINDS.has(o.kind)
+      );
+      const objectsWithGeometry = objects.filter((o) => o.kind !== "group");
+      const n = objectsWithGeometry.length;
+      let duplicateIssue = false;
+      let overlapIssue = false;
+      let zCollapseIssue = false;
+      for (let i = 0; i < n && !(duplicateIssue && overlapIssue && zCollapseIssue); i++) {
+        for (let j = i + 1; j < n; j++) {
+          const a = objectsWithGeometry[i];
+          const b = objectsWithGeometry[j];
+          const pa = specPosition(a);
+          const pb = specPosition(b);
+          const ax = pa.x - pb.x;
+          const ay = pa.y - pb.y;
+          const az = pa.z - pb.z;
+          if (!duplicateIssue && Math.abs(ax) < 1e-6 && Math.abs(ay) < 1e-6 && Math.abs(az) < 1e-6) {
+            addIssue(ctx, "geometry:duplicate_position", ["scene3d", "objects"]);
+            duplicateIssue = true;
+          }
+          if (
+            !zCollapseIssue &&
+            Math.abs(ax) < 1e-6 &&
+            Math.abs(ay) < 1e-6 &&
+            Math.abs(az) >= 1e-6
+          ) {
+            addIssue(ctx, "geometry:z_collapse", ["scene3d", "objects"]);
+            zCollapseIssue = true;
+          }
+          if (!overlapIssue && envelopeOverlap(toEnvelope(a, pa), toEnvelope(b, pb), 0)) {
+            addIssue(ctx, "geometry:envelope_overlap", ["scene3d", "objects"]);
+            overlapIssue = true;
+          }
+        }
+      }
+    }
   });
+
+/** Spec position with the (0,0,0) default the renderer applies. */
+function specPosition(o: PrimitiveObjectSpec): Vec3 {
+  return o.position ?? { x: 0, y: 0, z: 0 };
+}
+
+/** Minimal SceneGraphNode view for nodeEnvelope (only kind/position/size are
+ * read). Groups are excluded by the caller before this is reached. */
+function toEnvelope(o: PrimitiveObjectSpec, position: Vec3): ReturnType<typeof nodeEnvelope> {
+  const node = {
+    id: o.id,
+    kind: o.kind,
+    position,
+    size: o.size ?? 1,
+  } as unknown as SceneGraphNode;
+  return nodeEnvelope(node);
+}

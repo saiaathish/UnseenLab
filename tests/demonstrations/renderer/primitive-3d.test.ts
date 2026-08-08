@@ -681,7 +681,10 @@ describe("buildSceneGraph", () => {
       ],
     });
     const { graph, reasons } = buildSceneGraph(spec);
-    expect(reasons).toEqual([]);
+    // n1 (0,0,0) collocates with the orbit center sun (0,0,0): an I1
+    // duplicate the layout engine now repairs (sun is an orbit anchor →
+    // fixed; n1 spreads by 0.5+0.5+0.1 on the collision axis).
+    expect(reasons).toContain("layout_repaired");
     const orbit = graph.animations.find((a) => a.id === "a1")!;
     expect(orbit.orbitCenter).toEqual({ x: 0, y: 0, z: 0 });
     expect(orbit.orbitRadius).toBeCloseTo(5, 6);
