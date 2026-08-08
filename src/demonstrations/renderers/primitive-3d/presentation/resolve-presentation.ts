@@ -69,11 +69,7 @@ import {
   perspectiveDistance,
 } from "../camera";
 import {
-  REASON_EDGE_LABEL_DENSE,
-  REASON_EDGE_LABEL_SKIPPED,
   REASON_EDGE_HEAD_SUPPRESSED,
-  REASON_EDGE_UNROUTABLE,
-  REASON_LABEL_ELLIPSIZED,
   SHAFT_GAP,
   arrowHead,
 } from "./constants";

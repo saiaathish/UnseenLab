@@ -31,7 +31,7 @@ import { buildOrbitsShowcase } from "@/demonstrations/showcases/orbits/build-spe
 import { buildElectricFieldShowcase } from "@/demonstrations/showcases/electric-fields/build-spec";
 import { buildWaveInterferenceShowcase } from "@/demonstrations/showcases/wave-interference/build-spec";
 import { makeSpec, STRESS_CORPUS } from "./presentation-gate.corpus";
-import { nodeEnvelope, envelopeOverlap, ENVELOPE_CLEARANCE } from "@/demonstrations/renderers/primitive-3d/geometry/envelopes";
+import { nodeEnvelope, ENVELOPE_CLEARANCE } from "@/demonstrations/renderers/primitive-3d/geometry/envelopes";
 
 // ---------------------------------------------------------------------------
 // Harness — the renderer's exact setSpec path (renderer.ts setSpec)
@@ -317,7 +317,7 @@ describe("red-team repro regressions (MUST-FIX 4/5 + in-scope items)", () => {
         { id: "t2", target: "ep2", operator: "translate", speed: 1.5, delayMs: 200, amplitude: 1 },
       ]
     );
-    const { reasons, pres } = runPipeline(spec);
+    const { pres } = runPipeline(spec);
     const majors = majorViolations(pres);
     // MUST-FIX 5: no arrowhead embeds a source (was 17 I4 majors).
     expect(majors.filter((v) => v.invariant === "I4")).toEqual([]);

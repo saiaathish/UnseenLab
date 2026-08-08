@@ -27,7 +27,6 @@
  */
 
 import type {
-  LayoutUnit,
   SceneBounds,
   SceneGraph,
   SceneGraphNode,

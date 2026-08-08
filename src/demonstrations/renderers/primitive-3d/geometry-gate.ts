@@ -288,14 +288,6 @@ export function segmentBoxDistance(a: Vec3, b: Vec3, min: Vec3, max: Vec3): numb
   return f((lo + hi) / 2);
 }
 
-/** Distance from a point to an envelope surface (0 when inside). */
-function pointEnvelopeDistance(p: Vec3, e: Envelope): number {
-  if (e.shape === "sphere") {
-    return Math.max(0, len(sub(p, e.center)) - (e.radius ?? 0));
-  }
-  return pointBoxDistance(p, e.center, e.halfExtents);
-}
-
 /**
  * SIGNED distance from a point to an envelope surface: negative inside
  * (penetration depth), zero on the surface, positive outside. Used by I4 so

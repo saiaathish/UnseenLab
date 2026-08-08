@@ -48,7 +48,6 @@ import {
 
 // The stub deliberately mirrors Three.js constructor signatures, so unused
 // parameters (e.g. `_c`, `_w`) are expected here.
-/* eslint-disable @typescript-eslint/no-unused-vars */
 const threeStub = vi.hoisted(() => {
   const disposed: string[] = [];
 
@@ -423,7 +422,6 @@ const threeStub = vi.hoisted(() => {
 });
 
 vi.mock("three", () => threeStub.THREE);
-/* eslint-enable @typescript-eslint/no-unused-vars */
 
 // ---------------------------------------------------------------------------
 // Spec factory

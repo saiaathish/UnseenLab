@@ -68,7 +68,6 @@ test.skip(
 // ---------------------------------------------------------------------------
 
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
-import { CONCEPTUAL_TEMPLATE_IDS } from "@/demonstrations/spec/demo-spec";
 import { buildConceptualSpec } from "@/demonstrations/generation/offline/template-builder";
 import { createDefaultPreferences } from "@/domain/learner";
 import {

@@ -47,7 +47,6 @@ import {
 
 // The stub deliberately mirrors the Three.js constructor signatures actually
 // used by the renderer; unused parameters are expected here.
-/* eslint-disable @typescript-eslint/no-unused-vars */
 const threeStub = vi.hoisted(() => {
   const disposed: string[] = [];
   const pixelRatios: number[] = [];
@@ -355,7 +354,6 @@ const threeStub = vi.hoisted(() => {
 });
 
 vi.mock("three", () => threeStub.THREE);
-/* eslint-enable @typescript-eslint/no-unused-vars */
 
 // ---------------------------------------------------------------------------
 // Fake browser primitives (rAF with real cancel semantics, RO capture, …)

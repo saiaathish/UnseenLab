@@ -44,7 +44,6 @@ import {
   REASON_GATE_LABEL_SHORTENED,
   resolvePresentation,
   shortenGateLabels,
-  type PresentationOptions,
 } from "./resolve-presentation";
 import { isGraphLikeScene } from "../scene-graph";
 import {

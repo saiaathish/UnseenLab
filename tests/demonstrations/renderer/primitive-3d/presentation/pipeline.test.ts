@@ -205,8 +205,6 @@ describe("runGeometryGate — degrade: false (2D surface parity)", () => {
       ),
       [{ id: "r1", type: "causes", from: "n0", to: "n1" }]
     );
-    // degraded run (renderer path)
-    const degraded = runPipeline(spec);
     // non-degraded run on a FRESH graph (the 2D surface consumes its own
     // laid-out graph — mutation must not leak into it)
     const { graph } = buildSceneGraph(spec, { mobile: false });

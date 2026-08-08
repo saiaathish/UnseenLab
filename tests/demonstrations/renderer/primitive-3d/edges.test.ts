@@ -43,7 +43,6 @@ import {
   updateEdge,
   type EdgeContext,
   type Envelope,
-  type RuntimeEdge,
 } from "@/demonstrations/renderers/primitive-3d/edges";
 import type { RuntimeNode } from "@/demonstrations/renderers/primitive-3d/renderer";
 

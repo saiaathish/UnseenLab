@@ -18,7 +18,6 @@ import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 import {
   SCENE_POSITION_BOUND,
   SCENE_SIZE_MAX,
-  SCENE_SIZE_MIN,
 } from "@/demonstrations/renderers/primitive-3d/geometry/envelopes";
 import {
   demoSpecSchema,

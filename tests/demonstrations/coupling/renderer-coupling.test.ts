@@ -30,7 +30,6 @@ import { PrimitiveSceneRenderer } from "@/demonstrations/renderers/primitive-3d/
 
 // The stub deliberately mirrors Three.js constructor signatures, so unused
 // parameters (e.g. `_c`, `_w`) are expected here.
-/* eslint-disable @typescript-eslint/no-unused-vars */
 const threeStub = vi.hoisted(() => {
   const disposed: string[] = [];
   const groups: Array<{ name: string; children: unknown[]; position: unknown }> = [];
@@ -348,7 +347,6 @@ const threeStub = vi.hoisted(() => {
 });
 
 vi.mock("three", () => threeStub.THREE);
-/* eslint-enable @typescript-eslint/no-unused-vars */
 
 // ---------------------------------------------------------------------------
 // Spec factory + harness

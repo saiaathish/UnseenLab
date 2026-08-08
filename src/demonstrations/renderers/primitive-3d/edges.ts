@@ -43,11 +43,9 @@ import {
   GLYPH_HALF_H_EDGE,
   LABEL_ENV_CLEAR,
   LABEL_LABEL_CLEAR,
-  LABEL_EDGE_CLEAR,
   edgeLabelSpriteScale,
   estimateTextWidthPx,
   resolveLabelText,
-  TEXT_SAFETY_PX,
   ELLIPSIS_PX,
   REASON_EDGE_UNROUTABLE,
   REASON_EDGE_LABEL_SKIPPED,
@@ -733,7 +731,6 @@ function placeOneEdgeLabel(
   if (len < EPS) return null; // degenerate self-loop: no label
   const ux = dx / len;
   const uy = dy / len;
-  const uz = dz / len;
   // In-plane perpendicular. DEVIATION FROM DESIGN-2 §1.4 (documented): the
   // design's literal fallback (0,0,1) for z-aligned edges is PARALLEL to the
   // edge, which would force the label onto its own shaft; (1,0,0) is the

@@ -168,7 +168,7 @@ function autoFitFieldSpan(
 ): number {
   const graph = ctx.graph;
   if (!graph) return span;
-  let half = span / 2;
+  const half = span / 2;
   const touching = new Set<string>();
   if (!ctx.graphMode) {
     for (const rel of graph.relationships) {
