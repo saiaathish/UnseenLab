@@ -883,10 +883,13 @@ describe("lesson rail accessibility", () => {
     for (const label of ["Effect B", "Effect C", "Inhibited D"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
-    // The read-only "Diagram" tab (representation-tabs) is not affected:
-    // the interactive buttons belong to the stage fallback only.
+    // The stage fallback IS the interactive diagram surface: its svg is a
+    // role="group" container (A10 role contract — static diagrams keep
+    // role="img") holding the four node buttons. The Diagram tab
+    // (representation-tabs) provides the same interactive surface; that path
+    // is pinned by the dedicated tab-interaction test below.
     expect(
-      within(screen.getByRole("img", { name: /Relationship diagram/ })).getAllByRole("button").length
+      within(screen.getByRole("group", { name: /Relationship diagram/ })).getAllByRole("button").length
     ).toBe(4);
 
     // Commit a prediction, then reach the interact step.
@@ -924,5 +927,36 @@ describe("lesson rail accessibility", () => {
     expect(
       screen.getByRole("checkbox", { name: "Inhibited D" })
     ).toBeInTheDocument();
+  });
+
+  it("completes the graph interact step through the Diagram TAB's interactive nodes — 2D parity, no 3D stage activation", async () => {
+    const spec = causeEffectNetworkSpec();
+    assertValidSpec(spec);
+    const user = userEvent.setup();
+    render(<ShellHarness spec={spec} />);
+
+    // Commit a prediction, then reach the interact step.
+    await submitPredictionKeyboard(user, "B and C (and D through C)");
+    await user.click(continueButton());
+    expect(
+      screen.getByText("Click Cause A and watch what happens downstream.")
+    ).toBeInTheDocument();
+    expect(continueButton()).toBeDisabled();
+
+    // Switch to the Diagram tab. The 3D stage is never activated: WebGL is
+    // available (no fallback) and the interaction happens entirely inside the
+    // tab's diagram — the same canonical node ids the stage owns.
+    await user.click(screen.getByRole("tab", { name: "Diagram" }));
+    expect(screen.queryByText(/WebGL is not available here/)).not.toBeInTheDocument();
+    const panel = screen.getByRole("tabpanel");
+    const causeA = within(panel).getByRole("button", { name: "Cause A" });
+    expect(causeA).toHaveAttribute("aria-pressed", "false");
+
+    // One click on the node completes the interact step: the rail records the
+    // canonical manipulation and unlocks Continue — exactly like the 3D path.
+    await user.click(causeA);
+    expect(causeA).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Interaction recorded.")).toBeInTheDocument();
+    expect(continueButton()).toBeEnabled();
   });
 });

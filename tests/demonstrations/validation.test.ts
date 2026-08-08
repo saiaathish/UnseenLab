@@ -346,6 +346,89 @@ function nuclearChainReactionSpec(): DemoSpecV1 {
   return spec;
 }
 
+/** Level 1 hybrid showcase: spheres + orbits relationship + engine coupling.
+ * Ships a launch-speed slider ONLY — no gravity control, even though the
+ * orbits engine knows a gravity parameter internally. */
+function orbitSimulationSpec(): DemoSpecV1 {
+  return {
+    schemaVersion: 1,
+    id: "demo-orbits-001",
+    generationId: "gen-orbits-001",
+    userQuery: "Why do planets stay in orbit?",
+    normalizedConcept: "Orbital mechanics",
+    title: "Orbit Demo",
+    learningObjective: "Observe how launch speed sets the orbit shape.",
+    trust: {
+      level: "verified_simulation",
+      label: "Verified simulation",
+      limitations: ["Idealized two-body system."],
+      engineId: "orbits",
+      engineVersion: "1.0.0",
+    },
+    renderer: {
+      kind: "hybrid",
+      fallbackKind: "accessible_diagram",
+      preferredAspectRatio: 16 / 9,
+      background: "dark",
+    },
+    simulation: {
+      engineId: "orbits",
+      engineVersion: "1.0.0",
+      seed: 7,
+      parameters: [
+        {
+          key: "speed",
+          label: "Orbital speed",
+          min: 0.5,
+          max: 2,
+          step: 0.1,
+          value: 1,
+          unit: "x",
+        },
+      ],
+      readouts: [{ key: "period", label: "Period", format: "fixed2" }],
+    },
+    scene3d: {
+      objects: [
+        { id: "star", kind: "sphere", label: "Star", position: { x: 0, y: 0, z: 0 }, size: 2 },
+        { id: "planet", kind: "sphere", label: "Planet", position: { x: 6, y: 0, z: 0 }, size: 1 },
+      ],
+      relationships: [
+        { id: "rel-planet-orbits-star", type: "orbits", from: "planet", to: "star" },
+      ],
+      animations: [],
+    },
+    controls: [
+      {
+        id: "speed-control",
+        type: "slider",
+        label: "Orbital speed",
+        target: { kind: "parameter", ref: "speed" },
+        min: 0.5,
+        max: 2,
+        step: 0.1,
+      },
+    ],
+    prediction: {
+      prompt: "What happens to the orbit if speed increases?",
+      options: ["It moves to a larger orbit", "It moves to a smaller orbit"],
+      correctIndex: 0,
+    },
+    observationPrompts: [{ prompt: "Watch the period readout." }],
+    representations: [
+      { id: "rep-stage", kind: "stage_3d", label: "3D stage" },
+      { id: "rep-table", kind: "table", label: "Data table" },
+    ],
+    adaptationContext: { allowed: false, oneVariableMode: false },
+    provenance: {
+      source: "curated_engine",
+      templateIds: [],
+      generatedAt: "2026-08-04T00:00:00.000Z",
+    },
+    limits: baseLimits(),
+  };
+}
+
 function toJson(spec: DemoSpecV1): string {
   return JSON.stringify(spec);
 }
@@ -1586,5 +1669,73 @@ describe("focusParameterKeys boundary", () => {
     const result = validateDemoSpec(gate.value);
     expect(result.status).toBe("valid");
     expect(readFocusKeys(result.spec!)).toEqual(["length"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 3 boundary — lesson actions may reference only real controls
+//
+// Every lesson instruction that implies learner manipulation must resolve to
+// an actual control in spec.controls (or a canonical interactive node).
+//   - observation prompts carrying an explicit controlId that does not exist
+//     in spec.controls are dropped (repaired), never rendered,
+//   - free-text observation prompts that reference a known control that the
+//     spec does not ship (e.g. "gravitational constant" with no gravity
+//     control) are dropped too,
+//   - prompts that resolve to real controls — and verified engine semantics —
+//     pass through untouched.
+// ---------------------------------------------------------------------------
+
+describe("validateDemoSpec — observation prompts may reference only real controls", () => {
+  it("drops an observation prompt whose controlId references a missing control (repair, never rejection)", () => {
+    const spec = orbitSimulationSpec();
+    spec.observationPrompts = [
+      {
+        prompt: "Watch the period readout as you change the launch speed.",
+        controlId: "speed-control",
+      },
+      {
+        prompt: "Try increasing the gravitational constant.",
+        controlId: "gravity",
+      },
+    ] as unknown as DemoSpecV1["observationPrompts"];
+
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    const prompts = result.spec?.observationPrompts ?? [];
+    // The dangling prompt is absent from the output spec...
+    expect(prompts.some((p) => p.prompt.includes("gravitational constant"))).toBe(false);
+    // ...while the prompt that resolves to a real control survives.
+    expect(prompts.some((p) => p.prompt.includes("launch speed"))).toBe(true);
+  });
+
+  it("drops a free-text observation prompt that implies a missing control (gravitational constant, no gravity control)", () => {
+    const spec = orbitSimulationSpec();
+    spec.observationPrompts = [
+      { prompt: "What happens to the orbit when you increase the gravitational constant?" },
+    ];
+
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("repaired");
+    expect(result.spec?.observationPrompts ?? []).toEqual([]);
+  });
+
+  it("keeps a free-text observation prompt that resolves to a real control (no over-filtering)", () => {
+    const spec = orbitSimulationSpec();
+    const prompt = "Watch how the orbit changes as you move the Orbital speed slider.";
+    spec.observationPrompts = [{ prompt }];
+
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+    expect(result.spec?.observationPrompts).toEqual([{ prompt }]);
+  });
+
+  it("keeps verified engine semantics and resolvable prompts untouched (engines unchanged)", () => {
+    const spec = verifiedSimulationSpec(); // pendulum: prompt resolves to its Length control
+    const result = validateDemoSpec(toJson(spec));
+    expect(result.status).toBe("valid");
+    expect(result.spec!.simulation!.engineId).toBe("pendulum");
+    expect(result.spec!.controls[0].id).toBe("length-control");
+    expect(result.spec!.observationPrompts).toEqual(spec.observationPrompts);
   });
 });
