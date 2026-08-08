@@ -54,11 +54,18 @@ const MANIPULATION_VERBS = [
   "try",
   "increase",
   "decrease",
+  "reduce",
   "lower",
   "raise",
+  "boost",
+  "crank up",
+  "crank",
+  "turn up",
+  "turn down",
+  "turn",
+  "cut",
   "change",
   "move",
-  "turn",
   "adjust",
   "set",
 ];
@@ -77,6 +84,35 @@ const PHRASE_STOP_WORDS = new Set([
   "until",
   "but",
   "so",
+]);
+
+/** Trailing adverbial/prepositional words trimmed from the END of a captured
+ * noun phrase ("gravity down", "speed up a bit", "pull by 10") so the phrase
+ * reduces to the control noun itself before matching. Curated and small;
+ * matching stays exact. Bare trailing numbers ("by 10", "to 0" — the "to"
+ * itself is already a phrase stop) are trimmed too. */
+const TRAILING_TRIM_WORDS = new Set([
+  "a",
+  "bit",
+  "lot",
+  "up",
+  "down",
+  "on",
+  "off",
+  "back",
+  "around",
+  "slightly",
+  "little",
+  "much",
+  "just",
+  "only",
+  "again",
+  "further",
+  "by",
+  "slowly",
+  "gradually",
+  "quickly",
+  "zero",
 ]);
 
 /** Normalize a label/key/id for matching: lowercase, letters+digits only,
@@ -102,10 +138,28 @@ function termMatchesPhrase(term: string, phrase: string): boolean {
 }
 
 /**
+ * Trim trailing adverbial/prepositional words and bare trailing numbers from
+ * a captured noun-phrase word list ("gravity down" -> "gravity"), in place.
+ */
+function trimTrailingAdverbials(words: string[]): string[] {
+  while (words.length > 0) {
+    const last = words[words.length - 1].toLowerCase();
+    if (TRAILING_TRIM_WORDS.has(last) || /^[0-9]+$/.test(last)) {
+      words.pop();
+    } else {
+      break;
+    }
+  }
+  return words;
+}
+
+/**
  * Noun phrases following manipulation verbs, e.g. "Increase the Launch speed
  * and watch…" -> ["launch speed"]. Sentence punctuation ends the window; the
- * phrase is capped at 5 words and stops at conjunction/relative words so
- * trailing clauses ("…and observe the orbit shape") never pollute it.
+ * phrase is capped at 5 words, stops at conjunction/relative words so
+ * trailing clauses ("…and observe the orbit shape") never pollute it, and
+ * trailing adverbial words ("down", "up a bit") are trimmed so the phrase
+ * reduces to the control noun itself.
  */
 export function extractManipulationNounPhrases(prompt: string): string[] {
   const phrases: string[] = [];
@@ -128,11 +182,14 @@ export function extractManipulationNounPhrases(prompt: string): string[] {
           if (PHRASE_STOP_WORDS.has(word.toLowerCase())) break;
           phrase.push(word);
         }
+        trimTrailingAdverbials(phrase);
         if (phrase.length > 0) phrases.push(normalizeTerm(phrase.join(" ")));
       } else {
-        const words = window.match(/[a-z0-9-]+/gi) ?? [];
+        const words = trimTrailingAdverbials(
+          (window.match(/[a-z0-9-]+/gi) ?? []).slice(0, 3)
+        );
         if (words.length > 0) {
-          phrases.push(normalizeTerm(words.slice(0, 3).join(" ")));
+          phrases.push(normalizeTerm(words.join(" ")));
         }
       }
       // Resume scanning after this verb occurrence (no infinite loop when
