@@ -15,7 +15,11 @@
  *     matches a KNOWN control vocabulary label/key (the curated engine
  *     control catalog — a valid "known control" vocabulary even when the
  *     materializer dropped the control at budget) that is NOT available in
- *     this spec, the prompt is dropped. The check is deliberately narrow and
+ *     this spec, the prompt is dropped. A curated ALIAS layer extends that
+ *     vocabulary with the exact free-text phrasings a model uses for a
+ *     catalog control (e.g. "the gravitational constant" names the gravity
+ *     catalog entries), resolved back to the underlying catalog control for
+ *     the availability decision. The check is deliberately narrow and
  *     exact: purely observational prompts (watch/notice/describe/follow,
  *     no control noun) are always kept, and a prompt whose noun phrase
  *     resolves to an available control is never dropped.
@@ -176,6 +180,54 @@ export function knownControlVocabularyForEngine(
     .filter((term) => term.length >= 2);
 }
 
+/**
+ * Curated alias layer — exact free-text phrasings a model might use for a
+ * catalog control, keyed to the catalog label/key the phrasing names (the
+ * gravity family: "Gravity strength", catalog key "g" in orbits, and
+ * "Gravity", catalog key "gravity" in projectile/gas/pendulum). Static and
+ * hand-curated: never derived from user input, never fuzzy. Matching stays
+ * exact (normalized containment, like the catalog vocabulary itself); an
+ * alias never resolves to anything outside the curated table.
+ */
+const CATALOG_CONTROL_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  // Catalog label "Gravity strength" (catalog key "g").
+  "gravity strength": [
+    "gravitational constant",
+    "gravitational pull",
+    "gravity strength",
+  ],
+  // Catalog label "Gravity" (catalog key "gravity").
+  gravity: [
+    "gravitational constant",
+    "gravitational pull",
+    "gravitational acceleration",
+    "gravity strength",
+  ],
+};
+
+/** Normalized alias -> the normalized catalog label/key terms it names.
+ * Built once from the curated table at module load. */
+const ALIAS_TERMS_BY_ALIAS: ReadonlyMap<string, readonly string[]> = (() => {
+  const map = new Map<string, string[]>();
+  for (const [catalogTerm, aliases] of Object.entries(CATALOG_CONTROL_ALIASES)) {
+    const normalizedCatalogTerm = normalizeTerm(catalogTerm);
+    if (normalizedCatalogTerm.length < 2) continue;
+    for (const alias of aliases) {
+      const normalizedAlias = normalizeTerm(alias);
+      if (normalizedAlias.length < 2) continue;
+      const existing = map.get(normalizedAlias);
+      if (existing) {
+        if (!existing.includes(normalizedCatalogTerm)) {
+          existing.push(normalizedCatalogTerm);
+        }
+      } else {
+        map.set(normalizedAlias, [normalizedCatalogTerm]);
+      }
+    }
+  }
+  return map;
+})();
+
 /** Build the filter context straight from a spec (validation + rail use). */
 export function controlReferenceContextForSpec(
   spec: Pick<DemoSpecV1, "simulation">
@@ -232,11 +284,21 @@ export function filterUnavailableControlPrompts(
       const phraseMatch = [...vocabulary].some((term) =>
         termMatchesPhrase(term, phrase)
       );
+      // Curated alias layer: a phrase that names a catalog alias (e.g. "the
+      // gravitational constant") is a vocabulary hit whose availability is
+      // the availability of the catalog control(s) it aliases — dropped when
+      // none of those controls are available, kept when one is.
+      const aliasCatalogTerms = [...ALIAS_TERMS_BY_ALIAS.entries()]
+        .filter(([alias]) => termMatchesPhrase(alias, phrase))
+        .flatMap(([, terms]) => terms);
       const resolves = available.some((term) =>
         termMatchesPhrase(term, phrase)
       );
-      if (phraseMatch) vocabMatch = true;
-      if (resolves) availableMatch = true;
+      const aliasResolves = aliasCatalogTerms.some((term) =>
+        available.includes(term)
+      );
+      if (phraseMatch || aliasCatalogTerms.length > 0) vocabMatch = true;
+      if (resolves || aliasResolves) availableMatch = true;
     }
     // Drop only when manipulation intent names a known control that is NOT
     // available; a prompt that resolves to an available control is kept.
