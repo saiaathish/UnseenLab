@@ -217,7 +217,7 @@ const OBSERVATION_PROMPTS = [
   },
   {
     prompt:
-      "Turn the Dipole preset on: the Potential readout drops to zero at the midpoint while the Field strength readout rises above zero.",
+      "Set Charge 1 and Charge 2 to opposite signs and watch the Potential readout drop to zero at the midpoint while the Field strength readout rises above zero.",
   },
   {
     prompt:
