@@ -564,7 +564,7 @@ test("E2E 4 orbit observe: prompts resolve only to controls present in the Contr
   await expect(controls).toBeVisible();
   await expect(controls.getByRole("slider", { name: "Launch speed" })).toBeVisible();
   await expect(controls.getByRole("slider")).toHaveCount(1); // Launch speed only
-  const speedGroup = controls.getByRole("group", { name: "Speed" });
+  const speedGroup = controls.getByRole("group", { name: "Speed", exact: true });
   await expect(speedGroup).toBeVisible();
   for (const speedOption of ["0.5×", "1×", "1.5×", "2×"]) {
     await expect(speedGroup.getByRole("button", { name: speedOption })).toBeVisible();
