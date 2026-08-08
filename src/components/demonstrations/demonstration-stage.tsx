@@ -14,8 +14,13 @@ import {
   stageGuideForSpec,
   type StageGuide,
 } from "@/demonstrations/renderers/primitive-3d/presentation";
+import {
+  TooltipController,
+  type TooltipContent,
+} from "@/demonstrations/renderers/primitive-3d/presentation/tooltip-controller";
+import { ProjectedLabelOverlay } from "@/demonstrations/renderers/primitive-3d/presentation/projected-overlay";
 import type { EngineMapping } from "@/demonstrations/renderers/primitive-3d/types";
-import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
+import type { DemoSpecV1, PrimitiveObjectSpec } from "@/demonstrations/spec/demo-spec";
 
 import { AccessibleRepresentation } from "./accessible-representation";
 
@@ -265,9 +270,20 @@ function Primitive3DStage({
   onNodeManipulate,
 }: StageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<PrimitiveSceneRenderer | null>(null);
+  const tooltipRef = useRef<TooltipController | null>(null);
+  /** Host for the persistent DOM label overlay (W4, root-cause seam 5) —
+   * a sibling of the canvas inside the stage container; the overlay instance
+   * owns the layer div and cleans it up on dispose. */
+  const overlayHostRef = useRef<HTMLDivElement | null>(null);
+  const labelOverlayRef = useRef<ProjectedLabelOverlay | null>(null);
   const [webglUnavailable, setWebglUnavailable] = useState(false);
   const [startError, setStartError] = useState(false);
+  // FIX 4/FIX 14 hover identity: React state only on hover CHANGES (hover is
+  // low-rate by nature — no per-frame state); the tooltip controller does the
+  // per-pointer positioning imperatively.
+  const [hoverIdentityId, setHoverIdentityId] = useState<string | null>(null);
   const [mobile] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 768
   );
@@ -283,11 +299,27 @@ function Primitive3DStage({
   });
   const presentationSpec = useMemo(() => presentationSpecForStage(spec), [spec]);
   const guide = useMemo(() => stageGuideForSpec(spec), [spec]);
+  // W6 semantic surface (FIX 5/FIX 15, orbit-learning L10): the scene's
+  // learner-facing objects — the same identity-pickable kinds and primary-
+  // first order the renderer's keyboard/pointer identity uses, so the list
+  // items and the focused canvas expose the SAME names. Fed from W3's
+  // additive semantic block (name/type/shortDescription) with label/kind
+  // fallbacks.
+  const semanticObjects = useMemo(
+    () => semanticObjectsFor(presentationSpec, engineMapping ?? null),
+    [presentationSpec, engineMapping]
+  );
+  // The identity card follows the renderer's identity surface (pinned ?? 
+  // hover — FIX 5/FIX 14): a tap/click or Enter pins it, hover previews it.
+  const identityObject = hoverIdentityId
+    ? (semanticObjects.find((o) => o.id === hoverIdentityId) ?? null)
+    : null;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     let renderer: PrimitiveSceneRenderer | null = null;
+    let labelOverlay: ProjectedLabelOverlay | null = null;
     try {
       renderer = new PrimitiveSceneRenderer(canvas, {
         reducedMotion,
@@ -300,9 +332,20 @@ function Primitive3DStage({
         onNodeSelect: (nodeId) => onNodeSelectRef.current?.(nodeId),
         onEdgeSelect: (edgeId) => onEdgeSelectRef.current?.(edgeId),
         onNodeManipulate: (nodeId) => onNodeManipulateRef.current?.(nodeId),
+        onHoverIdentity: (id) => setHoverIdentityId(id),
       });
       renderer.setSpec(presentationSpec, { engineMapping: engineMapping ?? null });
       rendererRef.current = renderer;
+      // Persistent DOM label overlay (W4, root-cause fix seam 5): pulls the
+      // renderer's label projections on its own rAF and writes the DOM
+      // imperatively — no React state, no per-frame re-render. Disposed with
+      // the renderer.
+      if (overlayHostRef.current) {
+        labelOverlay = new ProjectedLabelOverlay(overlayHostRef.current, () =>
+          renderer?.readLabelProjections() ?? null
+        );
+        labelOverlayRef.current = labelOverlay;
+      }
     } catch {
       renderer?.dispose();
       rendererRef.current = null;
@@ -311,12 +354,54 @@ function Primitive3DStage({
     }
     return () => {
       rendererRef.current = null;
+      labelOverlayRef.current = null;
+      labelOverlay?.dispose();
       renderer?.dispose();
     };
     // The mapping is derived from the spec (stable); when it changes the
     // renderer is rebuilt with the new coupling.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec.id, engineMapping]);
+
+  // Tooltip (FIX 4): one role="tooltip" element per stage container, driven
+  // only by hover-identity changes. The controller owns the DOM; content
+  // comes from the semantic data (W3: semantic.name/shortDescription) with
+  // the plain label as fallback, anchored at the object's projected coords.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const controller = new TooltipController(container, {
+      reducedMotion,
+      resolveContent: (id) => resolveTooltipContent(id, presentationSpec, guide),
+      anchorFor: (id) => rendererRef.current?.getIdentityAnchor(id) ?? null,
+    });
+    tooltipRef.current = controller;
+    return () => {
+      tooltipRef.current = null;
+      controller.dispose();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec.id, reducedMotion]);
+
+  useEffect(() => {
+    const controller = tooltipRef.current;
+    if (!controller) return;
+    if (hoverIdentityId) {
+      controller.show(hoverIdentityId);
+    } else {
+      controller.hide();
+    }
+  }, [hoverIdentityId]);
+
+  // Keep the tooltip anchored while the pointer moves (cheap imperative
+  // reposition — never React state, never per-frame).
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const onPointerMove = () => tooltipRef.current?.reposition();
+    container.addEventListener("pointermove", onPointerMove, { passive: true });
+    return () => container.removeEventListener("pointermove", onPointerMove);
+  }, []);
 
   // Apply the canonical engine state on change only. A ref of the last
   // applied (stringified) state avoids re-applying identical emissions every
@@ -333,8 +418,11 @@ function Primitive3DStage({
   }, [visualState, engineMapping, spec.id]);
 
   useEffect(() => {
-    rendererRef.current?.setPlaying(playing);
-  }, [playing]);
+    // Root-cause P7 (trajectory-contract pin): the reduced-motion promise —
+    // under reducedMotion the stage never keeps continuous motion running,
+    // even when the page hands it playing=true.
+    rendererRef.current?.setPlaying(reducedMotion ? false : playing);
+  }, [playing, reducedMotion]);
 
   useEffect(() => {
     rendererRef.current?.setSpeed(speed);
@@ -357,7 +445,14 @@ function Primitive3DStage({
     );
   }
 
-  const conceptual = spec.trust.level === "conceptual_demonstration";
+  // W6 (camera-contract C6 + root cause §3/§6): the explanatory chrome
+  // (legend/relationships/Reset view) is gated behind conceptual OR
+  // verified_simulation — orbit/hybrid stages expose Reset view (the
+  // permanent userControlled latch must be clearable) and their relationship
+  // guide (the gravity relationship must render).
+  const showChrome =
+    spec.trust.level === "conceptual_demonstration" ||
+    spec.trust.level === "verified_simulation";
 
   return (
     <div>
@@ -368,6 +463,7 @@ function Primitive3DStage({
           : " Motion is reduced; use the Diagram or Guided steps representation for a static explanation."}
       </p>
       <div
+        ref={containerRef}
         className="relative w-full overflow-hidden rounded-xl border border-border bg-[#080d16] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
         style={{ aspectRatio: `${spec.renderer.preferredAspectRatio}` }}
       >
@@ -375,10 +471,20 @@ function Primitive3DStage({
           ref={canvasRef}
           aria-label={`${spec.title} 3D stage canvas`}
           aria-describedby={`stage-help-${spec.id}`}
-          className="block h-full w-full cursor-grab active:cursor-grabbing"
+          className="block h-full w-full cursor-grab active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         />
 
-        {conceptual ? (
+        {/* Persistent DOM label overlay host (W4, root-cause fix seam 5): the
+            ProjectedLabelOverlay appends its pointer-events-none layer here
+            and renders the scene's labels as absolutely-positioned DOM
+            elements (>= 14px primary / >= 12px secondary, clamped in-bounds,
+            hidden when the placement planner judges them occluded). */}
+        <div
+          ref={overlayHostRef}
+          className="pointer-events-none absolute inset-0 overflow-hidden"
+        />
+
+        {showChrome ? (
           <>
             <div
               aria-hidden="true"
@@ -421,9 +527,242 @@ function Primitive3DStage({
         ) : null}
       </div>
 
-      {conceptual ? <RelationshipGuide guide={guide} /> : null}
+      {semanticObjects.length > 0 ? (
+        <SceneObjectList
+          objects={semanticObjects}
+          activeId={hoverIdentityId}
+          onActivate={setHoverIdentityId}
+        />
+      ) : null}
+      {identityObject ? (
+        <ObjectDetailsCard object={identityObject} readouts={readouts} />
+      ) : null}
+
+      {showChrome ? <RelationshipGuide guide={guide} /> : null}
       <ReadoutDisplay readouts={readouts} />
     </div>
+  );
+}
+
+/**
+ * FIX 4 tooltip content: NAME + one sentence from the semantic data (W3:
+ * `semantic.name` / `semantic.shortDescription` on the spec object); falls
+ * back to the guide label (or node id) when no sentence exists. The semantic
+ * block is consumed structurally (W3's additive spec field may be absent in
+ * any intermediate tree) — absent data simply yields the label fallback.
+ */
+function resolveTooltipContent(
+  nodeId: string,
+  spec: DemoSpecV1,
+  guide: StageGuide
+): TooltipContent | null {
+  const object = spec.scene3d?.objects.find((o) => o.id === nodeId);
+  const semantic = (object as unknown as { semantic?: { name?: string; shortDescription?: string } })
+    ?.semantic;
+  const guideLabel = guide.entities.find((e) => e.id === nodeId)?.label;
+  const name = semantic?.name?.trim() || object?.label?.trim() || guideLabel || nodeId;
+  const sentence = semantic?.shortDescription?.trim();
+  return { name, sentence: sentence || undefined };
+}
+
+// ---------------------------------------------------------------------------
+// W6 semantic object list + details surface (FIX 5 / FIX 15, orbit-learning
+// L10): the SR-accessible equivalent of the in-canvas identity — a
+// keyboard-reachable role=list of the scene's objects exposing the same names
+// as the labels, plus a compact details card (name, type, one-line
+// description, live Speed/Distance readouts at the existing low-rate readout
+// cadence — never per-frame).
+// ---------------------------------------------------------------------------
+
+interface SceneSemanticObject {
+  id: string;
+  label: string;
+  type: string;
+  description: string;
+}
+
+/** Identity-pickable kinds — mirrors the renderer's IDENTITY_PICK_KINDS so
+ * the list, the labels and the keyboard/hover identity always agree on what
+ * is an object (decorative lines/trails/particles/groups stay out). */
+const SEMANTIC_LIST_KINDS = new Set([
+  "sphere",
+  "box",
+  "plane",
+  "ring",
+  "energy_packet",
+  "wave_surface",
+  "orbit_path",
+]);
+
+function humanizeObjectId(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+/**
+ * The scene's learner-facing objects in keyboard order — primary identity
+ * node first (the engine body that is not the mapping key, e.g. the orbit
+ * "planet" whose mapping key is the "planet-system" group), then scene order.
+ * Mirrors the renderer's non-graph keyboard navigation exactly.
+ */
+function semanticObjectsFor(
+  spec: DemoSpecV1,
+  engineMapping: EngineMapping | null
+): SceneSemanticObject[] {
+  const scene = spec.scene3d;
+  if (!scene) return [];
+  const objects = scene.objects.filter((o) => SEMANTIC_LIST_KINDS.has(o.kind));
+  const mappingKeys =
+    engineMapping && Object.keys(engineMapping).length > 0
+      ? new Set(Object.keys(engineMapping))
+      : null;
+  let primary: string | null = null;
+  if (engineMapping && mappingKeys) {
+    const bodyKeys = new Set<string>();
+    for (const entry of Object.values(engineMapping)) {
+      if (entry.body && !entry.body.startsWith("@")) bodyKeys.add(entry.body);
+    }
+    for (const obj of objects) {
+      if (bodyKeys.has(obj.id) && !mappingKeys.has(obj.id)) {
+        primary = obj.id;
+        break;
+      }
+    }
+  }
+  const orderedIds = primary
+    ? [primary, ...objects.filter((o) => o.id !== primary).map((o) => o.id)]
+    : objects.map((o) => o.id);
+  const byId = new Map(objects.map((o) => [o.id, o]));
+  return orderedIds.flatMap((id) => {
+    const obj = byId.get(id);
+    return obj ? [describeSemanticObject(obj, scene)] : [];
+  });
+}
+
+function describeSemanticObject(
+  obj: PrimitiveObjectSpec,
+  scene: NonNullable<DemoSpecV1["scene3d"]>
+): SceneSemanticObject {
+  const semantic = obj.semantic;
+  const type = semantic?.type?.trim()
+    ? humanizeObjectId(semantic.type)
+    : humanizeObjectId(obj.kind);
+  const description =
+    semantic?.shortDescription?.trim() ||
+    semantic?.relationshipSummary?.trim() ||
+    (obj.description ?? "").trim() ||
+    relationshipSentenceFor(obj, scene) ||
+    `A ${type.toLowerCase()} in this model`;
+  return {
+    id: obj.id,
+    label: semantic?.name?.trim() || obj.label?.trim() || humanizeObjectId(obj.id),
+    type,
+    description,
+  };
+}
+
+/** One-sentence description derived from the scene's relationships (labels
+ * like "The planet orbits the star"), resolving group-mapped endpoints. */
+function relationshipSentenceFor(
+  obj: PrimitiveObjectSpec,
+  scene: NonNullable<DemoSpecV1["scene3d"]>
+): string | null {
+  const groupOf = new Map<string, string>();
+  for (const candidate of scene.objects) {
+    if (candidate.kind === "group") {
+      for (const child of candidate.children ?? []) groupOf.set(child, candidate.id);
+    }
+  }
+  for (const rel of scene.relationships) {
+    const touches =
+      rel.from === obj.id ||
+      rel.to === obj.id ||
+      groupOf.get(rel.from) === obj.id ||
+      groupOf.get(rel.to) === obj.id;
+    if (touches && rel.label?.trim()) return rel.label.trim();
+  }
+  return null;
+}
+
+function SceneObjectList({
+  objects,
+  activeId,
+  onActivate,
+}: {
+  objects: SceneSemanticObject[];
+  activeId: string | null;
+  onActivate: (id: string) => void;
+}) {
+  return (
+    <ul
+      role="list"
+      tabIndex={0}
+      aria-label="Scene objects"
+      className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-surface-raised/50 p-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+    >
+      {objects.map((obj) => (
+        <li
+          key={obj.id}
+          role="listitem"
+          tabIndex={0}
+          aria-label={obj.label}
+          aria-current={activeId === obj.id ? "true" : undefined}
+          onClick={() => onActivate(obj.id)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onActivate(obj.id);
+            }
+          }}
+          className="cursor-pointer rounded-full border border-border/70 bg-surface px-2.5 py-1 text-xs font-medium text-foreground hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          {obj.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** FIX 15 details surface: compact — name, type, one-line description and
+ * the orbit Speed/Distance readouts when the engine provides them. The
+ * readouts arrive at the existing low-rate readout cadence (never per-frame);
+ * no live region, so the lesson rail's single-announcement contract holds. */
+function ObjectDetailsCard({
+  object,
+  readouts,
+}: {
+  object: SceneSemanticObject;
+  readouts: Readout[];
+}) {
+  const detailReadouts = readouts.filter(
+    (r) => r.label === "Speed" || r.label === "Distance"
+  );
+  return (
+    <section
+      aria-label={`Details: ${object.label}`}
+      className="mt-2 rounded-lg border border-border bg-surface-raised/70 px-3 py-2.5"
+    >
+      <p className="text-sm font-semibold">{object.label}</p>
+      <p className="mt-0.5 text-xs font-semibold uppercase tracking-widest text-muted">
+        {object.type}
+      </p>
+      <p className="mt-0.5 text-xs leading-5 text-muted">{object.description}</p>
+      {detailReadouts.length > 0 ? (
+        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+          {detailReadouts.map((readout) => (
+            <span key={readout.label}>
+              <span className="font-semibold uppercase tracking-widest text-muted">
+                {readout.label}
+              </span>{" "}
+              <span className="font-mono">{readout.value}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

@@ -29,7 +29,10 @@ import {
   type LabelContext,
   type LabelOverlay,
 } from "@/demonstrations/renderers/primitive-3d/labels";
-import { GLYPH_HALF_H_NODE } from "@/demonstrations/renderers/primitive-3d/presentation/constants";
+import {
+  nodeLabelGlyphHalfH,
+  type GlyphFrame,
+} from "@/demonstrations/renderers/primitive-3d/presentation/constants";
 import { buildOrbitsShowcase } from "@/demonstrations/showcases/orbits/build-spec";
 
 // ---------------------------------------------------------------------------
@@ -196,24 +199,47 @@ function overlayRuntime(
 // ---------------------------------------------------------------------------
 
 describe("label contract (L1-L12)", () => {
-  it("L1: every primary label's projected glyph is >= 14 CSS px at the default orbit frame", () => {
-    // Root cause §4: glyphs project to 5.6-11.2 px at desktop (moon 2.9 px).
-    // The glyph world height is 2 * GLYPH_HALF_H_NODE * min(size, 2).
+  it("L1: every primary label's glyph is screen-constant >= 14 CSS px at the default orbit frame", () => {
+    // Root cause §4: glyphs projected to 5.6-11.2 px at desktop (moon 2.9 px)
+    // because the glyph height followed the fixed 0.096u half height times
+    // min(size,2). Wave-2 fix (mission brief): the glyph half-height is
+    // computed from the CURRENT camera frame (halfH) + viewport, so the
+    // projected glyph is a screen-constant >= 14 CSS px floor for EVERY
+    // primary label — the smallest body (moon, size 0.35) is no longer 2-8x
+    // smaller than the star's glyph (the min(size,2) cap is raised).
+    const frame: GlyphFrame = {
+      halfH: DEFAULT_ORBIT_HALF_H,
+      viewportPx: DESKTOP_VIEWPORT_H,
+    };
     for (const { id, size } of primaryOrbitLabels()) {
-      const glyphWorldH = 2 * GLYPH_HALF_H_NODE * Math.min(size, 2);
+      const glyphWorldH = 2 * nodeLabelGlyphHalfH(size, frame);
       const px = projectedGlyphPx(glyphWorldH, DESKTOP_VIEWPORT_H);
       expect(px, `label ${id} (size ${size}) projects to ${px.toFixed(1)}px`).toBeGreaterThanOrEqual(
         MIN_DESKTOP_GLYPH_PX
       );
     }
+    // The floor is size-independent for small bodies: the moon's glyph is as
+    // tall as the planet's (the min(size,2) cap is raised by the floor — at
+    // the default orbit frame every primary glyph lands on the same 14px
+    // floor).
+    expect(nodeLabelGlyphHalfH(0.35, frame)).toBeCloseTo(
+      nodeLabelGlyphHalfH(1.3, frame),
+      10
+    );
   });
 
   it("L12: the mobile viewport (320px wide) still keeps glyphs readable (>= 12px)", () => {
-    // Root cause §4: mobile glyphs are 1.4-6.9 px. The 320px-wide viewport is
-    // a frozen support floor — glyphs must not collapse below readability.
+    // Root cause §4: mobile glyphs were 1.4-6.9 px. The 320px-wide viewport
+    // is a frozen support floor — the screen-constant floor recomputes from
+    // the CURRENT viewport height (180px at 16/9), so every primary glyph
+    // still projects >= 14px there: above the 12px mobile floor.
     void MOBILE_VIEWPORT_W; // width is the pinned floor; projection uses height
+    const frame: GlyphFrame = {
+      halfH: DEFAULT_ORBIT_HALF_H,
+      viewportPx: MOBILE_VIEWPORT_H,
+    };
     for (const { id, size } of primaryOrbitLabels()) {
-      const glyphWorldH = 2 * GLYPH_HALF_H_NODE * Math.min(size, 2);
+      const glyphWorldH = 2 * nodeLabelGlyphHalfH(size, frame);
       const px = projectedGlyphPx(glyphWorldH, MOBILE_VIEWPORT_H);
       expect(px, `label ${id} at 320px projects to ${px.toFixed(1)}px`).toBeGreaterThanOrEqual(
         MIN_MOBILE_GLYPH_PX

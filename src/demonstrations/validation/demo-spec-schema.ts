@@ -91,6 +91,18 @@ const MAX_GENERATED_AT_CHARS = 64;
 const MAX_MODEL_CHARS = 64;
 const MAX_OPTION_CHARS = 240;
 
+/**
+ * FIX 3 semantic identity bounds (additive): `name` (and the `role` label,
+ * a short phrase) cap at 24 chars; learner-facing prose
+ * (shortDescription / type / relationshipSummary / the top-level
+ * `description` shorthand) caps at 160 chars. The sanitizer TRUNCATES
+ * over-length values with a repair reason rather than rejecting, so a model
+ * spec carrying verbose semantic prose still validates (additive-only
+ * discipline — no new rejection classes for existing specs).
+ */
+export const MAX_SEMANTIC_NAME_CHARS = 24;
+export const MAX_SEMANTIC_DESC_CHARS = 160;
+
 /** Long-form "explanation blocks": timeline event descriptions and
  * prediction/observation prompts are capped at SPEC_LIMITS.maxExplanationChars
  * (800). */
@@ -101,6 +113,29 @@ const labelString = z.string().min(1).max(MAX_LABEL_CHARS);
 const colorString = z.string().min(1).max(MAX_COLOR_CHARS);
 const explanationString = z.string().min(1).max(MAX_EXPLANATION_CHARS);
 const engineVersionString = z.string().min(1).max(MAX_ENGINE_VERSION_CHARS);
+/** FIX 3 short semantic name / role label (24-char cap, see above). */
+const semanticNameString = z.string().min(1).max(MAX_SEMANTIC_NAME_CHARS);
+/** FIX 3 learner-facing semantic prose (160-char cap, see above). */
+const semanticDescString = z.string().min(1).max(MAX_SEMANTIC_DESC_CHARS);
+
+/**
+ * FIX 3 semantic identity block (additive, strict field-list discipline):
+ * { name, type, shortDescription, role, interactive, relationshipSummary }.
+ * Every field optional; unknown keys inside the block are rejected exactly
+ * like every other strict object level in the contract. Strings are bounded
+ * here as a backstop — the sanitizer truncates/strips first, so the repair
+ * pipeline never rejects on these bounds (additive-only discipline).
+ */
+const semanticSchema = z
+  .object({
+    name: semanticNameString.optional(),
+    type: semanticDescString.optional(),
+    shortDescription: semanticDescString.optional(),
+    role: semanticNameString.optional(),
+    interactive: z.boolean().optional(),
+    relationshipSummary: semanticDescString.optional(),
+  })
+  .strict();
 
 // ---------------------------------------------------------------------------
 // Numbers
@@ -225,6 +260,10 @@ const primitiveObjectSchema = z
       .max(SPEC_LIMITS.maxParticlesDesktop)
       .optional(),
     children: z.array(idString).min(1).max(SPEC_LIMITS.maxObjects).optional(),
+    // FIX 3 semantic identity (additive; see SceneSemanticSpec in the spec).
+    role: semanticNameString.optional(),
+    description: semanticDescString.optional(),
+    semantic: semanticSchema.optional(),
   })
   .strict();
 

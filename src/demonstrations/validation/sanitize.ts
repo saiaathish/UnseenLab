@@ -25,6 +25,8 @@ import {
   hasPollutionKey,
   isExecutableCodeString,
   isUnsafeUrlString,
+  MAX_SEMANTIC_DESC_CHARS,
+  MAX_SEMANTIC_NAME_CHARS,
   MAX_SPEC_DEPTH,
   measureDepth,
   MOBILE_MAX_PARTICLES,
@@ -107,6 +109,83 @@ function fieldCode(field: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// FIX 3 semantic identity repair (additive fields only)
+// ---------------------------------------------------------------------------
+//
+// The semantic block ({name, type, shortDescription, role, interactive,
+// relationshipSummary}) and its top-level shorthands (role/description) are
+// learner-facing display data — never physics. Invalid types, empty strings,
+// and over-length values are STRIPPED or TRUNCATED with repair reasons
+// (additive-only discipline: a model spec carrying sloppy semantic prose
+// still validates; no new rejection class). Unknown keys INSIDE the block
+// are NOT stripped — the strict field-list discipline rejects them like every
+// other strict object level in the contract.
+
+/** String fields of the semantic block and their char caps. */
+const SEMANTIC_STRING_BOUNDS: Record<string, number> = {
+  name: MAX_SEMANTIC_NAME_CHARS,
+  type: MAX_SEMANTIC_DESC_CHARS,
+  shortDescription: MAX_SEMANTIC_DESC_CHARS,
+  role: MAX_SEMANTIC_NAME_CHARS,
+  relationshipSummary: MAX_SEMANTIC_DESC_CHARS,
+};
+
+/**
+ * Repair one semantic string field (block field or the top-level
+ * role/description shorthand): invalid types and empty strings are dropped
+ * (display-only), over-length values are truncated to `max`. Always records
+ * a repair reason when it changes anything; returns undefined when dropped.
+ */
+function repairSemanticString(
+  key: string,
+  value: unknown,
+  max: number,
+  repairs: string[]
+): string | undefined {
+  if (typeof value !== "string" || value.trim() === "") {
+    // Invalid type or empty: display-only, drop it.
+    repairs.push(`repaired:semantic_${fieldCode(key)}`);
+    return undefined;
+  }
+  if (value.length <= max) return value;
+  repairs.push(`repaired:semantic_${fieldCode(key)}`);
+  return value.slice(0, max);
+}
+
+/** Repair one semantic block: strip invalid fields, truncate over-length. */
+function repairSemanticBlock(
+  block: Record<string, unknown>,
+  repairs: string[]
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(block)) {
+    const value = block[key];
+    if (key === "interactive") {
+      if (typeof value === "boolean") {
+        out.interactive = value;
+      } else {
+        repairs.push("repaired:semantic_interactive");
+      }
+      continue;
+    }
+    if (SEMANTIC_STRING_BOUNDS[key] === undefined) {
+      // Unknown key inside the strict block: leave it untouched so the
+      // schema rejects it (unknown_key) — the strict field-list discipline.
+      out[key] = value;
+      continue;
+    }
+    const repaired = repairSemanticString(
+      key,
+      value,
+      SEMANTIC_STRING_BOUNDS[key],
+      repairs
+    );
+    if (repaired !== undefined) out[key] = repaired;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Repair walk
 // ---------------------------------------------------------------------------
 
@@ -135,6 +214,11 @@ function repairTree(
   }
   const record = node as Record<string, unknown>;
   const out: Record<string, unknown> = {};
+  // Scene objects are the ONLY records that may carry the FIX 3 semantic
+  // shorthands (`id` + `kind` strings uniquely identify a PrimitiveObjectSpec —
+  // timeline events, controls, parameters and relationships never collide).
+  const isSceneObject =
+    typeof record.id === "string" && typeof record.kind === "string";
   for (const key of Object.keys(record)) {
     const value = record[key];
     let next: unknown = value;
@@ -156,7 +240,28 @@ function repairTree(
       repairs.push(`repaired:null_${key}`);
       continue;
     }
-    if (key === "size" && typeof value !== "number") {
+    if (isSceneObject && (key === "role" || key === "description")) {
+      // FIX 3 top-level semantic shorthand (additive): display-only. Strip
+      // invalid/empty values, truncate over-length ones — never reject.
+      const max =
+        key === "role" ? MAX_SEMANTIC_NAME_CHARS : MAX_SEMANTIC_DESC_CHARS;
+      const repaired = repairSemanticString(key, value, max, repairs);
+      if (repaired === undefined) continue;
+      out[key] = repaired;
+      continue;
+    } else if (isSceneObject && key === "semantic") {
+      // FIX 3 semantic identity block (additive): a non-object block is
+      // dropped (models emit null for "absent"); field-level repairs run
+      // inside (strip invalid types/empties, truncate over-length).
+      // Written straight to `out` + continue so the generic object recursion
+      // below never re-processes the UN-repaired original block.
+      if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        repairs.push("repaired:semantic");
+        continue;
+      }
+      out[key] = repairSemanticBlock(value as Record<string, unknown>, repairs);
+      continue;
+    } else if (key === "size" && typeof value !== "number") {
       // Non-numeric size (models emit strings like "medium", or null): visual
       // tuning only, the renderer has defaults. Drop rather than reject —
       // meaning is preserved (size is never physics).

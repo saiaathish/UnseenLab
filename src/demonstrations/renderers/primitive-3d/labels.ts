@@ -38,15 +38,16 @@ import {
   ELLIPSIS_PX,
   estimateTextWidthPx,
   GLYPH_HALF_H_EDGE,
-  GLYPH_HALF_H_NODE,
   LABEL_EDGE_CLEAR,
   LABEL_ENV_CLEAR,
   LABEL_LABEL_CLEAR,
   MAX_TEXTURE_PX,
   NODE_ANCHOR_ORDER,
+  nodeLabelGlyphHalfH,
   nodeLabelSpriteScale,
   REASON_LABEL_ELLIPSIZED,
   resolveLabelText,
+  type GlyphFrame,
   type NodeAnchor,
   type Rect,
 } from "./presentation/constants";
@@ -99,6 +100,35 @@ export const GLYPH_HALF_D = 0.001;
 /** Placement re-runs when a labeled node moved more than this (design §1.6). */
 export const LABEL_REPLACE_THRESHOLD = 0.05;
 
+/**
+ * Replan time budget — the 4 Hz cap (mission brief + root-cause §4: the
+ * planet moves 0.163 world/frame — 3.3x the replace threshold — so today the
+ * placement re-plans EVERY frame and anchor flips teleport sprites ~27px every
+ * 0.6-1.9s). updateLabelOverlays accumulates frame dt and only re-plans once
+ * the budget elapses during continuous motion.
+ */
+export const LABEL_REPLAN_INTERVAL_S = 0.25;
+
+/**
+ * A single-frame move beyond this many world units is a TELEPORT (engine
+ * re-aim / reset / slider round-trip — root cause: re-aims 6+, drags 12+;
+ * engine-driven deltas are 0.16-1.6). A teleport re-places immediately even
+ * inside the throttle window, so a stale anchor never survives a jump.
+ */
+export const LABEL_REPLAN_TELEPORT_UNITS = 4;
+
+/**
+ * y half-extent of the orbit_path ring envelope. The ring guide is a 1px line
+ * in the x-z plane (visuals.ts), so its 12^3 box envelope was pure dead
+ * weight: it blocked EVERY anchor of the star (and the planet while inside
+ * the ring) and inflated the camera frame ~2x (root-cause §3/§4). Flattening
+ * y to a line-thickness slab keeps the honest annulus radius in x/z (a label
+ * inside the ring is still pushed out to the side) while freeing the
+ * vertical anchors — the star's "above" lands again, the frame stops being
+ * y-inflated by the ring.
+ */
+export const ORBIT_PATH_Y_HALF = 0.02;
+
 /** Width in px of the *resolved* text (ellipsis measured at ELLIPSIS_PX). */
 function resolvedTextWidthPx(resolved: {
   text: string;
@@ -149,6 +179,13 @@ export function nodeEnvelopeHalfExtents(node: {
       // under-covered the grid corners in z (Wave-4b: electric-fields'
       // field-vectors clipped in the canonical top view).
       return { x: half, y: (node.size * 0.22) / 2, z: half };
+    case "orbit_path":
+      // The ring guide is a 1px line at y=0 (visuals.ts): thin-y annulus
+      // slab (ORBIT_PATH_Y_HALF). The 12^3 box envelope blocked every anchor
+      // of nodes inside the ring (star on fallback) and inflated the frame —
+      // root-cause §4 seam 4. The x/z radius still models the ring's disc, so
+      // a label inside the ring is still pushed out to the side.
+      return { x: half, y: ORBIT_PATH_Y_HALF, z: half };
     case "line":
     case "trail":
     case "process_edge":
@@ -527,6 +564,14 @@ export interface NodeLabelPlan {
   /** Sprite world width/height (text-measured, min(s,2)-capped). */
   spriteW: number;
   spriteH: number;
+  /**
+   * True when NO anchor was collision-free and the plan fell back to the
+   * first anchor (REASON_LABEL_ANCHOR_FALLBACK): the glyph rect overlaps
+   * geometry. The canvas sprite still renders (never drop a label), but the
+   * DOM overlay treats the label as occluded and hides it (mission brief:
+   * "hidden when occluded per the placement planner").
+   */
+  occluded: boolean;
 }
 
 /** A node participating in label placement (plain data, no Three.js). */
@@ -545,6 +590,13 @@ export interface PlacementInput {
   /** All non-group node envelopes (raw; inflated internally). */
   envelopes: LabelEnvelope[];
   edgePolylines: Array<{ id: string; pts: Vec3[] }>;
+  /**
+   * Camera frame for screen-constant glyph sizing (Wave 2, root-cause §4).
+   * When present, glyph rects and sprite scales use the MIN_NODE_LABEL_PX
+   * CSS-px floor projected at the frame; absent → the legacy min(size,2)
+   * math (frozen pins).
+   */
+  frame?: GlyphFrame | null;
 }
 
 function anchorOffset(
@@ -571,8 +623,10 @@ function anchorOffset(
 /**
  * The core placement pass (pure): for each item in order, resolve the text,
  * measure the sprite, then pick the first anchor in NODE_ANCHOR_ORDER whose
- * glyph rect (halfW = sprite/2, halfH = GLYPH_HALF_H_NODE·min(s,2)) collides
- * with nothing. Reasons are pushed for ellipsized labels and anchor fallbacks.
+ * glyph rect (halfW = sprite/2, halfH = nodeLabelGlyphHalfH — the legacy
+ * GLYPH_HALF_H_NODE·min(s,2), or the screen-constant floor when the input
+ * carries a camera frame) collides with nothing. Reasons are pushed for
+ * ellipsized labels and anchor fallbacks.
  */
 export function placeLabelItems(
   input: PlacementInput,
@@ -591,9 +645,9 @@ export function placeLabelItems(
     const resolved = resolveLabelText(item.label);
     if (resolved.truncated) reasons.push(REASON_LABEL_ELLIPSIZED);
     const textPx = resolvedTextWidthPx(resolved);
-    const scale = nodeLabelSpriteScale(item.size, textPx);
+    const scale = nodeLabelSpriteScale(item.size, textPx, input.frame);
     const glyphHalfW = scale.w / 2;
-    const glyphHalfH = GLYPH_HALF_H_NODE * Math.min(item.size, 2);
+    const glyphHalfH = nodeLabelGlyphHalfH(item.size, input.frame);
     const envHalf = nodeEnvelopeHalfExtents(item);
 
     // The anchor math places each candidate EXACTLY LABEL_ENV_CLEAR from the
@@ -628,9 +682,11 @@ export function placeLabelItems(
         break;
       }
     }
+    let occluded = false;
     if (chosen === null) {
       // No collision-free anchor: render at the first anchor anyway, loudly.
       chosen = "above";
+      occluded = true;
       reasons.push(REASON_LABEL_ANCHOR_FALLBACK);
     }
     const offset = anchorOffset(
@@ -657,6 +713,7 @@ export function placeLabelItems(
       rect,
       spriteW: scale.w,
       spriteH: scale.h,
+      occluded,
     });
     // The placed rect enters the label-label space inflated by the clearance.
     ctx.placedRects.push({
@@ -678,7 +735,7 @@ function placementInputFromGraph(
   edgePlans?: GraphEdgePlan[]
 ): PlacementInput {
   const items: LabelItem[] = graph.nodes
-    .filter((n) => n.kind !== "label" && n.label !== undefined)
+    .filter((n) => n.kind !== "label" && n.label !== undefined && !n.hidden)
     .map((n) => ({
       id: n.id,
       kind: n.kind,
@@ -688,7 +745,7 @@ function placementInputFromGraph(
     }))
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const envelopes = graph.nodes
-    .filter((n) => n.kind !== "group")
+    .filter((n) => n.kind !== "group" && !n.hidden)
     .map((n) => nodeEnvelope(n));
   let polylines: Array<{ id: string; pts: Vec3[] }>;
   if (edgePlans !== undefined) {
@@ -719,16 +776,16 @@ function placementInputFromGraph(
  * node id order; the first collision-free anchor per label wins.
  * `opts.edgePlans` supplies the graph-mode edge polylines; when omitted,
  * legacy flows_to/transfers_to relationships are used (non-graph scenes).
+ * `opts.frame` enables the screen-constant glyph floor (Wave 2).
  */
 export function planNodeLabels(
   graph: SceneGraph,
-  opts?: { edgePlans?: GraphEdgePlan[] }
+  opts?: { edgePlans?: GraphEdgePlan[]; frame?: GlyphFrame | null }
 ): { plans: NodeLabelPlan[]; reasons: string[] } {
   const reasons: string[] = [];
-  const plans = placeLabelItems(
-    placementInputFromGraph(graph, opts?.edgePlans),
-    reasons
-  );
+  const input = placementInputFromGraph(graph, opts?.edgePlans);
+  input.frame = opts?.frame ?? null;
+  const plans = placeLabelItems(input, reasons);
   return { plans, reasons };
 }
 
@@ -852,6 +909,46 @@ export interface LabelContext {
   /** Graph-mode edge plans (straight polylines; C3 feeds routed ones). */
   edgePlans: GraphEdgePlan[];
   trackDisposable(d: { dispose(): void }): void;
+  /**
+   * Camera frame for screen-constant glyph sizing (Wave 2, root-cause §4).
+   * Set by the renderer at build (the build frame); null → legacy math.
+   */
+  frame?: GlyphFrame | null;
+  /**
+   * Stable replan-throttle state (4 Hz budget). The renderer passes a
+   * long-lived object; tests share one context across calls, so a lazily
+   * created object also persists there.
+   */
+  replanState?: { accum: number };
+}
+
+/** One placed label's projection for the DOM overlay (canvas CSS px). */
+export interface LabelProjection {
+  nodeId: string;
+  /** Resolved label text (shared resolver — same string as the sprite). */
+  label: string;
+  /** Projected anchor position in canvas CSS px (y down). */
+  x: number;
+  y: number;
+  /** Primary entity (14px floor) vs secondary chrome (12px floor). */
+  primary: boolean;
+}
+
+/** Kinds that read as decorative chrome rather than primary entities —
+ * mirrors presentation.ts's decorative kinds. Primary labels render at the
+ * 14px floor, secondary chrome (guides / camera markers) at 12px. */
+const DECORATIVE_KINDS = new Set<PrimitiveKind>([
+  "label",
+  "line",
+  "trail",
+  "orbit_path",
+  "graph_surface",
+  "process_edge",
+  "vector_field",
+]);
+
+export function isPrimaryLabelKind(kind: PrimitiveKind): boolean {
+  return !DECORATIVE_KINDS.has(kind);
 }
 
 /** Runtime record for one placed node label. */
@@ -885,6 +982,10 @@ export function buildLabelSprite(
   rn: RuntimeNode,
   node: SceneGraphNode
 ): void {
+  // L6 (root-cause seam 4): a hidden object produces no orphan label — no
+  // sprite, no overlay record (the sprite would float at a stale position
+  // with no plan).
+  if (node.hidden) return;
   const text = node.label ?? node.id;
   const resolved = resolveLabelText(text);
   const texture = makeLabelTexture(text, {
@@ -896,7 +997,13 @@ export function buildLabelSprite(
     transparent: true,
   });
   const sprite = new THREE.Sprite(material);
-  const scale = nodeLabelSpriteScale(node.size, resolvedTextWidthPx(resolved));
+  // Screen-constant scale when the renderer supplies the build frame (Wave 2,
+  // root-cause §4): the glyph projects >= 14 CSS px at the current frame.
+  const scale = nodeLabelSpriteScale(
+    node.size,
+    resolvedTextWidthPx(resolved),
+    ctx.frame
+  );
   sprite.scale.set(scale.w, scale.h, 1);
   // Tentative position (refined by the placement pass on the next frame);
   // placement is deterministic and completes before the first render.
@@ -1014,27 +1121,76 @@ export function applyLabelPlans(
  * re-places ALL labels when any labeled node moved more than
  * LABEL_REPLACE_THRESHOLD from its placement base (design §1.6 — placement
  * stays deterministic; the re-place is silent, reasons surface only at build).
+ *
+ * Wave 2 (root-cause §4 — "Replan EVERY frame, zero hysteresis"):
+ *  - REPLAN THROTTLE: full replans are time-budgeted to <= 4 Hz
+ *    (LABEL_REPLAN_INTERVAL_S of accumulated dt) during continuous motion, so
+ *    anchors no longer flip every frame; a TELEPORT (a move beyond
+ *    LABEL_REPLAN_TELEPORT_UNITS — engine re-aim / reset / slider round-trip)
+ *    re-places immediately even inside the window.
+ *  - STICKY ANCHORS: when a replan does run, each label keeps its previous
+ *    anchor while that anchor remains collision-free (L8) — the reproduced
+ *    ~27px right→above flip is gone.
+ *  - HIDDEN objects: their sprites are hidden and excluded from placement
+ *    (no orphan label mid-session, L6).
  */
-export function updateLabelOverlays(ctx: LabelContext, _dt: number): void {
+export function updateLabelOverlays(ctx: LabelContext, dt: number): void {
   if (!ctx.graph || ctx.labels.length === 0) return;
-  let needReplan = false;
+  const state = ctx.replanState ?? (ctx.replanState = { accum: 0 });
+  if (dt > 0) state.accum += dt;
+
+  let hiddenById: Map<string, boolean> | null = null;
+  const isHidden = (id: string): boolean => {
+    if (!ctx.graph) return false;
+    hiddenById ??= new Map(ctx.graph.nodes.map((n) => [n.id, n.hidden === true]));
+    return hiddenById.get(id) ?? false;
+  };
+
+  // Replan decision: any label without a plan (first frame), any label moved
+  // beyond the replace threshold (throttled by the 4 Hz budget), or a
+  // teleport — which bypasses the budget.
+  let needInitial = false;
+  let moved = false;
+  let teleported = false;
   for (const overlay of ctx.labels) {
+    if (isHidden(overlay.nodeId)) {
+      if (overlay.sprite.visible !== false) overlay.sprite.visible = false;
+      continue;
+    }
     const w = worldOf(overlay.rn.group);
+    if (!overlay.plan) {
+      needInitial = true;
+      continue;
+    }
+    const dx = Math.abs(w.x - overlay.base.x);
+    const dy = Math.abs(w.y - overlay.base.y);
+    const dz = Math.abs(w.z - overlay.base.z);
     if (
-      !overlay.plan ||
-      Math.abs(w.x - overlay.base.x) > LABEL_REPLACE_THRESHOLD ||
-      Math.abs(w.y - overlay.base.y) > LABEL_REPLACE_THRESHOLD ||
-      Math.abs(w.z - overlay.base.z) > LABEL_REPLACE_THRESHOLD
+      dx > LABEL_REPLACE_THRESHOLD ||
+      dy > LABEL_REPLACE_THRESHOLD ||
+      dz > LABEL_REPLACE_THRESHOLD
     ) {
-      needReplan = true;
-      break;
+      moved = true;
+    }
+    if (
+      dx > LABEL_REPLAN_TELEPORT_UNITS ||
+      dy > LABEL_REPLAN_TELEPORT_UNITS ||
+      dz > LABEL_REPLAN_TELEPORT_UNITS
+    ) {
+      teleported = true;
     }
   }
-  if (needReplan) {
+
+  if (
+    needInitial ||
+    (moved && (state.accum >= LABEL_REPLAN_INTERVAL_S || teleported))
+  ) {
+    state.accum = 0;
     const items: LabelItem[] = [];
     const envelopes: LabelEnvelope[] = [];
     const byId = new Map(ctx.graph.nodes.map((n) => [n.id, n]));
     for (const node of ctx.graph.nodes) {
+      if (node.hidden) continue;
       const rn = ctx.runtime.get(node.id);
       const position = rn ? worldOf(rn.group) : { ...node.position };
       if (node.kind !== "group") {
@@ -1087,10 +1243,75 @@ export function updateLabelOverlays(ctx: LabelContext, _dt: number): void {
     // Deterministic order (node id order) — the same rule as the build pass.
     items.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const plans = placeLabelItems(
-      { items, envelopes, edgePolylines: polylines },
+      { items, envelopes, edgePolylines: polylines, frame: ctx.frame },
       []
     );
+
+    // Sticky anchors (L8): each label keeps its previous anchor while that
+    // anchor stays collision-free, so continuous motion never flips a label
+    // mid-sentence. Deterministic: overlays are visited in build order and
+    // every check runs against the current final-rect registry.
     const byPlanId = new Map(plans.map((p) => [p.nodeId, p]));
+    const itemsById = new Map(items.map((i) => [i.id, i]));
+    const envsById = new Map(envelopes.map((e) => [e.id, e]));
+    const inflatedEnvs = envelopes.map((env) =>
+      inflateEnvelope(env, LABEL_ENV_CLEAR)
+    );
+    const placedRects = new Map<string, Rect>();
+    for (const p of plans) {
+      placedRects.set(p.nodeId, {
+        cx: p.rect.cx,
+        cy: p.rect.cy,
+        cz: p.rect.cz,
+        halfW: p.rect.halfW + LABEL_LABEL_CLEAR,
+        halfH: p.rect.halfH + LABEL_LABEL_CLEAR,
+        halfD: p.rect.halfD + LABEL_LABEL_CLEAR,
+      });
+    }
+    for (const overlay of ctx.labels) {
+      const prev = overlay.plan;
+      const fresh = byPlanId.get(overlay.nodeId);
+      if (!prev || !fresh || fresh.anchor === prev.anchor) continue;
+      const item = itemsById.get(overlay.nodeId);
+      const env = envsById.get(overlay.nodeId);
+      if (!item || !env) continue;
+      const offset = anchorOffset(
+        item.position,
+        env.halfExtents,
+        fresh.rect.halfW,
+        fresh.rect.halfH,
+        prev.anchor
+      );
+      const rect: Rect = {
+        cx: item.position.x + offset.x,
+        cy: item.position.y + offset.y,
+        cz: item.position.z + offset.z,
+        halfW: fresh.rect.halfW,
+        halfH: fresh.rect.halfH,
+        halfD: GLYPH_HALF_D,
+      };
+      const others = inflatedEnvs.filter((e) => e.id !== item.id);
+      const otherRects: Rect[] = [];
+      for (const [id, r] of placedRects) {
+        if (id !== item.id) otherRects.push(r);
+      }
+      const stickyCtx: LabelCollisionContext = {
+        nodeEnvelopes: others,
+        edgePolylines: polylines,
+        placedRects: otherRects,
+      };
+      if (!labelRectCollides(rect, stickyCtx)) {
+        byPlanId.set(item.id, { ...fresh, anchor: prev.anchor, offset, rect });
+        placedRects.set(item.id, {
+          cx: rect.cx,
+          cy: rect.cy,
+          cz: rect.cz,
+          halfW: rect.halfW + LABEL_LABEL_CLEAR,
+          halfH: rect.halfH + LABEL_LABEL_CLEAR,
+          halfD: rect.halfD + LABEL_LABEL_CLEAR,
+        });
+      }
+    }
     for (const overlay of ctx.labels) {
       const plan = byPlanId.get(overlay.nodeId);
       if (plan) {
@@ -1099,8 +1320,9 @@ export function updateLabelOverlays(ctx: LabelContext, _dt: number): void {
       }
     }
   }
+
   for (const overlay of ctx.labels) {
-    if (!overlay.plan) continue;
+    if (!overlay.plan || isHidden(overlay.nodeId)) continue;
     const w = worldOf(overlay.rn.group);
     overlay.sprite.position.set(
       w.x + overlay.plan.offset.x,

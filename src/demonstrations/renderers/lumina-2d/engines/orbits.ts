@@ -71,8 +71,35 @@ export function createOrbits(): SimulationModule {
   let dragIdx = -1;
   let W = 800;
   let H = 600;
+  // Trajectory re-aim seam (root-cause §2, A22 P0 — ADDITIVE): the ENGINE is
+  // the only party that knows when placeBodies() teleports the body, so it
+  // flags its visual-state emissions and bumps a monotone epoch. The 3D
+  // renderer clears the trail once per epoch flip (never a straight connector
+  // across a teleport).
+  //
+  // Semantics (pinned by the coupling suites — replay parity + read-only 2D
+  // consumer):
+  //  - `reaimEpoch` bumps ONLY on learner-visible re-aims: a non-g
+  //    setParameter (the slider path) or a drag release. init/reset place the
+  //    bodies but do NOT bump — a parameter-only restore (reset + re-applied
+  //    params) must reproduce the SAME canonical state as a from-scratch run
+  //    with those params (the UI replay path always re-applies the params
+  //    after a reset, so the re-aim signal still fires).
+  //  - `pendingReaim` is a PERSISTENT flag, never consumed by getVisualState:
+  //    getVisualState is a pure read (draw()/repeat calls must not mutate
+  //    the canonical state); the renderer detects the false->true edge and,
+  //    authoritatively, the epoch flip.
+  let reaimEpoch = 0;
+  let pendingReaim = false;
 
-  function placeBodies() {
+  /**
+   * (Re-)place the bodies from the current parameters. `signalReaim` marks
+   * this as a learner-visible re-aim (a non-g parameter change or a drag
+   * release) that the coupled 3D surface must treat as a trajectory
+   * discontinuity — the INITIAL placement and the plain reset carry no epoch
+   * bump (coupling replay-parity pin: reset + params == params alone).
+   */
+  function placeBodies(signalReaim = false) {
     const d = params.distance;
     const e = params.eccentricity;
     const a = d / (1 + e); // semi-major axis from apoapsis placement
@@ -94,6 +121,10 @@ export function createOrbits(): SimulationModule {
     lastRelX = d;
     lastRelY = 0;
     dragIdx = -1;
+    if (signalReaim) {
+      reaimEpoch++;
+      pendingReaim = true;
+    }
   }
 
   /** Pairwise inverse-square accelerations for a body in the given state. */
@@ -185,7 +216,10 @@ export function createOrbits(): SimulationModule {
     init(ctx: SimContext) {
       W = ctx.width;
       H = ctx.height;
-      placeBodies();
+      // Initial placement is an aim, not a re-aim: no trajectory exists yet
+      // for the coupled surface to break (the epoch stays 0 until the first
+      // learner-visible re-aim).
+      placeBodies(false);
     },
 
     resize(width: number, height: number) {
@@ -260,7 +294,11 @@ export function createOrbits(): SimulationModule {
       const b = ORBITS_META.bounds[key];
       if (!b) return;
       params[key] = clamp(value, b.min, b.max);
-      if (key !== "g") placeBodies(); // re-aim the orbit; g just rescales gravity
+      // Any non-g parameter change re-aims the orbit (placeBodies teleports
+      // the body): bump the re-aim epoch + flag the discontinuity so the 3D
+      // trail clears once (never a teleport connector). g just rescales
+      // gravity — the trajectory is continuous.
+      if (key !== "g") placeBodies(true);
     },
 
     pointer(p: SimPointer) {
@@ -277,7 +315,15 @@ export function createOrbits(): SimulationModule {
         bodies[1].y = wy;
         trail = [];
       } else if (p.type === "up" || p.type === "leave") {
+        // A drag release is a re-aim (root-cause §2: drags teleport 12+
+        // world units): the next visual state flags it so the coupled trail
+        // starts a fresh segment at the release position.
+        const wasDragging = dragIdx === 1;
         dragIdx = -1;
+        if (wasDragging) {
+          reaimEpoch++;
+          pendingReaim = true;
+        }
       }
     },
 
@@ -302,13 +348,32 @@ export function createOrbits(): SimulationModule {
      * Canonical body positions for coupled 3D surfaces. Coordinates are the
      * engine's own simulation units (origin at the star / canvas centre) —
      * resolution-independent by construction.
+     *
+     * ADDITIVE trajectory seam (root-cause §2): `reaimed` is true once a
+     * learner-visible re-aim happened (non-g parameter change / drag release
+     * — PERSISTENT, never consumed: this accessor is a pure read, the 2D
+     * consumer and repeat polls must never mutate the canonical state), and
+     * `epoch` is the monotone re-aim counter the renderer clears trails on.
+     * `velocity` (per body) plus the `speed`/`distance` parameters feed the
+     * debug seam's honest bound/escape classification.
      */
     getVisualState(): EngineVisualState {
       const at = (i: number) =>
         bodies.length > i
           ? { x: bodies[i].x, y: bodies[i].y }
           : { x: 0, y: 0 };
-      return { bodies: { star: at(0), planet: at(1) } };
+      const velAt = (i: number) =>
+        bodies.length > i
+          ? { x: bodies[i].vx, y: bodies[i].vy }
+          : { x: 0, y: 0 };
+      return {
+        bodies: { star: at(0), planet: at(1) },
+        velocity: { star: velAt(0), planet: velAt(1) },
+        reaimed: pendingReaim,
+        epoch: reaimEpoch,
+        speed: params.speed,
+        distance: params.distance,
+      };
     },
 
     serializeState(): OrbitsState {

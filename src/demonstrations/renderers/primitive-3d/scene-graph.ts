@@ -28,6 +28,7 @@ import type {
   PrimitiveObjectSpec,
   RelationshipOperator,
   RelationshipSpec,
+  SceneSemanticSpec,
   Vec3,
 } from "@/demonstrations/spec/demo-spec";
 import {
@@ -50,6 +51,7 @@ import type {
   SceneGraphNode,
   SceneGraphRelationship,
   SceneLayout,
+  SceneSemantic,
 } from "./types";
 
 export interface BuildSceneGraphOptions {
@@ -252,6 +254,27 @@ function vec3OrDefault(
   return out;
 }
 
+/**
+ * FIX 3 additive semantic carry (root cause §4/§5): copies the spec's
+ * semantic block into the graph node, merging the top-level `role` /
+ * `description` shorthands as fallbacks for `semantic.role` /
+ * `semantic.shortDescription` (the block wins). Absent everywhere ->
+ * undefined (presentation layers then auto-derive identity, byte-identical
+ * to pre-FIX-3 behavior). Purely additive: no other node field is touched.
+ */
+function carrySemantic(obj: PrimitiveObjectSpec): SceneSemantic | undefined {
+  const block = obj.semantic;
+  const hasShorthand = obj.role !== undefined || obj.description !== undefined;
+  if (block === undefined && !hasShorthand) return undefined;
+  const role = block?.role ?? obj.role;
+  const shortDescription = block?.shortDescription ?? obj.description;
+  return {
+    ...(block ?? {}),
+    ...(role !== undefined ? { role } : {}),
+    ...(shortDescription !== undefined ? { shortDescription } : {}),
+  };
+}
+
 function emptySceneGraph(spec: DemoSpecV1): SceneGraph {
   return {
     nodes: [],
@@ -420,6 +443,7 @@ export function buildSceneGraph(
       trailPoints,
       particleCount,
       depth: 1,
+      semantic: carrySemantic(obj as PrimitiveObjectSpec),
     };
     nodes.push(node);
     byId.set(node.id, node);

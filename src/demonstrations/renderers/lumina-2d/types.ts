@@ -76,6 +76,45 @@ export interface EngineVisualState {
    * { charge1, charge2 } for charges, { source1, source2 } for waves).
    */
   bodies?: Record<string, { x: number; y: number }>;
+  /**
+   * orbits only (ADDITIVE — trajectory seam, root-cause §2): per-body
+   * velocity in engine units/s at snapshot time. The coupled 3D surface uses
+   * it for velocity vectors and for the honest escape classification of the
+   * debug seam. Absent on engines that do not track velocity cheaply.
+   */
+  velocity?: Record<string, { x: number; y: number }>;
+  /**
+   * orbits only (ADDITIVE — trajectory seam, root-cause §2): true once a
+   * learner-visible re-aim happened (a non-g parameter change or a drag
+   * release teleported the body via placeBodies). PERSISTENT — never
+   * consumed by the accessor: getVisualState is a pure read (the 2D consumer
+   * and repeat polls must not mutate the canonical state — coupling pin), so
+   * the renderer detects the false->true EDGE and, authoritatively, the
+   * `epoch` counter flip.
+   */
+  reaimed?: boolean;
+  /**
+   * orbits only (ADDITIVE — trajectory seam, root-cause §2): monotone re-aim
+   * epoch, ++ per learner-visible re-aim (non-g setParameter / drag release;
+   * init and reset do NOT bump — a parameter-only restore must reproduce the
+   * same canonical state as a from-scratch run, coupling replay pin). The 3D
+   * renderer clears a body's trail exactly once per epoch flip, so the next
+   * recorded point starts a fresh segment (never an old-last -> new-start
+   * teleport connector).
+   */
+  epoch?: number;
+  /**
+   * orbits only (ADDITIVE — escape classification): the current launch-speed
+   * parameter (the engine's escape regime is speed >= sqrt(2); the engine
+   * never clamps). The debug seam uses it to classify bound vs escape.
+   */
+  speed?: number;
+  /**
+   * orbits only (ADDITIVE — escape classification): the current orbit-distance
+   * parameter — the launch (apoapsis) distance of the last re-aim, engine
+   * units. No bound orbit ever exceeds it; an escape grows past it.
+   */
+  distance?: number;
   /** charges only: a bounded vector-field grid. */
   field?: {
     vectors: EngineFieldVector[];

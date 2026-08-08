@@ -1242,6 +1242,23 @@ export function updateEdge(edge: RuntimeEdge): void {
  * Record the holder's world position into the trail ring buffer. The recorded
  * points are WORLD space and the trail Line lives in the SCENE (not the moving
  * holder), so the history stays truthful when the body moves (F-18).
+ *
+ * Precision (P1/T12 — "the trail is an exact history"): the CPU ring is
+ * Float64Array so the recorded samples equal the engine snapshot EXACTLY
+ * (float32 would round e.g. 90*0.04 to 3.5999999046325684 — a visible
+ * deviation from the canonical state). The GPU position attribute is a
+ * separate Float32Array synced on every write (three.js requires float32
+ * attributes — WebGLAttributes rejects Float64Array), so rendering precision
+ * is unaffected. Hand-built runtimes whose `attribute.array` IS the ring
+ * (unit tests) are written once.
+ *
+ * The buffer belongs to ONE trajectory segment (the current re-aim epoch):
+ * every point pushed after a clearTrail belongs to the post-re-aim segment,
+ * because the clear emptied the ring and dropped `last` — the next push opens
+ * the fresh polyline at index 0. There is deliberately NO geometric
+ * segment-break detection here (legit deltas 0.16–1.6 world/emission vs
+ * re-aims 6+ — root-cause §2): the caller signals re-aims through the engine
+ * epoch, and clearTrail is the single, atomic break seam.
  */
 export function pushTrailPoint(rn: RuntimeNode): void {
   const t = rn.trail;
@@ -1259,21 +1276,52 @@ export function pushTrailPoint(rn: RuntimeNode): void {
   ) {
     return; // stationary: do not duplicate points
   }
+  const attr = t.attribute.array;
+  const dual = attr !== t.buffer;
+  const write = (index: number) => {
+    t.buffer[index] = x;
+    t.buffer[index + 1] = y;
+    t.buffer[index + 2] = z;
+    if (dual) {
+      attr[index] = x;
+      attr[index + 1] = y;
+      attr[index + 2] = z;
+    }
+  };
   if (t.written < t.capacity) {
-    t.buffer[t.written * 3] = x;
-    t.buffer[t.written * 3 + 1] = y;
-    t.buffer[t.written * 3 + 2] = z;
+    write(t.written * 3);
     t.written++;
   } else {
     t.buffer.copyWithin(0, 3, t.capacity * 3);
-    t.buffer[(t.capacity - 1) * 3] = x;
-    t.buffer[(t.capacity - 1) * 3 + 1] = y;
-    t.buffer[(t.capacity - 1) * 3 + 2] = z;
+    if (dual) attr.copyWithin(0, 3, t.capacity * 3);
+    write((t.capacity - 1) * 3);
   }
   t.last = { x, y, z };
   t.geometry.setDrawRange(0, t.written);
   t.attribute.needsUpdate = true;
 }
+
+/**
+ * The single, atomic clear-on-re-aim path (root-cause §2: "zero
+ * resetTrail/clearTrail" in the repo — the teleport connector was drawn
+ * because nothing ever emptied the buffer between placeBodies teleports).
+ *
+ * Empties the ring buffer and the draw range and drops `last`, so the NEXT
+ * pushTrailPoint starts a fresh polyline segment at index 0 — an old-last ->
+ * new-start straight connector across a teleport is impossible (T2/T8). The
+ * trail's `epoch` bumps (monotone — the debug seam's `trail.epoch`, "++ on
+ * every re-aim/clear"); the renderer additionally syncs it to the engine's
+ * epoch at each re-aim so the seam always reports the engine's counter.
+ */
+export function clearTrail(trail: TrailRuntime): void {
+  trail.written = 0;
+  trail.last = null;
+  trail.geometry.setDrawRange(0, 0);
+  trail.epoch = (typeof trail.epoch === "number" ? trail.epoch : 0) + 1;
+}
+
+/** The runtime trail record shape (world ring buffer + Line + epoch). */
+export type TrailRuntime = NonNullable<RuntimeNode["trail"]>;
 
 /** Re-exported for visuals.ts (line/process_edge fallback reason). */
 export { REASON_LINE_NO_ENDPOINTS };

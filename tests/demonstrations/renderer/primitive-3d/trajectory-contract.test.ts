@@ -319,14 +319,14 @@ describe("trajectory contract (T1-T12)", () => {
     // boolean (or an epoch counter) set by the engine whenever placeBodies()
     // teleports the body (setParameter of any non-g key, reset, drag release).
     type ReaimedVisualState = EngineVisualState & { reaimed?: boolean };
-    const before = module.getVisualState() as ReaimedVisualState;
+    const before = module.getVisualState!() as ReaimedVisualState;
     expect(before.reaimed).toBeFalsy(); // steady-state frames carry no flag
 
     // Any non-g parameter change re-aims (placeBodies — orbits.ts:263): the
     // visual state emitted right after MUST flag the discontinuity so the
     // renderer can start a new segment instead of connecting.
     module.setParameter("speed", 1.2);
-    const after = module.getVisualState() as ReaimedVisualState;
+    const after = module.getVisualState!() as ReaimedVisualState;
     expect(after.reaimed).toBe(true);
   });
 
@@ -462,7 +462,7 @@ describe("trajectory contract (T1-T12)", () => {
     let maxDist = 0;
     for (let i = 0; i < 600; i++) {
       module.step(1 / 60);
-      const s = module.getVisualState()!;
+      const s = module.getVisualState!()!;
       const p = s.bodies!.planet;
       maxDist = Math.max(maxDist, Math.hypot(p.x, p.y));
     }
@@ -519,7 +519,7 @@ describe("physics honesty contract (P1-P7)", () => {
     for (let i = 0; i < 1200; i++) {
       module.step(1 / 60);
       if (i % 120 === 0) {
-        const p = module.getVisualState()!.bodies!.planet;
+        const p = module.getVisualState!()!.bodies!.planet;
         distances.push(Math.hypot(p.x, p.y));
       }
     }

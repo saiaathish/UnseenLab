@@ -478,8 +478,40 @@ export function perspectiveDistance(
   return clampNum(distance, 4, 120);
 }
 
+/**
+ * Flat-scene canonical coverage (orbit-learning Wave-2 close-out, contracts
+ * C1/C2): scenes whose content is planar on the ground plane (x-z) get a
+ * REDUCED canonical view set — the near-top view (polar 0.05) is excluded.
+ * For a flat scene the top view is pedagogically useless (the disc is seen
+ * face-on only from a true top view, which the learner never needs) and it
+ * degenerates into over-coverage: its projected span equals the horizontal
+ * span the front/side views already enforce, so it can only INFLATE the
+ * frame. The front/side views and the ±band orbit combos remain in the set,
+ * so I5 canonical coverage keeps its meaning; non-flat (3D) scenes keep the
+ * full set — the camera.test.ts canonical-coverage pins use cube fixtures
+ * and are untouched (gated by isFlatScene).
+ */
+export const FLAT_SCENE_MAX_THICKNESS_RATIO = 0.5;
+
+/** True when the content is planar: its thickness along the canonical up
+ * axis (+y) is below FLAT_SCENE_MAX_THICKNESS_RATIO of its largest span in
+ * the ground plane (x/z). Empty extents are never flat. */
+export function isFlatScene(aabb: ContentExtent): boolean {
+  if (aabb.max.x < aabb.min.x) return false; // empty extent
+  const thicknessY = aabb.max.y - aabb.min.y;
+  const groundSpan = Math.max(
+    aabb.max.x - aabb.min.x,
+    aabb.max.z - aabb.min.z
+  );
+  return groundSpan > 0 && thicknessY < FLAT_SCENE_MAX_THICKNESS_RATIO * groundSpan;
+}
+
 /** The exact distance that keeps every AABB corner inside the frustum for the
- * canonical non-graph view set (front/top/left/right + the ±band worst). */
+ * canonical non-graph view set (front/top/left/right + the ±band worst).
+ * FLAT-SCENE EXCEPTION (C1/C2): when the content is planar (isFlatScene) the
+ * degenerate near-top view is excluded from the set — a flat disc needs no
+ * top view, and it is the over-coverage constraint that keeps the orbit frame
+ * dead-space-inflated. */
 export function perspectiveCanonicalDistance(
   aabb: ContentExtent,
   fovDeg: number
@@ -495,7 +527,7 @@ export function perspectiveCanonicalDistance(
       }
     }
   }
-  const dirs = perspectiveCanonicalViewDirs();
+  const dirs = perspectiveCanonicalViewDirs(isFlatScene(aabb));
   let required = 0;
   for (const { azimuth, polar } of dirs) {
     const f = viewDir(azimuth, polar);
@@ -516,16 +548,25 @@ export function perspectiveCanonicalDistance(
 
 /** Canonical view directions for non-graph (perspective) scenes — mirrors the
  * azimuth/polar formulas canonicalViews uses (default dir (1, 0.65, 1.35),
- * top polar 0.05, left/right ± π/2, worst over the ±band 9-combo). */
-function perspectiveCanonicalViewDirs(): Array<{ azimuth: number; polar: number }> {
+ * top polar 0.05, left/right ± π/2, worst over the ±band 9-combo). For FLAT
+ * scenes (`flatScene` = isFlatScene(aabb)) the near-top view (polar 0.05) is
+ * excluded — the degenerate top view of a planar scene adds no coverage the
+ * front/side/band views do not already enforce, while inflating the frame
+ * (contract C1/C2). Exported for the contract test to pin the set membership
+ * (pure decision logic — no Three.js). */
+export function perspectiveCanonicalViewDirs(
+  flatScene: boolean
+): Array<{ azimuth: number; polar: number }> {
   const azimuth = Math.atan2(1, 1.35);
   const polar = Math.acos(0.65 / Math.hypot(1, 0.65, 1.35));
   const dirs: Array<{ azimuth: number; polar: number }> = [
     { azimuth, polar },
-    { azimuth, polar: 0.05 },
-    { azimuth: azimuth - Math.PI / 2, polar },
-    { azimuth: azimuth + Math.PI / 2, polar },
   ];
+  if (!flatScene) dirs.push({ azimuth, polar: 0.05 });
+  dirs.push(
+    { azimuth: azimuth - Math.PI / 2, polar },
+    { azimuth: azimuth + Math.PI / 2, polar }
+  );
   for (const da of [-GRAPH_AZIMUTH_BAND, 0, GRAPH_AZIMUTH_BAND]) {
     for (const dp of [-GRAPH_POLAR_BAND, 0, GRAPH_POLAR_BAND]) {
       dirs.push({ azimuth: azimuth + da, polar: polar + dp });
@@ -558,6 +599,25 @@ export interface MaybeReframeInput {
   content: ContentExtent;
   /** Runtime extents: engine bodies + trails + field span. */
   dynamic?: DynamicExtent | null;
+  /**
+   * ENGINE PARAMETER CHANGE (re-aim): ignore the userControlled latch for
+   * THIS decision, so an escape/high-speed body never exits the frustum
+   * (root-cause §3 "camera latch freeze"; contract C4). Pure pointer
+   * exploration keeps the latch semantics — the latch is released only on
+   * the re-aim push and the next pointerdown re-latches.
+   */
+  releaseLatch?: boolean;
+  /**
+   * RESET-VIEW path: recompute the concept frame over static + dynamic
+   * extents and shrink with hysteresis when the current frame is more than
+   * REFRAME_HYSTERESIS larger than required (bounded — the required frame
+   * is a lower bound of the build frame, so the shrink never overshoots the
+   * default frame; the deadband prevents jitter). Perspective scenes only;
+   * graph scenes keep the grow-only contract. The caller must NOT set
+   * shrink while the trail is still growing into the frame (the shrink
+   * would be undone by the very next grow).
+   */
+  shrink?: boolean;
 }
 
 /** The grown frame: `orthoBaseHalf` is meaningful in graph mode, `distance`
@@ -574,9 +634,14 @@ export interface ReframeResult {
  * only when `required > current · REFRAME_HYSTERESIS` — monotone growth, no
  * shrink (no jitter), never under user control. Returns null when skipped or
  * when no growth is required.
+ *
+ * Wave-2 (orbit-learning): two escapes from the grow-only contract, both
+ * deliberate — `releaseLatch` ignores the userControlled latch for the single
+ * engine parameter-change push (contract C4), and `shrink` implements the
+ * bounded reset-view shrink described on MaybeReframeInput.
  */
 export function maybeReframe(input: MaybeReframeInput): ReframeResult | null {
-  if (input.orbit.userControlled) return null;
+  if (input.orbit.userControlled && !input.releaseLatch) return null;
   const aabb = input.dynamic
     ? unionExtent(input.content, extentFromDynamic(input.dynamic))
     : input.content;
@@ -599,6 +664,15 @@ export function maybeReframe(input: MaybeReframeInput): ReframeResult | null {
       distance: required,
     };
   }
+  // Reset-view bounded shrink: the current frame is more than 5% larger than
+  // the required concept frame — snap back (the deadband absorbs jitter).
+  if (input.shrink && input.orbit.distance > required * REFRAME_HYSTERESIS) {
+    return {
+      graphMode: false,
+      orthoBaseHalf: input.orthoBaseHalf,
+      distance: required,
+    };
+  }
   return null;
 }
 
@@ -612,14 +686,33 @@ export function maybeReframe(input: MaybeReframeInput): ReframeResult | null {
  * tick origins + max vector magnitude. "@surface" mappings are skipped (the
  * wave amplitude stays within the static envelope's size·0.15). Returns null
  * when there is nothing dynamic.
+ *
+ * Wave-2 (orbit-learning, root-cause §3 "phantom dynamic extent"): the extent
+ * covers the VISIBLE MESH, not just the mapping pivot. A mapped node may be a
+ * GROUP whose pivot is nowhere near the geometry (orbits: the planet-system
+ * pivot tracks the engine body; the planet mesh sits at local +6 and the moon
+ * at +7.4). For every mapped node the extent includes the node itself plus
+ * every non-group descendant at its group-relative world offset, each with its
+ * own radius + label reach — the frame decision covers exactly what renders.
+ *
+ * TRAIL BOUNDS (contract C3/C4): every trail-bearing engine mesh contributes a
+ * `trailBounds` bbox. `trailBoundsByNode` (node id -> bbox over the WRITTEN
+ * world points of the trail ring buffer) is the real producer — the renderer
+ * computes it from the runtime trail buffers and passes it through
+ * frameCamera. When it carries no bbox for a mesh, the extent falls back to
+ * the mesh's CURRENT extent: the body's position is always on its own trail,
+ * so the fallback is a valid lower bound that keeps a live trajectory part of
+ * the frame decision (nothing produces trail extents today).
  */
 export function dynamicExtentFromEngineState(
   engineMapping: EngineMapping | null,
   engineState: EngineVisualState | null,
-  graph: SceneGraph | null
+  graph: SceneGraph | null,
+  trailBoundsByNode?: Map<string, ContentExtent> | null
 ): DynamicExtent | null {
   if (!engineMapping || !engineState) return null;
   const nodeById = new Map((graph?.nodes ?? []).map((n) => [n.id, n]));
+  const world = graph ? worldPositions(graph) : new Map<string, Vec3>();
   // Placed label plans for label-bearing engine nodes (non-graph scenes are
   // the only engine-coupled ones, so the no-edgePlans call matches the
   // renderer's build-time planNodeLabels call exactly).
@@ -637,6 +730,7 @@ export function dynamicExtentFromEngineState(
     }
   }
   const engineBodies: Array<{ center: Vec3; radius: number }> = [];
+  const trailBounds: ContentExtent[] = [];
   let engineFieldBounds: ContentExtent | null = null;
   for (const [nodeId, entry] of Object.entries(engineMapping)) {
     if (entry.body === "@field") {
@@ -660,22 +754,75 @@ export function dynamicExtentFromEngineState(
     const body = engineState.bodies?.[entry.body];
     if (!body) continue;
     const node = nodeById.get(nodeId);
-    const radius = (node?.size ?? 0) * 0.5;
-    const reach = node ? labelReach.get(node.id) : undefined;
-    engineBodies.push({
-      center: {
-        x: (entry.offsetX ?? 0) + body.x * entry.scale,
-        y: node?.position.y ?? 0,
-        z: (entry.offsetY ?? 0) + body.y * entry.scale,
-      },
-      radius: reach
-        ? Math.max(radius, reach.x, reach.y, reach.z)
-        : radius,
-    });
+    const pivot: Vec3 = {
+      x: (entry.offsetX ?? 0) + body.x * entry.scale,
+      y: node?.position.y ?? 0,
+      z: (entry.offsetY ?? 0) + body.y * entry.scale,
+    };
+    // The visible meshes of this mapping: the mapped node itself (leaf bodies
+    // — and an id missing from the graph keeps the raw pivot extent so the
+    // engine body position itself is never dropped from the frame) or, for a
+    // group, every non-group descendant (groups carry no geometry of their
+    // own; the children's local offsets are added below).
+    const meshes: Array<{ id: string; size: number }> = [];
+    if (node && node.kind === "group") {
+      const stack = [...node.children];
+      while (stack.length > 0) {
+        const childId = stack.pop()!;
+        const child = nodeById.get(childId);
+        if (!child) continue;
+        if (child.kind === "group") {
+          stack.push(...child.children);
+          continue;
+        }
+        meshes.push({ id: child.id, size: child.size });
+      }
+    } else {
+      meshes.push({ id: nodeId, size: node?.size ?? 0 });
+    }
+    const nodeWorld = node
+      ? world.get(nodeId) ?? { x: node.position.x, y: node.position.y, z: node.position.z }
+      : pivot;
+    for (const mesh of meshes) {
+      const meshWorld = node
+        ? world.get(mesh.id) ?? { x: 0, y: 0, z: 0 }
+        : pivot;
+      const center: Vec3 = {
+        x: pivot.x + (meshWorld.x - nodeWorld.x),
+        y: pivot.y + (meshWorld.y - nodeWorld.y),
+        z: pivot.z + (meshWorld.z - nodeWorld.z),
+      };
+      const radius = mesh.size * 0.5;
+      const reach = nodeById.has(mesh.id) ? labelReach.get(mesh.id) : undefined;
+      engineBodies.push({
+        center,
+        radius: reach
+          ? Math.max(radius, reach.x, reach.y, reach.z)
+          : radius,
+      });
+      // Trail bounds: the runtime bbox (real producer) wins; else the current
+      // extent of a trail-bearing mesh — the body is always on its own trail.
+      const runtimeBox = trailBoundsByNode?.get(mesh.id);
+      if (runtimeBox) {
+        trailBounds.push(runtimeBox);
+      } else if ((nodeById.get(mesh.id)?.trailPoints ?? 0) > 0) {
+        trailBounds.push({
+          min: { x: center.x - radius, y: center.y - radius, z: center.z - radius },
+          max: { x: center.x + radius, y: center.y + radius, z: center.z + radius },
+        });
+      }
+    }
   }
-  if (engineBodies.length === 0 && !engineFieldBounds) return null;
+  if (
+    engineBodies.length === 0 &&
+    !engineFieldBounds &&
+    trailBounds.length === 0
+  ) {
+    return null;
+  }
   return {
     engineBodies: engineBodies.length > 0 ? engineBodies : undefined,
+    trailBounds: trailBounds.length > 0 ? trailBounds : undefined,
     engineFieldBounds,
   };
 }
@@ -845,6 +992,74 @@ export function projectOrthoToCSS(
   };
 }
 
+export interface PerspectiveProjectParams {
+  /** Orbit target (the frame center the camera looks at). */
+  center: Vec3;
+  azimuth: number;
+  polar: number;
+  distance: number;
+  /** Defaults to DEFAULT_FOV_DEG. */
+  fovDeg?: number;
+  aspect: number;
+  canvasBox: CanvasBox;
+}
+
+/**
+ * Project a world position to CSS-pixel canvas coordinates through the
+ * PERSPECTIVE orbit camera (Wave-2 seam for the DOM overlay work — W4/W5
+ * import this). Mirrors applyCamera's placement exactly: the camera sits at
+ * target + distance·viewDir(azimuth, polar) and looks at the target, so the
+ * view basis is the Three.js lookAt basis (right = cross(up, dir),
+ * up = cross(dir, right), depth along −dir) and the y-axis flips into CSS
+ * pixels like projectOrthoToCSS. Returns null when the point is behind the
+ * camera (depth <= 0) — the caller keeps its label hidden.
+ */
+export function projectPerspectiveToCSS(
+  world: Vec3,
+  params: PerspectiveProjectParams
+): { x: number; y: number } | null {
+  const { center, azimuth, polar, distance, aspect, canvasBox } = params;
+  const fovDeg = params.fovDeg ?? DEFAULT_FOV_DEG;
+  const sp = Math.sin(polar);
+  const cp = Math.cos(polar);
+  const dir = {
+    x: sp * Math.sin(azimuth),
+    y: cp,
+    z: sp * Math.cos(azimuth),
+  };
+  const pos = {
+    x: center.x + distance * dir.x,
+    y: center.y + distance * dir.y,
+    z: center.z + distance * dir.z,
+  };
+  // Three.js lookAt basis: x = cross(up, z) with z = normalize(pos − target)
+  // (the camera looks down −z toward the target); y = z × x.
+  const right = { x: dir.z, y: 0, z: -dir.x };
+  const rl = Math.hypot(right.x, right.y, right.z);
+  if (rl < 1e-12) return null;
+  right.x /= rl;
+  right.z /= rl;
+  const upv = {
+    x: dir.y * right.z - dir.z * right.y,
+    y: dir.z * right.x - dir.x * right.z,
+    z: dir.x * right.y - dir.y * right.x,
+  };
+  const dx = world.x - pos.x;
+  const dy = world.y - pos.y;
+  const dz = world.z - pos.z;
+  const depth = -(dx * dir.x + dy * dir.y + dz * dir.z);
+  if (depth <= 0) return null;
+  const xc = dx * right.x + dy * right.y + dz * right.z;
+  const yc = dx * upv.x + dy * upv.y + dz * upv.z;
+  const f = 1 / Math.tan((fovDeg * Math.PI) / 360);
+  const ndcX = (xc * f) / (depth * aspect);
+  const ndcY = (yc * f) / depth;
+  return {
+    x: canvasBox.x + (ndcX * 0.5 + 0.5) * canvasBox.width,
+    y: canvasBox.y + (1 - (ndcY * 0.5 + 0.5)) * canvasBox.height,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Three.js surface (camera objects + orbit application)
 // ---------------------------------------------------------------------------
@@ -861,14 +1076,24 @@ export interface FrameInput {
   aspect?: number;
   /** C4 reframe mode: recompute the frame over the union of static graph
    * content and engine dynamic extents instead of framing from scratch.
-   * Grow-only with REFRAME_HYSTERESIS; skipped when orbit.userControlled;
-   * never resets the orbit record or the camera. */
+   * Grow-only with REFRAME_HYSTERESIS; skipped when orbit.userControlled
+   * (unless `releaseLatch` — engine parameter change); never resets the
+   * orbit record or the camera. */
   reframe?: {
     graph: SceneGraph | null;
     engineMapping: EngineMapping | null;
     engineState: EngineVisualState | null;
     aspect: number;
     fovDeg?: number;
+    /** World-space trail bboxes keyed by node id — the renderer's runtime
+     * producer for dynamicExtentFromEngineState's trailBounds (C3/C4). */
+    trailBounds?: Map<string, ContentExtent> | null;
+    /** Engine parameter change (re-aim): ignore the userControlled latch for
+     * this reframe decision (C4 — an escape never exits the frustum). */
+    releaseLatch?: boolean;
+    /** Reset-view: bounded shrink toward the concept frame (never while the
+     * trail is still growing into the frame — the caller decides). */
+    shrink?: boolean;
   };
 }
 
@@ -900,10 +1125,14 @@ export function frameCamera(
 
   if (input.reframe) {
     const ref = input.reframe;
-    if (input.orbit.userControlled) return null;
     const dynamic =
-      ref.graph || ref.engineMapping || ref.engineState
-        ? dynamicExtentFromEngineState(ref.engineMapping, ref.engineState, ref.graph)
+      ref.graph || ref.engineMapping || ref.engineState || ref.trailBounds
+        ? dynamicExtentFromEngineState(
+            ref.engineMapping,
+            ref.engineState,
+            ref.graph,
+            ref.trailBounds
+          )
         : null;
     const result = maybeReframe({
       graphMode: input.graphMode,
@@ -916,6 +1145,8 @@ export function frameCamera(
       orthoBaseHalf: input.orthoBaseHalf,
       content: contentAABBFromGraph(ref.graph, { graphMode: input.graphMode }),
       dynamic,
+      releaseLatch: ref.releaseLatch,
+      shrink: ref.shrink,
     });
     if (!result) return null;
     return {
