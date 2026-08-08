@@ -1672,6 +1672,146 @@ describe("focusParameterKeys boundary", () => {
   });
 });
 
+describe("validateDemoSpec — model geometry rejections (design-1 §7.2)", () => {
+  /** The pendulum fixture relabeled as model output with a given object set
+   * and no prediction truth (model specs are never graded — the science
+   * policy would otherwise reject before the geometry check can speak). */
+  function modelSpecWithObjects(objects: unknown[]): string {
+    const spec = verifiedSimulationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    (raw.provenance as Record<string, unknown>).source = "model_generated_spec";
+    (raw.prediction as Record<string, unknown>).correctIndex = undefined;
+    const scene3d = raw.scene3d as { objects: unknown[]; relationships: unknown[]; animations: unknown[] };
+    scene3d.objects = objects;
+    scene3d.relationships = [];
+    scene3d.animations = [];
+    return JSON.stringify(raw);
+  }
+
+  it("rejects two colliding bodies at the exact same position (geometry:duplicate_position)", () => {
+    const result = validateDemoSpec(
+      modelSpecWithObjects([
+        { id: "a", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 1 },
+        { id: "b", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 1 },
+      ])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("geometry:duplicate_position");
+  });
+
+  it("rejects overlapping body envelopes (geometry:envelope_overlap)", () => {
+    const result = validateDemoSpec(
+      modelSpecWithObjects([
+        { id: "a", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 3 },
+        { id: "b", kind: "sphere", position: { x: 1, y: 0, z: 0 }, size: 1 },
+      ])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("geometry:envelope_overlap");
+  });
+
+  it("rejects z-collapsed bodies (same x,y, differing z)", () => {
+    const result = validateDemoSpec(
+      modelSpecWithObjects([
+        { id: "a", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 1 },
+        { id: "b", kind: "sphere", position: { x: 0, y: 0, z: 5 }, size: 1 },
+      ])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("geometry:z_collapse");
+  });
+
+  it("accepts a concentric star + glow + ring composition (decorative kinds are not rejection subjects)", () => {
+    // The orbits-showcase composition: a body with its glow and orbit ring
+    // concentric at the origin. Decorative kinds legitimately coincide with
+    // bodies by construction — rejecting them would block the flagship scene
+    // whenever a model reproduces it.
+    const result = validateDemoSpec(
+      modelSpecWithObjects([
+        { id: "star", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 2.4 },
+        { id: "star-glow", kind: "particle_field", position: { x: 0, y: 0, z: 0 }, size: 5, particleCount: 100 },
+        { id: "orbit-path", kind: "orbit_path", position: { x: 0, y: 0, z: 0 }, size: 12 },
+        { id: "planet", kind: "sphere", position: { x: 6, y: 0, z: 0 }, size: 1 },
+      ])
+    );
+    expect(["valid", "repaired"]).toContain(result.status);
+    expect(result.reasons.some((r) => r.startsWith("geometry:"))).toBe(false);
+  });
+
+  it("decorative layers do not mask a genuine body collision", () => {
+    const result = validateDemoSpec(
+      modelSpecWithObjects([
+        { id: "star", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 5 },
+        { id: "planet", kind: "sphere", position: { x: 1, y: 0, z: 0 }, size: 2 },
+      ])
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("geometry:envelope_overlap");
+  });
+
+  it("curated specs are exempt from the geometric rejections (layout repairs them)", () => {
+    const spec = verifiedSimulationSpec(); // provenance stays curated_engine
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    (raw.scene3d as { objects: unknown[] }).objects = [
+      { id: "a", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 1 },
+      { id: "b", kind: "sphere", position: { x: 0, y: 0, z: 0 }, size: 1 },
+    ];
+    const result = validateDemoSpec(JSON.stringify(raw));
+    expect(["valid", "repaired"]).toContain(result.status);
+    expect(result.reasons.some((r) => r.startsWith("geometry:"))).toBe(false);
+  });
+
+  it("W4 density class as MODEL output is rejected: 25 size-1 nodes on a 1u grid (geometry:envelope_overlap)", () => {
+    // Red-team hostile question 1: the W4 attack spec (25 process_node, size
+    // 1, at (c−2, r−2)·1 spacing, 120-char labels). Adjacent pairs sit at
+    // exactly the envelope-touching distance — inside the layout engine's
+    // own minimum clearance (ENVELOPE_CLEARANCE = 0.1) — so the class cannot
+    // be relied on to repair. The sanitizer backstop must reject it with
+    // `geometry:envelope_overlap` (a raw-penetration-only test let this class
+    // through; the threshold is the layout's clearance, E1 wave 5).
+    const objects: unknown[] = [];
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        objects.push({
+          id: `n${r}_${c}`,
+          kind: "process_node",
+          position: { x: c - 2, y: r - 2, z: 0 },
+          size: 1,
+          label: "A".repeat(120),
+        });
+      }
+    }
+    const result = validateDemoSpec(modelSpecWithObjects(objects));
+    expect(result.status).toBe("rejected");
+    expect(result.reasons).toContain("geometry:envelope_overlap");
+  });
+
+  it("the SAME W4 density class as curated output is exempt (layout repairs it)", () => {
+    // Curated provenance: the geometric rejections do not run (the layout
+    // engine is the repair path for curated specs — process_flow's pn1/ep1
+    // duplicate and the W4 grid class both stay valid and carry no
+    // geometry:* reason).
+    const spec = verifiedSimulationSpec();
+    const raw = JSON.parse(toJson(spec)) as Record<string, unknown>;
+    const objects: unknown[] = [];
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        objects.push({
+          id: `n${r}_${c}`,
+          kind: "process_node",
+          position: { x: c - 2, y: r - 2, z: 0 },
+          size: 1,
+          label: "A".repeat(120),
+        });
+      }
+    }
+    (raw.scene3d as { objects: unknown[] }).objects = objects;
+    const result = validateDemoSpec(JSON.stringify(raw));
+    expect(["valid", "repaired"]).toContain(result.status);
+    expect(result.reasons.some((r) => r.startsWith("geometry:"))).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Fix 3 boundary — lesson actions may reference only real controls
 //

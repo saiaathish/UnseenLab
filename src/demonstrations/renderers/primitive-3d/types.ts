@@ -61,6 +61,14 @@ export interface SceneGraphAnimation {
   /** orbit operator: center and radius (derived from `orbits` relationships). */
   orbitCenter?: Vec3;
   orbitRadius?: number;
+  /**
+   * translate waypoints (design-1 §3.1): surface-to-surface slide path for a
+   * packet traveling a flow chain — [srcExit, midEntry, midExit, ..., destEntry].
+   * The packet walks the polyline monotonically and HOLDS at the destination
+   * surface (never flies past it / out of frame). Absent for translate
+   * animations without a derivable chain (legacy unbounded semantics).
+   */
+  slidePath?: Vec3[];
 }
 
 /** The effective limits applied while building this graph. */
@@ -80,6 +88,53 @@ export interface SceneGraph {
   animations: SceneGraphAnimation[];
   background: "dark" | "light";
   limits: SceneGraphLimits;
+  /**
+   * Resolved layout (design-1 §2/§3.2): deterministic post-layout bounds for
+   * camera framing and the animation clamp, plus the repair record. Present
+   * on every graph (identity + bounds when no repair ran).
+   */
+  layout?: SceneLayout;
+}
+
+// ---------------------------------------------------------------------------
+// Resolved layout (design-1 §2.1 — additive; types are pure)
+// ---------------------------------------------------------------------------
+
+/** Content AABB (envelopes + label rects + margin) for framing + clamping. */
+export interface SceneBounds {
+  min: Vec3;
+  max: Vec3;
+  /** (min+max)/2. */
+  center: Vec3;
+  /** Bounding-sphere radius about center. */
+  radius: number;
+}
+
+/** One rigid layout unit: a movable node or a group root with movable
+ * descendants. Members are the envelope subjects; a group unit's members
+ * never move relative to the root (containment preserved by construction). */
+export interface LayoutUnit {
+  /** Node id to translate (a movable node or a group root). */
+  rootId: string;
+  /** Movable nodes in the subtree (envelope subjects). */
+  memberIds: string[];
+  rootIsGroup: boolean;
+}
+
+/** The deterministic post-layout record (design-1 §2.1). */
+export interface SceneLayout {
+  /** True iff any position changed (including packet snap). */
+  repaired: boolean;
+  /** Deterministic post-layout bounds (stages 5–6 + animation clamp). */
+  bounds: SceneBounds;
+  /** Nodes whose positions changed: [from, to] in graph coordinates. */
+  moved: Array<{ id: string; from: Vec3; to: Vec3 }>;
+  /** Node ids whose label text was truncated (degrade stage). */
+  labelShortened: string[];
+  /** Relationship ids whose edge-label sprite is suppressed (degrade stage). */
+  suppressedEdgeLabels: string[];
+  /** Units, for B2 (label placement / gate) transparency. */
+  units: LayoutUnit[];
 }
 
 /** Renderer-level error surface. Reasons are safe codes, never content. */

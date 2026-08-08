@@ -27,6 +27,89 @@ DemoSpecV1.scene3d
   PointsMaterial, SpriteMaterial. No textures, no shaders, no env maps, no
   imported models.
 
+## Scene pipeline (Wave 3/4 rework — deterministic, gate-enforced)
+
+```
+canonicalize spec → resolveLayout (seeded auto-repair)
+  → presentation (labels → edges → edge labels → camera)
+  → geometry gate (fail loudly / degrade by simplification)
+```
+
+Stages and owners (all under `src/demonstrations/renderers/primitive-3d/`):
+
+| Stage | Module | Responsibility |
+| --- | --- | --- |
+| Canonicalize | `scene-graph.ts` | buildSceneGraph: refs, limits, clamps, graph mode, `graph.layout` attach |
+| Layout | `layout/resolve-layout.ts` | deterministic seeded repair: repulsion, grid fallback, z-plane canonicalization, chained-packet snap, short-edge lengthening, identity layout for non-graphs |
+| Node labels | `labels.ts` | anchor-order placement, 288px truncation budget, collision-tested, `planNodeLabels` |
+| Edges | `edges.ts` | bounded routing (`routeEdgeWithReasons`), radius-aware heads, edge-label candidates, legacy flow/transforms edges |
+| Camera | `camera.ts` | envelope+label+margin framing (`graphFrameHalfHeight`), reframe hysteresis on `setEngineState`, canonical views, `projectOrthoToCSS` export |
+| Presentation aggregate | `presentation/resolve-presentation.ts` | pure `resolvePresentation`: reproduces the renderer's presentation decisions as plain data (labels → edges → edge labels → camera → GateScene) |
+| Gate runner (production) | `presentation/pipeline.ts` | `runGeometryGate(graph, opts)`: I3 shorten/re-place degrade (degrade on), short-head suppression, `checkScene`, surfaced reasons |
+| Gate (pure) | `geometry-gate.ts` | `checkScene` — invariants I1–I5 + informational checkers; the corpus expectations and the 2D surface share it |
+| Shared geometry | `geometry/envelopes.ts` | single source of extents, clearance constants, collision predicates; sanitizer + layout + gate all read it |
+| 2D surface | `src/components/demonstrations/accessible-representation.tsx` | consumes the SAME laid-out graph + runs the SAME gate runner (degrade off) |
+
+### Invariants (geometry gate — all unit-tested)
+
+- **I1** No two node envelopes intersect.
+- **I2** No edge crosses a non-endpoint node's envelope.
+- **I3** No label overlaps any node envelope, edge, or other label.
+- **I4** Every arrowhead anchors on exactly its source→target pair; inset = actual target radius + head length.
+- **I5** All rendered content stays inside the framed viewport with margin.
+
+### Fail loudly / degrade by simplification
+
+`PrimitiveSceneRenderer.setSpec` joins the gate runner's verdict into its
+`getLastReasons()` surface (placement reasons are deduped at the join — first
+occurrence wins). Degrade is real, never silent:
+
+- I3 repairable: colliding node labels are shortened (halving, bounded passes)
+  and re-placed — `gate_label_shortened`; the built scene carries the
+  shortened labels.
+- I4 repairable: edges shorter than `r_s + r_t + headLen` have their arrowheads
+  suppressed — `edge_head_suppressed_short_edge` (the I4 checker skips
+  suppressed heads; direction is carried by shaft + label).
+- Unrepairable residuals emit one `gate_I{n}_violations` per breached
+  invariant plus `gate_unverified`; the scene still renders with a documented
+  residual — never a silent pass.
+- The 2D surface surfaces the same verdict as `data-gate-i1..i5` /
+  `data-gate-unverified` / `data-gate-reasons` on the diagram figure (degrade
+  off — its own seeded spread handles 2D projection residuals).
+
+### Layout semantics
+
+- Determinism: layout is a pure function of (graph, seed) with a seeded PRNG
+  (`mulberry32` / `hashString`); seed = `hashString(spec.id|spec.generationId)`.
+- `layout_repaired` marks any successful repair; `layout_collision_remaining` +
+  `layout_iterations_capped` surface residuals the budget could not clear
+  (surfaced loudly, never silent).
+- The 2D diagram consumes the already-laid-out graph (`graph.layout` present)
+  instead of re-running `resolveLayout` — 2D and 3D agree on residual scenes
+  (ATK-14; no second-pass drift).
+
+### Canonical views + CSS projection
+
+`camera.ts` exports `canonicalViews` (front / left / right / top-down frames
+for corpus and screenshots) and `projectOrthoToCSS(world, {center, halfH,
+aspect, canvasBox})` — the graph-mode ortho projection (view basis
+zAxis = normalize(0, 0.55, 1)) that is math-identical to the frozen
+`projectNode` helper in `e2e/demo-lesson-rail.spec.ts`. The gate's I5 verdict
+uses the build-time aspect (4/3, `FRAME_ASPECT_DEFAULT`); live 16:9 is covered
+by reframe growth plus the browser e2e DOM bbox QA.
+
+### Reason-code catalog (placement + gate surface)
+
+Layout: `layout_repaired`, `layout_grid_fallback`, `layout_labels_shortened`,
+`layout_edge_labels_suppressed`, `layout_packet_slots_capped`,
+`layout_collision_remaining`, `layout_iterations_capped`,
+`follow_path_needs_path`, `update_vector_identity_axis_fallback`.
+Labels/edges: `label_truncated_ellipsis`, `label_anchor_fallback`,
+`edge_label_skipped_no_space`, `edge_label_suppressed_density`,
+`edge_unroutable`, `edge_head_suppressed_short_edge`.
+Gate: `gate_I1_violations` … `gate_I5_violations`, `gate_unverified`,
+`gate_label_shortened`.
+
 ## Lifecycle guarantees (tested)
 
 - One canvas, one renderer, one rAF loop; a second runner on the same canvas

@@ -89,6 +89,17 @@ const LIMITS_SECTION = [
   `- Explanation text max ${SPEC_LIMITS.maxExplanationChars} chars; learning objective max 400 chars.`,
 ].join("\n");
 
+/** Additive layout guidance (design-1 §8): the model receives zero spacing
+ * guidance today (audit-4 §3), so collisions are structurally guaranteed at
+ * scale. Text only — no schema/enum/limit changes. */
+const LAYOUT_SECTION = [
+  "LAYOUT (scene3d objects):",
+  "- Keep every object position within |x|, |y|, |z| <= 50 world units; use z = 0 for conceptual graphs.",
+  "- Never place two objects at the same position; keep connected objects' centers at least size_a/2 + size_b/2 + 1.0 world units apart.",
+  "- Prefer size 0.5..5 (valid range 0.001..100).",
+  "- Keep node and edge labels to 20 characters or fewer for full legibility (rendered up to 40).",
+].join("\n");
+
 /** Trust-level rules. The precedence is the learner's EXPLICIT intent, never
  * the topic name (the deterministic trust decision table applies the same
  * rules: src/demonstrations/generation/trust/decision-table.ts):
@@ -205,6 +216,8 @@ export function buildGenerationPrompt(
     CATALOG_SECTION,
     "",
     LIMITS_SECTION,
+    "",
+    LAYOUT_SECTION,
     "",
     ...preferenceSection(promptPreferences(prefs)),
     "",

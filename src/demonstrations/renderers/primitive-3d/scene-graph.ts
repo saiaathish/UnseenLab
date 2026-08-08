@@ -30,13 +30,26 @@ import type {
   RelationshipSpec,
   Vec3,
 } from "@/demonstrations/spec/demo-spec";
-import { validateOperatorParams } from "./operators";
+import {
+  REASON_UPDATE_VECTOR_IDENTITY,
+  resolveUpdateVectorAxis,
+  validateOperatorParams,
+} from "./operators";
+import {
+  SCENE_POSITION_BOUND,
+  SCENE_SIZE_MAX,
+  SCENE_SIZE_MIN,
+  computeSceneBounds,
+} from "./geometry/envelopes";
+import { hashString } from "./geometry/rng";
+import { resolveLayout, derivePacketSlidePath } from "./layout/resolve-layout";
 import type {
   SceneGraph,
   SceneGraphAnimation,
   SceneGraphLimits,
   SceneGraphNode,
   SceneGraphRelationship,
+  SceneLayout,
 } from "./types";
 
 export interface BuildSceneGraphOptions {
@@ -207,9 +220,11 @@ export function isSafeColor(value: string): boolean {
   return COLOR_HEX.test(trimmed) || NAMED_COLORS.has(trimmed.toLowerCase());
 }
 
-const POSITION_BOUND = 500;
-const SIZE_MIN = 0.001;
-const SIZE_MAX = 100;
+// Position/size bounds are the shared geometry constants (single source of
+// truth, design-1 §6): the sanitizer clamps to the same targets.
+const POSITION_BOUND = SCENE_POSITION_BOUND;
+const SIZE_MIN = SCENE_SIZE_MIN;
+const SIZE_MAX = SCENE_SIZE_MAX;
 
 function clampNum(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
@@ -528,7 +543,9 @@ export function buildSceneGraph(
   }
 
   // -------------------------------------------------------------------------
-  // 5. Animations: target refs, operator validation, derived enrichments
+  // 5. Animations: target refs + operator validation ONLY (no derived
+  //    enrichment yet — layout must run first so orbit/follow_path/slidePath
+  //    read FINAL positions, design-1 §2.3).
   // -------------------------------------------------------------------------
   const animations: SceneGraphAnimation[] = [];
   for (const anim of scene3d.animations ?? []) {
@@ -554,17 +571,72 @@ export function buildSceneGraph(
     }
     reasons.push(...validation.reasons);
 
-    const graphAnim: SceneGraphAnimation = {
+    let axis = validation.params.axis;
+    if (a.operator === "update_vector") {
+      // update_vector identity guard (design-1 §11.4 / audit-1 tpl-field-02):
+      // the base vector of every conceptual node is the default (0,1,0); an
+      // axis parallel to it (the default y) rotates nothing. Reroute to a
+      // perpendicular axis and say so.
+      const resolved = resolveUpdateVectorAxis(
+        { x: 0, y: 1, z: 0 },
+        axis ?? "y",
+      );
+      if (resolved.fallback) {
+        axis = resolved.axis;
+        reasons.push(REASON_UPDATE_VECTOR_IDENTITY);
+      }
+    }
+
+    animations.push({
       id: String(a.id),
       target: String(a.target),
       operator: a.operator,
       speed: validation.params.speed,
       delayMs: validation.params.delayMs,
-      axis: validation.params.axis,
+      axis,
       amplitude: validation.params.amplitude,
-    };
+    });
+  }
 
-    if (a.operator === "orbit") {
+  const graph: SceneGraph = {
+    nodes,
+    relationships,
+    animations,
+    background: spec.renderer?.background ?? "dark",
+    limits,
+  };
+
+  // -------------------------------------------------------------------------
+  // 6. Layout pass (design-1 §2.2/§2.3): deterministic seeded repair for
+  //    layout-eligible specs (primitive_3d conceptual non-simulation graph
+  //    scenes — never physics showcases). Everything else gets an identity
+  //    layout with deterministic bounds (stages 5–6 + animation clamp need
+  //    them for every scene).
+  // -------------------------------------------------------------------------
+  if (isLayoutEligible(spec, graph)) {
+    const seed = hashString(`${spec.id}|${spec.generationId}`);
+    const laidOut = resolveLayout(graph, seed);
+    // Write final positions/labels back into the shared node objects so the
+    // derived enrichment below reads final state.
+    for (const laidNode of laidOut.graph.nodes) {
+      const node = byId.get(laidNode.id);
+      if (!node) continue;
+      node.position = laidNode.position;
+      if (laidNode.label !== undefined) node.label = laidNode.label;
+    }
+    graph.layout = laidOut.layout;
+    reasons.push(...laidOut.reasons);
+  } else {
+    graph.layout = identitySceneLayout(graph);
+  }
+
+  // -------------------------------------------------------------------------
+  // 7. Derived enrichment (reads FINAL positions): orbit centers/radii,
+  //    follow_path waypoints, translate slide paths (design-1 §2.3/§3.1).
+  // -------------------------------------------------------------------------
+  const dropAnimationIds = new Set<string>();
+  for (const graphAnim of animations) {
+    if (graphAnim.operator === "orbit") {
       const rel = relationships.find(
         (r) => r.type === "orbits" && r.from === graphAnim.target
       );
@@ -578,25 +650,100 @@ export function buildSceneGraph(
       graphAnim.orbitRadius = Math.max(0.001, radius);
     }
 
-    if (a.operator === "follow_path") {
+    if (graphAnim.operator === "follow_path") {
       const path = derivePath(graphAnim.target, relationships, byId);
       if (!path) {
+        // No derivable chain: drop the animation (mirrors the pre-layout
+        // behaviour — step 5 only validated; the drop happens here).
         reasons.push("follow_path_needs_path");
+        dropAnimationIds.add(graphAnim.id);
         continue;
       }
       graphAnim.path = path;
     }
 
-    animations.push(graphAnim);
+    if (graphAnim.operator === "translate") {
+      const target = byId.get(graphAnim.target);
+      if (target && target.kind === "energy_packet" && !parentOf.has(target.id)) {
+        const slidePath = derivePacketSlidePath(graph, target.id);
+        if (slidePath) graphAnim.slidePath = slidePath;
+      }
+    }
   }
+  const keptAnimations =
+    dropAnimationIds.size > 0
+      ? animations.filter((a) => !dropAnimationIds.has(a.id))
+      : animations;
 
-  const graph: SceneGraph = {
-    nodes,
-    relationships,
-    animations,
-    background: spec.renderer?.background ?? "dark",
-    limits,
+  return { graph: { ...graph, animations: keptAnimations }, reasons: [...new Set(reasons)] };
+}
+
+/**
+ * Layout eligibility (design-1 §1.2): primitive_3d + conceptual + not a
+ * simulation + non-empty scene + graph-like. Engine-coupled showcases are
+ * excluded by construction (`engineMapping` exists only for
+ * verified_simulation specs), so physics-true showcase bodies never move.
+ */
+export function isLayoutEligible(spec: DemoSpecV1, graph: SceneGraph): boolean {
+  return (
+    spec.renderer?.kind === "primitive_3d" &&
+    spec.trust?.level === "conceptual_demonstration" &&
+    !spec.simulation &&
+    (spec.scene3d?.objects.length ?? 0) > 0 &&
+    isGraphLikeScene(graph)
+  );
+}
+
+/** Identity layout (bounds only) for non-eligible / non-graph scenes. */
+function identitySceneLayout(graph: SceneGraph): SceneLayout {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const parentOf = new Map<string, string>();
+  for (const n of graph.nodes) {
+    for (const childId of n.children) parentOf.set(childId, n.id);
+  }
+  const worldOf = (id: string): Vec3 => {
+    const chain: string[] = [];
+    let current: string | undefined = id;
+    while (current !== undefined) {
+      chain.push(current);
+      current = parentOf.get(current);
+    }
+    const out: Vec3 = { x: 0, y: 0, z: 0 };
+    for (const c of chain) {
+      const node = byId.get(c);
+      if (!node) continue;
+      out.x += node.position.x;
+      out.y += node.position.y;
+      out.z += node.position.z;
+    }
+    return out;
   };
-
-  return { graph, reasons: [...new Set(reasons)] };
+  const nodes = graph.nodes.map((n) => ({ ...n, position: worldOf(n.id) }));
+  const edges: Array<{ from: Vec3; to: Vec3 }> = [];
+  // Draws the same legacy-edge set as the renderer (flows_to/transfers_to +
+  // transforms_into — MUST-FIX 2) plus derived graph edges.
+  const EDGE_TYPES = new Set<RelationshipOperator>([
+    "flows_to",
+    "transfers_to",
+    "transforms_into",
+  ]);
+  for (const rel of graph.relationships) {
+    const from = byId.get(rel.from);
+    const to = byId.get(rel.to);
+    if (!from || !to) continue;
+    if (
+      (GRAPH_NODE_KINDS.has(from.kind) && GRAPH_NODE_KINDS.has(to.kind)) ||
+      EDGE_TYPES.has(rel.type)
+    ) {
+      edges.push({ from: worldOf(rel.from), to: worldOf(rel.to) });
+    }
+  }
+  return {
+    repaired: false,
+    bounds: computeSceneBounds(nodes, edges),
+    moved: [],
+    labelShortened: [],
+    suppressedEdgeLabels: [],
+    units: [],
+  };
 }

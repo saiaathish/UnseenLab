@@ -82,6 +82,54 @@ prediction options 4 · query 500 chars.
 Reason codes are slugged (`unknown_key:<safe-slug>`): attacker-controlled key
 names can never be echoed into logs.
 
+## Geometry validation and layout (Wave 3/4)
+
+**Sanitizer bounds alignment.** Spec positions/sizes are clamped to the shared
+geometry constants: `|position| ≤ 500` per axis and `size ∈ [0.001, 100]`
+(`SCENE_POSITION_BOUND`, `SCENE_SIZE_MIN/MAX` in
+`renderers/primitive-3d/geometry/envelopes.ts` — the same module the layout
+engine and the gate read).
+
+**`geometry:*` rejections (model-generated specs only).** `validateDemoSpec`
+rejects `provenance.source === "model_generated_spec"` specs whose `scene3d`
+bodies collide, with one code per class (subject kinds: sphere, process_node,
+energy_packet, box):
+
+- `geometry:duplicate_position` — two bodies at the same position (±1e-6, all
+  axes).
+- `geometry:envelope_overlap` — two bodies within the layout engine's minimum
+  clearance of each other (`ENVELOPE_CLEARANCE = 0.1` world units). The
+  threshold is the layout's own collision predicate, not raw penetration: a
+  tightly packed grid (e.g. size-1 nodes on a 1-unit grid) sits inside the
+  clearance the layout guarantees and cannot be relied on to repair, so it is
+  rejected up front.
+- `geometry:z_collapse` — equal x,y (±1e-6) with differing z (the 2D
+  projection would merge them).
+
+Curated specs (`curated_engine` / `template_composition`) are exempt: their
+residual geometry is repaired by the layout engine. Curated z-collapse is
+surfaced as a `z_collapse_warning` reason by the sanitizer without changing
+the status.
+
+**Layout guidance in the model prompt.** The generation prompt's LAYOUT
+section tells the model: keep positions within |x|, |y|, |z| ≤ 50 world units
+(z = 0 for conceptual graphs); never place two objects at the same position;
+keep connected centers at least `size_a/2 + size_b/2 + 1.0` apart; prefer
+size 0.5..5; keep node/edge labels ≤ 20 characters.
+
+**`layout_repaired`.** After validation, deterministic renderers repair
+layout-eligible scenes (primitive_3d, conceptual, graph-like, no simulation)
+with a seeded auto-repair pass (pure function of graph + seed). Successful
+repair is recorded as `layout_repaired`; unresolvable residuals are surfaced
+as `layout_collision_remaining` / `layout_iterations_capped` — never silent.
+
+**Gate surfacing.** The geometry gate (invariants I1–I5) runs in production at
+`setSpec`; its verdict joins the renderer's `getLastReasons()` surface
+(`gate_I{n}_violations`, `gate_unverified`, placement reasons — deduped) and
+the accessible 2D diagram surfaces the same verdict as `data-gate-i1..i5`,
+`data-gate-unverified`, `data-gate-reasons` attributes on the diagram figure.
+See `docs/3d-renderer.md` for the reason-code catalog.
+
 ## Rejected at schema level
 
 `eval(`, `new Function`, `onclick/onerror/onload/onmouseover=`, `<script`,

@@ -4,10 +4,10 @@
  *   MeshBasicMaterial, MeshStandardMaterial, LineBasicMaterial,
  *   PointsMaterial, SpriteMaterial.
  * No external textures, no shaders, no env maps. Label sprites use an
- * in-code canvas texture (never loaded from the network).
+ * in-code canvas texture (never loaded from the network); the texture
+ * builder lives in ./labels.ts (makeLabelTexture).
  *
- * Thin wrapper around Three.js — the only code here that touches `three`
- * besides renderer.ts.
+ * Thin wrapper around Three.js.
  */
 
 import * as THREE from "three";
@@ -97,35 +97,6 @@ export function materialFor(kind: PrimitiveKind, color: string): THREE.Material 
 
   cache.set(key, material);
   return material;
-}
-
-/**
- * Build an in-code label sprite texture from plain text. The canvas texture
- * is generated deterministically per call and must be disposed by the caller
- * (or via disposeScene on the renderer). Never loads external images.
- */
-export function makeLabelTexture(
-  text: string,
-  opts?: { dark?: boolean }
-): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas");
-  const width = 320;
-  const height = 72;
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (ctx) {
-    const dark = opts?.dark ?? true;
-    ctx.clearRect(0, 0, width, height);
-    ctx.font = "600 30px system-ui, -apple-system, 'Segoe UI', sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = dark ? "#f2f5ff" : "#10131c";
-    ctx.fillText(String(text).slice(0, 40), width / 2, height / 2 + 2);
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
 }
 
 /** Dispose every cached material. Safe to call repeatedly. */

@@ -16,6 +16,10 @@ import { z } from "zod";
 import { SPEC_LIMITS } from "@/demonstrations/spec/demo-spec";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 import {
+  SCENE_POSITION_BOUND,
+  SCENE_SIZE_MAX,
+} from "@/demonstrations/renderers/primitive-3d/geometry/envelopes";
+import {
   demoSpecSchema,
   findUnsafeString,
   hasPollutionKey,
@@ -79,13 +83,13 @@ const FIELD_CLAMP_MIN: Record<string, number> = {
   startMs: 0,
   durationMs: 0,
   preferredAspectRatio: 0.1,
-  x: -1_000_000_000,
-  y: -1_000_000_000,
-  z: -1_000_000_000,
+  x: -SCENE_POSITION_BOUND,
+  y: -SCENE_POSITION_BOUND,
+  z: -SCENE_POSITION_BOUND,
 };
 
 const FIELD_CLAMP_MAX: Record<string, number> = {
-  size: 1_000_000_000,
+  size: SCENE_SIZE_MAX,
   trailPoints: SPEC_LIMITS.maxTrailPoints,
   speed: 100,
   amplitude: 1_000_000,
@@ -93,9 +97,9 @@ const FIELD_CLAMP_MAX: Record<string, number> = {
   startMs: 3_600_000,
   durationMs: 3_600_000,
   preferredAspectRatio: 10,
-  x: 1_000_000_000,
-  y: 1_000_000_000,
-  z: 1_000_000_000,
+  x: SCENE_POSITION_BOUND,
+  y: SCENE_POSITION_BOUND,
+  z: SCENE_POSITION_BOUND,
 };
 
 function fieldCode(field: string): string {
@@ -540,10 +544,36 @@ export function sanitizeDemoSpec(raw: unknown): SanitizeOutcome {
     return { status: "rejected", reasons: dedupe(policy.reasons) };
   }
 
+  // z-collapse warning (design-1 §7.3): objects equal in x,y but separated
+  // only in z render as one pixel blob on the 2D surface (z is dropped). Any
+  // provenance — surfaced as a reason, never auto-fixed and never flips the
+  // status. Non-graph 3D scenes legitimately use z; the warning is the
+  // contract's honest record.
+  const reasonsOut = dedupe(repairs);
+  const objects = parsedSpec.data.scene3d?.objects ?? [];
+  const geometryObjects = objects.filter((o) => o.kind !== "group");
+  for (let i = 0; i < geometryObjects.length; i++) {
+    for (let j = i + 1; j < geometryObjects.length; j++) {
+      const a = geometryObjects[i];
+      const b = geometryObjects[j];
+      const pa = a.position ?? { x: 0, y: 0, z: 0 };
+      const pb = b.position ?? { x: 0, y: 0, z: 0 };
+      if (
+        Math.abs(pa.x - pb.x) < 1e-6 &&
+        Math.abs(pa.y - pb.y) < 1e-6 &&
+        Math.abs(pa.z - pb.z) >= 1e-6
+      ) {
+        reasonsOut.push("z_collapse_warning");
+        break;
+      }
+    }
+    if (reasonsOut.includes("z_collapse_warning")) break;
+  }
+
   return {
     status: repairs.length > 0 ? "repaired" : "valid",
     spec: parsedSpec.data,
-    reasons: dedupe(repairs),
+    reasons: reasonsOut,
   };
 }
 

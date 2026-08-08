@@ -74,7 +74,10 @@ function sceneObjects(mobile: boolean): PrimitiveObjectSpec[] {
     {
       id: "orbit-path-planet",
       kind: "orbit_path",
-      label: "Planet orbit",
+      // Design-2 (C3): re-label so the static ring reads as the ILLUSTRATIVE
+      // reference it is, never the quantitative orbit — at Launch speed 1.2
+      // the live orbit reaches 15.4 world units vs the ring's 6 (sh-orbit-01).
+      label: "Default orbit guide",
       position: { x: 0, y: 0, z: 0 },
       size: 12,
       color: "#64748b",
