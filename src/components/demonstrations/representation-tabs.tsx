@@ -26,6 +26,9 @@ interface Props {
   onRepresentationChange: (id: string) => void;
   /** Forwarded to the stage (kept mounted while a non-stage tab is active). */
   stage: StageProps;
+  /** Canonical graph interaction, mirroring the 3D renderer's event contract. */
+  onNodeSelect?: (nodeId: string | null) => void;
+  onNodeManipulate?: (nodeId: string) => void;
 }
 
 const REP_KIND_TO_MODE: Partial<Record<RepresentationSpec["kind"], RepresentationMode>> = {
@@ -78,6 +81,8 @@ export function DemonstrationRepresentationTabs({
   parameters,
   onRepresentationChange,
   stage,
+  onNodeSelect,
+  onNodeManipulate,
 }: Props) {
   const ordered = useMemo(
     () => orderedRepresentations(spec, reducedMotion, preferredRepresentations),
@@ -197,6 +202,8 @@ export function DemonstrationRepresentationTabs({
               rep={active}
               readouts={readouts}
               parameters={parameters}
+              onNodeSelect={onNodeSelect}
+              onNodeManipulate={onNodeManipulate}
             />
           </div>
         )}
@@ -214,16 +221,26 @@ function NonStageView({
   rep,
   readouts,
   parameters,
+  onNodeSelect,
+  onNodeManipulate,
 }: {
   spec: DemoSpecV1;
   rep: RepresentationSpec;
   readouts: Readout[];
   parameters: Record<string, number>;
+  onNodeSelect?: (nodeId: string | null) => void;
+  onNodeManipulate?: (nodeId: string) => void;
 }) {
   switch (rep.kind) {
     case "diagram":
     case "causal_map":
-      return <AccessibleDiagram spec={spec} />;
+      return (
+        <AccessibleDiagram
+          spec={spec}
+          onNodeSelect={onNodeSelect}
+          onNodeManipulate={onNodeManipulate}
+        />
+      );
     case "table":
       return <DataTableView spec={spec} readouts={readouts} parameters={parameters} />;
     case "timeline":
