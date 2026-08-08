@@ -555,13 +555,20 @@ test("E2E 4 orbit observe: prompts resolve only to controls present in the Contr
   const observeStep = lessonRail(page).getByRole("region", { name: "Observe" });
   await expect(observeStep).toBeVisible();
 
-  // The Controls panel is the ground truth: Launch speed exists; there is NO
-  // gravitational-constant / gravity control (the fixture's simulation
-  // parameter "g" is not exposed as a learner control).
+  // The Controls panel is the ground truth: Launch speed is the ONLY slider —
+  // the fixture's "Speed" control (type "speed_control") renders as a
+  // segmented BUTTON group (0.5× / 1× / 1.5× / 2×), never a slider, and there
+  // is NO gravitational-constant / gravity control anywhere in the panel (the
+  // fixture's simulation parameter "g" is not exposed as a learner control).
   const controls = page.getByRole("region", { name: "Controls" });
   await expect(controls).toBeVisible();
   await expect(controls.getByRole("slider", { name: "Launch speed" })).toBeVisible();
-  await expect(controls.getByRole("slider")).toHaveCount(2); // Launch speed + Speed
+  await expect(controls.getByRole("slider")).toHaveCount(1); // Launch speed only
+  const speedGroup = controls.getByRole("group", { name: "Speed" });
+  await expect(speedGroup).toBeVisible();
+  for (const speedOption of ["0.5×", "1×", "1.5×", "2×"]) {
+    await expect(speedGroup.getByRole("button", { name: speedOption })).toBeVisible();
+  }
   await expect(controls.getByText(/gravity/i)).toHaveCount(0);
 
   // Fix 3 contract: no learner-facing action may reference a control that is
