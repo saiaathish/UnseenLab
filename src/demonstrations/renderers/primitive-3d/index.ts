@@ -49,11 +49,11 @@ export type {
 } from "./operators";
 export {
   materialFor,
-  makeLabelTexture,
   disposeMaterials,
   ALLOWED_MATERIAL_CLASSES,
   MAX_EMISSIVE_INTENSITY,
 } from "./materials";
+export { makeLabelTexture } from "./labels";
 export type {
   SceneGraph,
   SceneGraphNode,

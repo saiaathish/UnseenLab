@@ -4,6 +4,13 @@
  * requestAnimationFrame loop, dt clamp, DPR cap, resize observer, visibility
  * pause, WebGL availability guard, context-loss recovery, full disposal.
  *
+ * Since C0 (3D Representation Quality Program, Wave 3) this file is
+ * orchestration only: spec/scene building, node/group construction, engine
+ * state coupling, graph interaction, time/playback, sizing and lifecycle.
+ * Visual construction lives in ./visuals.ts, labels in ./labels.ts, edges +
+ * trails in ./edges.ts, and camera framing in ./camera.ts — all moved
+ * behavior-identically.
+ *
  * Orbit controls are a minimal custom implementation (pointer drag + wheel
  * zoom + gentle idle auto-orbit) instead of three/examples OrbitControls, so
  * the module graph stays tiny and typed. Auto-orbit, dragging and zoom are
@@ -17,7 +24,7 @@ import type {
   PrimitiveKind,
   Vec3,
 } from "@/demonstrations/spec/demo-spec";
-import type { EngineFieldVector, EngineVisualState } from "@/demonstrations/renderers/lumina-2d/types";
+import type { EngineVisualState } from "@/demonstrations/renderers/lumina-2d/types";
 import { FrameStatsSampler } from "@/demonstrations/performance/frame-stats";
 import {
   buildSceneGraph,
@@ -30,11 +37,10 @@ import {
 import type { GraphEdgePlan } from "./scene-graph";
 import {
   disposeMaterials,
-  makeLabelTexture,
-  materialFor,
   MAX_EMISSIVE_INTENSITY,
 } from "./materials";
 import {
+  clampNum,
   makeNodeState,
   stepOperator,
   type NodeState,
@@ -42,14 +48,27 @@ import {
 } from "./operators";
 import type {
   EngineMapping,
-  EngineMappingEntry,
   PrimitiveSceneRendererOptions,
   RendererStatus,
   SceneGraph,
   SceneGraphAnimation,
   SceneGraphNode,
-  SceneGraphRelationship,
 } from "./types";
+import { buildLabelSprite, type LabelContext } from "./labels";
+import {
+  buildFlowEdge,
+  buildGraphEdge,
+  updateEdge,
+  type EdgeContext,
+  type RuntimeEdge,
+} from "./edges";
+import { buildVisual, updateKind, type VisualContext } from "./visuals";
+import {
+  applyCamera,
+  clampGraphOrbit,
+  frameCamera,
+  type OrbitState,
+} from "./camera";
 
 export const MAX_DT = 0.05; // seconds; avoid huge jumps on tab refocus
 export const DPR_CAP = 2;
@@ -58,16 +77,8 @@ const FPS_INTERVAL = 0.5; // seconds between onFps emissions
 const AUTO_ORBIT_RATE = 0.06; // rad/s gentle idle orbit
 const EDGE_TYPES = new Set(["flows_to", "transfers_to"]);
 
-// Canonical-graph (graph-like scene) constants -------------------------------
-// Graph scenes are rendered as an alternate projection of the same canonical
-// graph the 2D diagram resolves: edges derive from scene3d.relationships,
-// arrowheads attach to the destination, inhibits ends in a bar, and the
-// camera is near-orthographic with heavily restricted rotation so the graph
-// never degenerates into spaghetti.
-const GRAPH_VIEW_DIR = new THREE.Vector3(0, 0.55, 1).normalize(); // +z, slight tilt
-const GRAPH_AZIMUTH_BAND = 0.45; // rad of allowed azimuth swing around default
-const GRAPH_POLAR_BAND = 0.18; // rad of allowed polar tilt around default
-const Y_UP = new THREE.Vector3(0, 1, 0);
+// Canonical-graph (graph-like scene) framing constants live in ./camera.ts
+// (GRAPH_VIEW_DIR / GRAPH_AZIMUTH_BAND / GRAPH_POLAR_BAND).
 const HIGHLIGHT_TINT = new THREE.Color("#ffe9a8"); // "lights up" color
 const CASCADE_STEP_MS = 260; // per-hop delay of the downstream cascade
 const CASCADE_FADE_MS = 180; // fade-in duration of each cascade step
@@ -77,11 +88,6 @@ export function clampDt(dt: number, max: number = MAX_DT): number {
   if (!Number.isFinite(dt)) return 0;
   if (dt < 0) return 0;
   return dt > max ? max : dt;
-}
-
-function clampNum(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, value));
 }
 
 /** Which render path each primitive kind takes (coverage-checked in tests). */
@@ -117,33 +123,12 @@ export function isCanvasOwned(canvas: HTMLCanvasElement): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Deterministic helpers (seeded PRNG for particles)
-// ---------------------------------------------------------------------------
-
-function hashString(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Runtime scene record
 // ---------------------------------------------------------------------------
 
-interface OwnedMaterial {
+/** A material owned by a runtime node — animation + selection visuals may
+ * mutate it freely (never the shared materials cache). */
+export interface OwnedMaterial {
   material: THREE.Material;
   animateOpacity: boolean;
   animateColor: boolean;
@@ -151,7 +136,9 @@ interface OwnedMaterial {
   baseColor?: string;
 }
 
-interface RuntimeNode {
+/** Runtime record for a built node: its group, operator state, owned
+ * materials and per-kind state (trail/particles/wave/vectorTicks). */
+export interface RuntimeNode {
   graph: SceneGraphNode;
   group: THREE.Group;
   state: NodeState;
@@ -187,38 +174,6 @@ interface RuntimeNode {
   };
 }
 
-interface RuntimeEdge {
-  /** The derived edge (canonical graph). Legacy flow edges carry a minimal
-   * plan (no arrowhead/label) and are only drawn for non-graph scenes. */
-  plan: GraphEdgePlan;
-  from: RuntimeNode;
-  to: RuntimeNode;
-  group: THREE.Group;
-  shaft: {
-    geometry: THREE.BufferGeometry;
-    attribute: THREE.BufferAttribute;
-    line: THREE.Line;
-    material: THREE.Material;
-    baseColor: string;
-  };
-  head: { mesh: THREE.Mesh; material: THREE.Material; baseColor: string } | null;
-  label: THREE.Sprite | null;
-}
-
-interface OrbitState {
-  azimuth: number;
-  polar: number;
-  distance: number;
-  target: THREE.Vector3;
-  defaultAzimuth: number;
-  defaultPolar: number;
-  defaultDistance: number;
-  userControlled: boolean;
-}
-
-const OPACITY_ANIMATORS = new Set(["fade", "pulse", "reveal"]);
-const COLOR_ANIMATORS = new Set(["change_color"]);
-
 /**
  * Operators that change an object's POSITION. When an object's position is
  * owned by the canonical engine state (hybrid showcases), these operators are
@@ -230,67 +185,6 @@ const POSITION_OPERATORS = new Set<AnimationOperator>([
   "oscillate",
   "follow_path",
 ]);
-
-/** Sentinel mapping body keys for grid-driven objects (see EngineMapping). */
-const FIELD_BODY = "@field";
-const SURFACE_BODY = "@surface";
-
-/** Bilinear sample of a row-major values grid at continuous (gx, gy) cells. */
-function sampleBilinear(
-  gx: number,
-  gy: number,
-  width: number,
-  height: number,
-  values: number[]
-): number {
-  if (width < 2 || height < 2) return values[0] ?? 0;
-  const x = clampNum(gx, 0, width - 1);
-  const y = clampNum(gy, 0, height - 1);
-  const x0 = Math.min(Math.floor(x), width - 2);
-  const y0 = Math.min(Math.floor(y), height - 2);
-  const fx = x - x0;
-  const fy = y - y0;
-  const i0 = x0 + y0 * width;
-  return (
-    values[i0] * (1 - fx) * (1 - fy) +
-    values[i0 + 1] * fx * (1 - fy) +
-    values[i0 + width] * (1 - fx) * fy +
-    values[i0 + width + 1] * fx * fy
-  );
-}
-
-/** Bilinear sample of a row-major field-vector grid (cell index j*width+i). */
-function sampleFieldBilinear(
-  gx: number,
-  gy: number,
-  width: number,
-  height: number,
-  vectors: EngineFieldVector[]
-): EngineFieldVector {
-  const fallback: EngineFieldVector = { x: 0, y: 0, ex: 0, ey: 0, magnitude: 0 };
-  if (width < 2 || height < 2) return vectors[0] ?? fallback;
-  const x = clampNum(gx, 0, width - 1);
-  const y = clampNum(gy, 0, height - 1);
-  const x0 = Math.min(Math.floor(x), width - 2);
-  const y0 = Math.min(Math.floor(y), height - 2);
-  const fx = x - x0;
-  const fy = y - y0;
-  const i0 = x0 + y0 * width;
-  const mix = (
-    a: number,
-    b: number,
-    c: number,
-    d: number
-  ) => a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy;
-  const v00 = vectors[i0];
-  const v10 = vectors[i0 + 1];
-  const v01 = vectors[i0 + width];
-  const v11 = vectors[i0 + width + 1];
-  if (!v00 || !v10 || !v01 || !v11) return fallback;
-  const ex = mix(v00.ex, v10.ex, v01.ex, v11.ex);
-  const ey = mix(v00.ey, v10.ey, v01.ey, v11.ey);
-  return { x: 0, y: 0, ex, ey, magnitude: Math.hypot(ex, ey) };
-}
 
 export class PrimitiveSceneRenderer {
   private readonly canvas: HTMLCanvasElement;
@@ -576,21 +470,29 @@ export class PrimitiveSceneRenderer {
       for (const plan of this.edgePlans) {
         const from = this.runtime.get(plan.fromId);
         const to = this.runtime.get(plan.toId);
-        if (from && to) this.buildGraphEdge(from, to, plan);
+        if (from && to) buildGraphEdge(this.edgeCtx, from, to, plan);
       }
     } else {
       for (const rel of graph.relationships) {
         if (!EDGE_TYPES.has(rel.type)) continue;
         const from = this.runtime.get(rel.from);
         const to = this.runtime.get(rel.to);
-        if (from && to) this.buildFlowEdge(from, to, rel);
+        if (from && to) buildFlowEdge(this.edgeCtx, from, to, rel);
       }
     }
 
     // Keyboard interaction: graph nodes are reachable via the focused canvas.
     this.canvas.tabIndex = this.graphMode ? 0 : this.canvas.tabIndex;
 
-    this.frameCamera(graph);
+    const framed = frameCamera(this.camera, graph, {
+      graphMode: this.graphMode,
+      orbit: this.orbit,
+      orthoBaseHalf: this.orthoBaseHalf,
+    });
+    if (framed) {
+      this.camera = framed.camera;
+      this.orthoBaseHalf = framed.orthoBaseHalf;
+    }
   }
 
   private buildNode(node: SceneGraphNode, parent: RuntimeNode | null): RuntimeNode {
@@ -605,9 +507,9 @@ export class PrimitiveSceneRenderer {
     };
     this.runtime.set(node.id, rn);
 
-    if (node.kind !== "group") this.buildVisual(rn, node, holder);
+    if (node.kind !== "group") buildVisual(this.visualCtx, rn, node, holder);
     if (node.kind !== "label" && node.label !== undefined) {
-      this.buildLabelSprite(rn, node, holder);
+      buildLabelSprite(this.labelCtx, rn, node, holder);
     }
     if (this.graphMode && node.kind !== "group") {
       // Pointer picking: the holder and every mesh it owns hit-test as the
@@ -640,264 +542,49 @@ export class PrimitiveSceneRenderer {
     this.disposables.push(d);
   }
 
-  private buildVisual(rn: RuntimeNode, node: SceneGraphNode, holder: THREE.Group): void {
-    const color = node.color;
-    const size = node.size;
+  // Structural context views handed to the extracted modules (labels/edges/
+  // visuals). Each exposes exactly the renderer state that module's functions
+  // operate on; the getters are re-evaluated per call so the views always
+  // reflect the current scene/state.
 
-    switch (node.kind) {
-      case "sphere": {
-        const geo = new THREE.SphereGeometry(size * 0.5, 24, 16);
-        holder.add(new THREE.Mesh(geo, materialFor(node.kind, color)));
-        this.trackDisposable(geo);
-        break;
-      }
-      case "box": {
-        const geo = new THREE.BoxGeometry(size, size, size);
-        holder.add(new THREE.Mesh(geo, materialFor(node.kind, color)));
-        this.trackDisposable(geo);
-        break;
-      }
-      case "plane": {
-        const geo = new THREE.PlaneGeometry(size, size);
-        const mesh = new THREE.Mesh(geo, materialFor(node.kind, color));
-        mesh.rotation.x = -Math.PI / 2;
-        holder.add(mesh);
-        this.trackDisposable(geo);
-        break;
-      }
-      case "ring": {
-        const geo = new THREE.RingGeometry(size * 0.35, size * 0.5, 28);
-        const mesh = new THREE.Mesh(geo, materialFor(node.kind, color));
-        mesh.rotation.x = -Math.PI / 2;
-        holder.add(mesh);
-        this.trackDisposable(geo);
-        break;
-      }
-      case "arrow": {
-        const shaft = new THREE.CylinderGeometry(
-          size * 0.05,
-          size * 0.05,
-          size * 0.6,
-          8
-        );
-        const tip = new THREE.ConeGeometry(size * 0.16, size * 0.3, 12);
-        const mat = materialFor(node.kind, color);
-        const tipMesh = new THREE.Mesh(tip, mat);
-        tipMesh.position.y = size * 0.45;
-        holder.add(new THREE.Mesh(shaft, mat));
-        holder.add(tipMesh);
-        this.trackDisposable(shaft);
-        this.trackDisposable(tip);
-        break;
-      }
-      case "line":
-      case "process_edge": {
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute(
-          "position",
-          new THREE.BufferAttribute(new Float32Array([0, 0, 0, 0, 0, size]), 3)
-        );
-        holder.add(new THREE.Line(geo, materialFor("line", color)));
-        this.trackDisposable(geo);
-        break;
-      }
-      case "orbit_path": {
-        const segments = 64;
-        const pts = new Float32Array((segments + 1) * 3);
-        const radius = size * 0.5;
-        for (let i = 0; i <= segments; i++) {
-          const a = (i / segments) * Math.PI * 2;
-          pts[i * 3] = radius * Math.cos(a);
-          pts[i * 3 + 1] = 0;
-          pts[i * 3 + 2] = radius * Math.sin(a);
-        }
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.BufferAttribute(pts, 3));
-        holder.add(new THREE.Line(geo, materialFor("line", color)));
-        this.trackDisposable(geo);
-        break;
-      }
-      case "trail": {
-        const capacity = Math.max(2, node.trailPoints);
-        const buffer = new Float32Array(capacity * 3);
-        const geo = new THREE.BufferGeometry();
-        const attribute = new THREE.BufferAttribute(buffer, 3);
-        geo.setAttribute("position", attribute);
-        geo.setDrawRange(0, 0);
-        const line = new THREE.Line(geo, materialFor("line", color));
-        holder.add(line);
-        rn.trail = {
-          capacity,
-          buffer,
-          geometry: geo,
-          attribute,
-          line,
-          written: 0,
-          last: null,
-        };
-        this.trackDisposable(geo);
-        break;
-      }
-      case "graph_surface": {
-        const n = 12;
-        const pts = new Float32Array((n + 1) * 2 * 2 * 3);
-        let w = 0;
-        for (let i = 0; i <= n; i++) {
-          const t = (i / n - 0.5) * size;
-          for (const s of [-1, 1]) {
-            pts[w++] = t;
-            pts[w++] = 0;
-            pts[w++] = s * size * 0.5;
-            pts[w++] = t;
-            pts[w++] = 0;
-            pts[w++] = -s * size * 0.5;
-          }
-        }
-        for (let i = 0; i <= n; i++) {
-          const t = (i / n - 0.5) * size;
-          for (const s of [-1, 1]) {
-            pts[w++] = s * size * 0.5;
-            pts[w++] = 0;
-            pts[w++] = t;
-            pts[w++] = -s * size * 0.5;
-            pts[w++] = 0;
-            pts[w++] = t;
-          }
-        }
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.BufferAttribute(pts, 3));
-        holder.add(new THREE.LineSegments(geo, materialFor("line", color)));
-        this.trackDisposable(geo);
-        break;
-      }
-      case "wave_surface": {
-        const segments = 24;
-        const geo = new THREE.PlaneGeometry(size, size, segments, segments);
-        const attribute = geo.attributes.position as THREE.BufferAttribute;
-        const base = new Float32Array(attribute.array);
-        const mesh = new THREE.Mesh(geo, materialFor(node.kind, color));
-        mesh.rotation.x = -Math.PI / 2;
-        holder.add(mesh);
-        rn.wave = { attribute, base, size };
-        this.trackDisposable(geo);
-        break;
-      }
-      case "particle_field": {
-        const count = node.particleCount;
-        const half = size * 0.5;
-        const positions = new Float32Array(count * 3);
-        const velocities = new Float32Array(count * 3);
-        const rng = mulberry32(hashString(node.id));
-        for (let i = 0; i < count; i++) {
-          positions[i * 3] = (rng() * 2 - 1) * half;
-          positions[i * 3 + 1] = (rng() * 2 - 1) * half;
-          positions[i * 3 + 2] = (rng() * 2 - 1) * half;
-          const speed = 0.4 + rng() * 0.8;
-          const phi = rng() * Math.PI * 2;
-          const theta = rng() * Math.PI;
-          velocities[i * 3] = speed * Math.sin(theta) * Math.cos(phi);
-          velocities[i * 3 + 1] = speed * Math.cos(theta);
-          velocities[i * 3 + 2] = speed * Math.sin(theta) * Math.sin(phi);
-        }
-        const geo = new THREE.BufferGeometry();
-        const attribute = new THREE.BufferAttribute(positions, 3);
-        geo.setAttribute("position", attribute);
-        const points = new THREE.Points(geo, materialFor(node.kind, color));
-        holder.add(points);
-        rn.particles = { count, half, positions, velocities, attribute };
-        this.trackDisposable(geo);
-        break;
-      }
-      case "vector_field": {
-        const grid = 4;
-        const span = size;
-        const len = span * 0.22;
-        const ticks = grid * grid;
-        const pts = new Float32Array(ticks * 2 * 3);
-        const origins = new Float32Array(ticks * 3);
-        for (let i = 0; i < grid; i++) {
-          for (let j = 0; j < grid; j++) {
-            const k = i * grid + j;
-            const ox = (i / (grid - 1) - 0.5) * span;
-            const oz = (j / (grid - 1) - 0.5) * span;
-            origins[k * 3] = ox;
-            origins[k * 3 + 1] = 0;
-            origins[k * 3 + 2] = oz;
-            // tick from base to base + (0, len, 0)
-            pts[k * 6] = ox;
-            pts[k * 6 + 1] = 0;
-            pts[k * 6 + 2] = oz;
-            pts[k * 6 + 3] = ox;
-            pts[k * 6 + 4] = len;
-            pts[k * 6 + 5] = oz;
-          }
-        }
-        const geo = new THREE.BufferGeometry();
-        const attribute = new THREE.BufferAttribute(pts, 3);
-        geo.setAttribute("position", attribute);
-        holder.add(
-          new THREE.LineSegments(geo, materialFor("vector_field", color))
-        );
-        rn.vectorTicks = { attribute, origins, grid, span, len };
-        this.trackDisposable(geo);
-        break;
-      }
-      case "process_node": {
-        const geo = new THREE.SphereGeometry(size * 0.5, 16, 12);
-        holder.add(new THREE.Mesh(geo, materialFor(node.kind, color)));
-        this.trackDisposable(geo);
-        break;
-      }
-      case "energy_packet": {
-        const geo = new THREE.SphereGeometry(size * 0.5, 12, 8);
-        holder.add(new THREE.Mesh(geo, materialFor(node.kind, color)));
-        this.trackDisposable(geo);
-        break;
-      }
-      case "camera_marker": {
-        const geo = new THREE.OctahedronGeometry(size * 0.4);
-        holder.add(new THREE.Mesh(geo, materialFor(node.kind, color)));
-        this.trackDisposable(geo);
-        break;
-      }
-      case "label": {
-        const texture = makeLabelTexture(node.label ?? node.id, {
-          dark: this.graph?.background === "dark",
-        });
-        const material = new THREE.SpriteMaterial({
-          map: texture,
-          depthTest: false,
-          transparent: true,
-        });
-        const sprite = new THREE.Sprite(material);
-        sprite.scale.set(size * 2.2, size * 0.5, 1);
-        holder.add(sprite);
-        this.trackDisposable(texture);
-        break;
-      }
-      case "group": {
-        break;
-      }
-      default: {
-        // Compile-time exhaustiveness: adding a new PrimitiveKind without a
-        // case here stops typechecking.
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const never: never = node.kind;
-        return;
-      }
-    }
-
-    // Per-node material clones when opacity or color is animated, so shared
-    // cached materials are never mutated. Graph scenes clone every material
-    // so selection dimming/highlighting can run per node.
-    const anims = this.animationsByTarget.get(node.id) ?? [];
-    const animateOpacity = anims.some((a) => OPACITY_ANIMATORS.has(a.operator));
-    const animateColor = anims.some((a) => COLOR_ANIMATORS.has(a.operator));
-    if (animateOpacity || animateColor || this.graphMode) {
-      this.cloneMaterials(holder, rn, animateOpacity || this.graphMode, animateColor);
-    }
+  private get labelCtx(): LabelContext {
+    return {
+      graph: this.graph,
+      graphMode: this.graphMode,
+      trackDisposable: (d) => this.trackDisposable(d),
+    };
   }
 
+  private get edgeCtx(): EdgeContext {
+    return {
+      scene: this.scene,
+      graph: this.graph,
+      trackDisposable: (d) => this.trackDisposable(d),
+      edges: this.edges,
+      pickEdges: this.pickEdges,
+    };
+  }
+
+  private get visualCtx(): VisualContext {
+    return {
+      scene: this.scene,
+      graph: this.graph,
+      time: this.time,
+      graphMode: this.graphMode,
+      animationsByTarget: this.animationsByTarget,
+      engineMapping: this.engineMapping,
+      engineState: this.engineState,
+      engineFieldMaxMag: this.engineFieldMaxMag,
+      trackDisposable: (d) => this.trackDisposable(d),
+      cloneMaterials: (holder, rn, animateOpacity, animateColor) =>
+        this.cloneMaterials(holder, rn, animateOpacity, animateColor),
+    };
+  }
+
+  /** Per-node material clones when opacity or color is animated, so shared
+   * cached materials are never mutated. Graph scenes clone every material
+   * so selection dimming/highlighting can run per node. Called from
+   * visuals.buildVisual. */
   private cloneMaterials(
     holder: THREE.Object3D,
     rn: RuntimeNode,
@@ -928,234 +615,6 @@ export class PrimitiveSceneRenderer {
         mesh.material = clone;
       }
     }
-  }
-
-  private buildLabelSprite(
-    rn: RuntimeNode,
-    node: SceneGraphNode,
-    holder: THREE.Group
-  ): void {
-    const texture = makeLabelTexture(node.label ?? node.id, {
-      dark: this.graph?.background === "dark",
-    });
-    const material = new THREE.SpriteMaterial({
-      map: texture,
-      depthTest: false,
-      transparent: true,
-    });
-    const sprite = new THREE.Sprite(material);
-    sprite.position.y = node.size * 0.9 + 0.4;
-    sprite.scale.set(Math.min(node.size, 2) * 2.2, Math.min(node.size, 2) * 0.5, 1);
-    holder.add(sprite);
-    this.trackDisposable(texture);
-    if (this.graphMode) {
-      // Labels stay locked above their nodes and always face the camera
-      // (sprites). In graph scenes they participate in selection dimming.
-      rn.owned.push({
-        material,
-        animateOpacity: true,
-        animateColor: false,
-        baseColor: undefined,
-      });
-    }
-  }
-
-  /**
-   * Build a derived graph edge: shaft line from → to, arrowhead cone at the
-   * DESTINATION (or a `—|` bar for inhibits), and the relationship label
-   * mid-edge. All materials are per-edge clones so dim/highlight never touch
-   * the shared cache.
-   */
-  private buildGraphEdge(
-    from: RuntimeNode,
-    to: RuntimeNode,
-    plan: GraphEdgePlan
-  ): void {
-    const group = new THREE.Group();
-    group.name = `edge:${plan.id}`;
-
-    const geo = new THREE.BufferGeometry();
-    const attribute = new THREE.BufferAttribute(new Float32Array(6), 3);
-    attribute.setXYZ(0, from.graph.position.x, from.graph.position.y, from.graph.position.z);
-    attribute.setXYZ(1, to.graph.position.x, to.graph.position.y, to.graph.position.z);
-    geo.setAttribute("position", attribute);
-    const lineMaterial = materialFor("line", from.graph.color).clone();
-    lineMaterial.transparent = true;
-    const line = new THREE.Line(geo, lineMaterial);
-    group.add(line);
-    this.trackDisposable(geo);
-
-    const toColor = to.graph.color;
-    let head: RuntimeEdge["head"] = null;
-    if (plan.inhibits) {
-      const barGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.4, 8);
-      const material = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(toColor),
-      });
-      material.transparent = true;
-      const bar = new THREE.Mesh(barGeo, material);
-      group.add(bar);
-      head = { mesh: bar, material, baseColor: toColor };
-      this.trackDisposable(barGeo);
-    } else {
-      const tipGeo = new THREE.ConeGeometry(0.15, 0.36, 10);
-      const material = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(toColor),
-      });
-      material.transparent = true;
-      const tip = new THREE.Mesh(tipGeo, material);
-      group.add(tip);
-      head = { mesh: tip, material, baseColor: toColor };
-      this.trackDisposable(tipGeo);
-    }
-
-    let label: THREE.Sprite | null = null;
-    const labelText = plan.label;
-    if (labelText) {
-      const texture = makeLabelTexture(labelText, {
-        dark: this.graph?.background === "dark",
-      });
-      const material = new THREE.SpriteMaterial({
-        map: texture,
-        depthTest: false,
-        transparent: true,
-      });
-      const sprite = new THREE.Sprite(material);
-      sprite.scale.set(1.9, 0.42, 1);
-      group.add(sprite);
-      this.trackDisposable(texture);
-      label = sprite;
-    }
-
-    this.scene?.add(group);
-    this.edges.push({
-      plan,
-      from,
-      to,
-      group,
-      shaft: {
-        geometry: geo,
-        attribute,
-        line,
-        material: lineMaterial,
-        baseColor: from.graph.color,
-      },
-      head,
-      label,
-    });
-    this.pickEdges.set(group, plan.id);
-  }
-
-  /** Legacy plain edge (flows_to / transfers_to only, non-graph scenes). */
-  private buildFlowEdge(
-    from: RuntimeNode,
-    to: RuntimeNode,
-    rel: SceneGraphRelationship
-  ): void {
-    const group = new THREE.Group();
-    group.name = `edge:${rel.id}`;
-    const geo = new THREE.BufferGeometry();
-    const attribute = new THREE.BufferAttribute(new Float32Array(6), 3);
-    attribute.setXYZ(0, from.graph.position.x, from.graph.position.y, from.graph.position.z);
-    attribute.setXYZ(1, to.graph.position.x, to.graph.position.y, to.graph.position.z);
-    geo.setAttribute("position", attribute);
-    const line = new THREE.Line(geo, materialFor("line", from.graph.color));
-    group.add(line);
-    this.scene?.add(group);
-    this.trackDisposable(geo);
-    this.edges.push({
-      plan: {
-        id: rel.id,
-        type: rel.type,
-        label: rel.label ?? rel.type,
-        fromId: rel.from,
-        toId: rel.to,
-        from: from.graph.position,
-        to: to.graph.position,
-        inhibits: false,
-      },
-      from,
-      to,
-      group,
-      shaft: {
-        geometry: geo,
-        attribute,
-        line,
-        material: materialFor("line", from.graph.color),
-        baseColor: from.graph.color,
-      },
-      head: null,
-      label: null,
-    });
-  }
-
-  private frameCamera(graph: SceneGraph): void {
-    let camera = this.camera;
-    if (!camera) return;
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    for (const n of graph.nodes) {
-      minX = Math.min(minX, n.position.x);
-      minY = Math.min(minY, n.position.y);
-      minZ = Math.min(minZ, n.position.z);
-      maxX = Math.max(maxX, n.position.x);
-      maxY = Math.max(maxY, n.position.y);
-      maxZ = Math.max(maxZ, n.position.z);
-    }
-    const hasNodes = Number.isFinite(minX);
-    const center = new THREE.Vector3(
-      hasNodes ? (minX + maxX) / 2 : 0,
-      hasNodes ? (minY + maxY) / 2 : 0,
-      hasNodes ? (minZ + maxZ) / 2 : 0
-    );
-    const diagonal = hasNodes
-      ? Math.hypot(maxX - minX, maxY - minY, maxZ - minZ)
-      : 0;
-    const distance = clampNum(diagonal * 2.2, 4, 120);
-
-    if (this.graphMode) {
-      // Near-orthographic default for canonical graphs: the graph lives in a
-      // plane, so a flat projection keeps it readable and never turns it into
-      // spaghetti. Rotation is clamped to a narrow band around the default.
-      if (!(camera instanceof THREE.OrthographicCamera)) {
-        this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 2000);
-        camera = this.camera;
-      }
-      this.orthoBaseHalf = Math.max(diagonal * 0.72, 1.4);
-      const dir = GRAPH_VIEW_DIR;
-      const pos = center.clone().addScaledVector(dir, distance);
-      camera.position.copy(pos);
-      camera.up.set(0, 1, 0);
-      camera.lookAt(center);
-      this.orbit.target.copy(center);
-      this.orbit.distance = distance;
-      this.orbit.defaultDistance = distance;
-      this.orbit.defaultAzimuth = Math.atan2(dir.x, dir.z);
-      this.orbit.defaultPolar = Math.acos(dir.y / dir.length());
-      this.orbit.azimuth = this.orbit.defaultAzimuth;
-      this.orbit.polar = this.orbit.defaultPolar;
-      this.orbit.userControlled = false;
-      return;
-    }
-
-    if (!(camera instanceof THREE.PerspectiveCamera)) {
-      this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
-      camera = this.camera;
-    }
-    const dir = new THREE.Vector3(1, 0.65, 1.35).normalize();
-    const pos = center.clone().addScaledVector(dir, distance);
-    camera.position.copy(pos);
-    camera.up.set(0, 1, 0);
-    camera.lookAt(center);
-
-    this.orbit.target.copy(center);
-    this.orbit.distance = distance;
-    this.orbit.defaultDistance = distance;
-    this.orbit.defaultAzimuth = Math.atan2(dir.x, dir.z);
-    this.orbit.defaultPolar = Math.acos(dir.y);
-    this.orbit.azimuth = this.orbit.defaultAzimuth;
-    this.orbit.polar = this.orbit.defaultPolar;
-    this.orbit.userControlled = false;
   }
 
   // -------------------------------------------------------------------------
@@ -1278,13 +737,13 @@ export class PrimitiveSceneRenderer {
     for (const rn of this.runtime.values()) this.applyAnimations(rn, dt, time);
     this.scene.updateMatrixWorld(true);
     for (const rn of this.runtime.values()) this.applyTransforms(rn);
-    for (const rn of this.runtime.values()) this.updateKind(rn, dt);
-    for (const edge of this.edges) this.updateEdge(edge);
+    for (const rn of this.runtime.values()) updateKind(this.visualCtx, rn, dt);
+    for (const edge of this.edges) updateEdge(edge);
     if (this.graphMode) this.applySelectionVisuals();
     if (!this.options.reducedMotion && !this.orbit.userControlled && !this.graphMode) {
       this.orbit.azimuth += AUTO_ORBIT_RATE * dt;
     }
-    this.applyCamera();
+    applyCamera(this.camera, this.orbit, this.orthoBaseHalf, this.cameraAspect);
   }
 
   // -------------------------------------------------------------------------
@@ -1298,20 +757,6 @@ export class PrimitiveSceneRenderer {
     const body = this.engineState.bodies[mapping.body];
     if (!body) return null;
     return { x: body.x, y: body.y };
-  }
-
-  /** Mapping entry for a vector_field node when a field grid is present. */
-  private engineFieldEntry(rn: RuntimeNode): EngineMappingEntry | null {
-    if (!this.engineState?.field) return null;
-    const entry = this.engineMapping?.[rn.graph.id];
-    return entry && entry.body === FIELD_BODY ? entry : null;
-  }
-
-  /** Mapping entry for a wave_surface node when a surface grid is present. */
-  private engineSurfaceEntry(rn: RuntimeNode): EngineMappingEntry | null {
-    if (!this.engineState?.surface) return null;
-    const entry = this.engineMapping?.[rn.graph.id];
-    return entry && entry.body === SURFACE_BODY ? entry : null;
   }
 
   private applyAnimations(rn: RuntimeNode, dt: number, time: number): void {
@@ -1375,265 +820,6 @@ export class PrimitiveSceneRenderer {
     }
   }
 
-  private updateKind(rn: RuntimeNode, dt: number): void {
-    const s = rn.state;
-    const scene = this.scene;
-    if (!scene) return;
-
-    if (rn.particles && s.emitting && dt > 0) {
-      const p = rn.particles;
-      for (let i = 0; i < p.count; i++) {
-        p.positions[i * 3] += p.velocities[i * 3] * dt;
-        p.positions[i * 3 + 1] += p.velocities[i * 3 + 1] * dt;
-        p.positions[i * 3 + 2] += p.velocities[i * 3 + 2] * dt;
-        for (let k = 0; k < 3; k++) {
-          const v = p.positions[i * 3 + k];
-          if (v > p.half) {
-            p.positions[i * 3 + k] = p.half;
-            p.velocities[i * 3 + k] = -Math.abs(p.velocities[i * 3 + k]) * 0.9;
-          } else if (v < -p.half) {
-            p.positions[i * 3 + k] = -p.half;
-            p.velocities[i * 3 + k] = Math.abs(p.velocities[i * 3 + k]) * 0.9;
-          }
-        }
-      }
-      p.attribute.needsUpdate = true;
-    }
-
-    if (rn.wave) {
-      const w = rn.wave;
-      const surfaceEntry = this.engineSurfaceEntry(rn);
-      if (surfaceEntry) {
-        this.applyEngineSurface(w, surfaceEntry);
-      } else {
-        const wavelength = Math.max(0.001, w.size / 3);
-        const amplitude = w.size * 0.15;
-        for (let i = 0; i < w.base.length; i += 3) {
-          const x = w.base[i];
-          // Displace the local y (world z after the -90deg x rotation).
-          w.attribute.array[i + 1] =
-            amplitude * Math.sin(Math.PI * 2 * (x / wavelength + this.time * 0.5));
-        }
-        w.attribute.needsUpdate = true;
-      }
-    }
-
-    if (rn.vectorTicks) {
-      const vt = rn.vectorTicks;
-      const fieldEntry = this.engineFieldEntry(rn);
-      if (fieldEntry) {
-        this.applyEngineField(vt, fieldEntry);
-      } else {
-        const v = s.vector;
-        for (let k = 0; k < vt.origins.length / 3; k++) {
-          const ox = vt.origins[k * 3];
-          const oy = vt.origins[k * 3 + 1];
-          const oz = vt.origins[k * 3 + 2];
-          vt.attribute.array[k * 6] = ox;
-          vt.attribute.array[k * 6 + 1] = oy;
-          vt.attribute.array[k * 6 + 2] = oz;
-          vt.attribute.array[k * 6 + 3] = ox + v.x * vt.len;
-          vt.attribute.array[k * 6 + 4] = oy + v.y * vt.len;
-          vt.attribute.array[k * 6 + 5] = oz + v.z * vt.len;
-        }
-        vt.attribute.needsUpdate = true;
-      }
-    }
-
-    if (rn.trail && dt > 0) {
-      this.pushTrailPoint(rn);
-    }
-  }
-
-  /**
-   * Drive a wave_surface mesh from the engine's u field. The mesh is rotated
-   * -90° about x, so local +y maps to world -z; the engine's normalized y
-   * (row/GH - 0.5, positive toward +z) therefore samples the flipped row:
-   *   engineY = (0.5 - localY/size) - 0.5 = -localY/size
-   * Heights are written into the local y channel (same visual language as the
-   * operator-driven ripples), additively on top of the base plane so the
-   * surface keeps its in-plane spread. Bilinear-sampled from the engine grid,
-   * values clamped to ±1 before scaling.
-   */
-  private applyEngineSurface(
-    w: NonNullable<RuntimeNode["wave"]>,
-    entry: EngineMappingEntry
-  ): void {
-    const surface = this.engineState?.surface;
-    if (!surface) return;
-    const { width, height, values } = surface;
-    const dispScale = w.size * 0.15; // matches the operator ripple amplitude
-    const inv = 1 / entry.scale;
-    const ox = entry.offsetX ?? 0;
-    const oy = entry.offsetY ?? 0;
-    for (let i = 0; i < w.base.length; i += 3) {
-      const lx = w.base[i];
-      const ly = w.base[i + 1];
-      const gx = ((lx - ox) * inv + 0.5) * width;
-      const gy = (-(ly - oy) * inv + 0.5) * height;
-      const value = sampleBilinear(gx, gy, width, height, values);
-      w.attribute.array[i + 1] =
-        w.base[i + 1] + clampNum(value, -1, 1) * dispScale;
-    }
-    w.attribute.needsUpdate = true;
-  }
-
-  /**
-   * Drive a vector_field's arrows from the engine's field grid. Each arrow
-   * samples the grid at its own world position (mapped back through the
-   * curated entry scale/offsets); the direction follows (ex, 0, ey) and the
-   * length is bounded by the field maximum in the current state, so arrows
-   * near charges compress rather than explode.
-   */
-  private applyEngineField(
-    vt: NonNullable<RuntimeNode["vectorTicks"]>,
-    entry: EngineMappingEntry
-  ): void {
-    const field = this.engineState?.field;
-    if (!field) return;
-    const { width, height, vectors, span } = field;
-    const maxMag = this.engineFieldMaxMag > 0 ? this.engineFieldMaxMag : 1;
-    const inv = 1 / entry.scale;
-    const ox = entry.offsetX ?? 0;
-    const oy = entry.offsetY ?? 0;
-    const invSpan = 1 / (2 * span);
-    for (let k = 0; k < vt.origins.length / 3; k++) {
-      const oxW = vt.origins[k * 3];
-      const ozW = vt.origins[k * 3 + 2];
-      const px = (oxW - ox) * inv;
-      const py = (ozW - oy) * inv;
-      const gx = (px * invSpan + 0.5) * width;
-      const gy = (py * invSpan + 0.5) * height;
-      const sample = sampleFieldBilinear(gx, gy, width, height, vectors);
-      const mag = sample.magnitude;
-      const len =
-        mag > 1e-6
-          ? vt.len * Math.max(0.08, Math.sqrt(Math.min(1, mag / maxMag)))
-          : 0;
-      const dirX = mag > 1e-6 ? sample.ex / mag : 0;
-      const dirY = mag > 1e-6 ? sample.ey / mag : 0;
-      vt.attribute.array[k * 6] = oxW;
-      vt.attribute.array[k * 6 + 1] = 0;
-      vt.attribute.array[k * 6 + 2] = ozW;
-      // engine (ex, ey) → world (x, z): the field lives in the plane.
-      vt.attribute.array[k * 6 + 3] = oxW + dirX * len;
-      vt.attribute.array[k * 6 + 4] = 0;
-      vt.attribute.array[k * 6 + 5] = ozW + dirY * len;
-    }
-    vt.attribute.needsUpdate = true;
-  }
-
-  private pushTrailPoint(rn: RuntimeNode): void {
-    const t = rn.trail;
-    if (!t) return;
-    const world = new THREE.Vector3();
-    rn.group.getWorldPosition(world);
-    const x = world.x;
-    const y = world.y;
-    const z = world.z;
-    if (
-      t.last &&
-      Math.abs(t.last.x - x) < 1e-6 &&
-      Math.abs(t.last.y - y) < 1e-6 &&
-      Math.abs(t.last.z - z) < 1e-6
-    ) {
-      return; // stationary: do not duplicate points
-    }
-    if (t.written < t.capacity) {
-      t.buffer[t.written * 3] = x;
-      t.buffer[t.written * 3 + 1] = y;
-      t.buffer[t.written * 3 + 2] = z;
-      t.written++;
-    } else {
-      t.buffer.copyWithin(0, 3, t.capacity * 3);
-      t.buffer[(t.capacity - 1) * 3] = x;
-      t.buffer[(t.capacity - 1) * 3 + 1] = y;
-      t.buffer[(t.capacity - 1) * 3 + 2] = z;
-    }
-    t.last = { x, y, z };
-    t.geometry.setDrawRange(0, t.written);
-    t.attribute.needsUpdate = true;
-  }
-
-  private updateEdge(edge: RuntimeEdge): void {
-    const from = new THREE.Vector3();
-    const to = new THREE.Vector3();
-    edge.from.group.getWorldPosition(from);
-    edge.to.group.getWorldPosition(to);
-    edge.shaft.attribute.setXYZ(0, from.x, from.y, from.z);
-    edge.shaft.attribute.setXYZ(1, to.x, to.y, to.z);
-    edge.shaft.attribute.needsUpdate = true;
-
-    const head = edge.head;
-    if (!head) return;
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const dz = to.z - from.z;
-    const len = Math.hypot(dx, dy, dz) || 1;
-    const ux = dx / len;
-    const uy = dy / len;
-    const uz = dz / len;
-    // Head anchors at the DESTINATION node, just outside its radius.
-    const nodeRadius = Math.max(0.25, edge.to.graph.size * 0.5);
-    const inset = nodeRadius + 0.22;
-    head.mesh.position.set(
-      to.x - ux * inset,
-      to.y - uy * inset,
-      to.z - uz * inset
-    );
-    if (edge.plan.inhibits) {
-      // `—|` bar: perpendicular to the edge direction at the destination.
-      let px = -uy;
-      let py = ux;
-      let pz = 0;
-      const plen = Math.hypot(px, py, pz);
-      if (plen < 1e-6) {
-        // Edge runs along z (no in-plane perpendicular): fall back to x-z.
-        px = 0;
-        py = -uz;
-        pz = uy;
-      } else {
-        px /= plen;
-        py /= plen;
-        pz /= plen;
-      }
-      head.mesh.quaternion.setFromUnitVectors(Y_UP, new THREE.Vector3(px, py, pz));
-    } else {
-      head.mesh.quaternion.setFromUnitVectors(Y_UP, new THREE.Vector3(ux, uy, uz));
-    }
-    if (edge.label) {
-      edge.label.position.set(
-        (from.x + to.x) / 2,
-        (from.y + to.y) / 2 + 0.5,
-        (from.z + to.z) / 2
-      );
-    }
-  }
-
-  private applyCamera(): void {
-    const camera = this.camera;
-    if (!camera) return;
-    const { azimuth, polar, distance, target } = this.orbit;
-    const sp = Math.sin(polar);
-    const cp = Math.cos(polar);
-    camera.position.set(
-      target.x + distance * sp * Math.sin(azimuth),
-      target.y + distance * cp,
-      target.z + distance * sp * Math.cos(azimuth)
-    );
-    camera.lookAt(target);
-    if (camera instanceof THREE.OrthographicCamera) {
-      // Zoom = frustum scaling; distance is the zoom factor (larger = out).
-      const halfH = this.orthoBaseHalf * (distance / this.orbit.defaultDistance);
-      const halfW = halfH * this.cameraAspect;
-      camera.left = -halfW;
-      camera.right = halfW;
-      camera.top = halfH;
-      camera.bottom = -halfH;
-      camera.updateProjectionMatrix();
-    }
-  }
-
   // -------------------------------------------------------------------------
   // Pointer input (minimal custom orbit: drag rotate, wheel zoom) + graph
   // interaction (node/edge selection, hover dim, keyboard focus)
@@ -1664,7 +850,7 @@ export class PrimitiveSceneRenderer {
       this.pointerMoved += Math.abs(dx) + Math.abs(dy);
       this.orbit.azimuth -= dx * 0.005;
       this.orbit.polar = clampNum(this.orbit.polar - dy * 0.005, 0.05, Math.PI - 0.05);
-      if (this.graphMode) this.clampGraphOrbit();
+      if (this.graphMode) clampGraphOrbit(this.orbit);
       return;
     }
     // Edge hover: dim everything outside the hovered edge's causal path
@@ -1689,21 +875,6 @@ export class PrimitiveSceneRenderer {
       this.orbit.distance * (1 + e.deltaY * 0.0012),
       2,
       200
-    );
-  }
-
-  /** Graph scenes: rotation is heavily restricted so the graph never turns
-   * into spaghetti — a narrow azimuth swing and a small tilt band. */
-  private clampGraphOrbit(): void {
-    this.orbit.azimuth = clampNum(
-      this.orbit.azimuth,
-      this.orbit.defaultAzimuth - GRAPH_AZIMUTH_BAND,
-      this.orbit.defaultAzimuth + GRAPH_AZIMUTH_BAND
-    );
-    this.orbit.polar = clampNum(
-      this.orbit.polar,
-      this.orbit.defaultPolar - GRAPH_POLAR_BAND,
-      this.orbit.defaultPolar + GRAPH_POLAR_BAND
     );
   }
 
