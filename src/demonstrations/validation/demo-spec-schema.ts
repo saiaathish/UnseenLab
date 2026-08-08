@@ -299,6 +299,9 @@ const predictionSchema = z
 const observationPromptSchema = z
   .object({
     prompt: explanationString,
+    // Optional binding to a real control; the repair pass drops prompts
+    // whose controlId does not resolve to an available control.
+    controlId: idString.optional(),
   })
   .strict();
 

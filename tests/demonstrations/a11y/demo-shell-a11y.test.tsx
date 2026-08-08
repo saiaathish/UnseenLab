@@ -725,11 +725,13 @@ describe("demonstration shell accessibility", () => {
     render(<Harness spec={spec} />);
 
     // Visible note, politely announced (role=status), plus the accessible
-    // representation as the working substitute.
+    // representation as the working substitute. The fallback diagram is the
+    // interactive surface (callbacks wired), so its svg is a role="group"
+    // container (A10 role contract); a static diagram keeps role="img".
     const note = await screen.findByText(/WebGL is not available here/);
     expect(note).toBeVisible();
     expect(note).toHaveAttribute("role", "status");
-    expect(screen.getByRole("img", { name: /Relationship diagram/ })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: /Relationship diagram/ })).toBeInTheDocument();
     expect(screen.getByLabelText("Accessible representation")).toBeInTheDocument();
   });
 

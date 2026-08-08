@@ -290,6 +290,14 @@ export interface PredictionSpec {
 
 export interface ObservationPrompt {
   prompt: string;
+  /**
+   * For prompts that instruct the learner to manipulate a control: the exact
+   * id of that control in the spec's controls array. Purely observational
+   * prompts (watch/notice/describe only) omit it. Validators and the lesson
+   * rail drop prompts whose controlId does not resolve to an available
+   * control — an instruction the learner cannot perform is never shown.
+   */
+  controlId?: string;
 }
 
 export interface RepresentationSpec {

@@ -7,7 +7,8 @@
  */
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import { SPEC_LIMITS } from "@/demonstrations/spec/demo-spec";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 import { AccessibleDiagram } from "@/components/demonstrations/accessible-representation";
@@ -73,7 +74,9 @@ describe("AccessibleDiagram — canonical graph parity", () => {
     });
     const { container } = render(<AccessibleDiagram spec={spec} />);
 
-    // The diagram is announced with the object/relationship summary.
+    // The static diagram (no callbacks) is announced with the object/
+    // relationship summary and keeps role="img" (the A10 role contract: only
+    // the INTERACTIVE diagram is role="group"; see the interactive suite).
     expect(
       screen.getByRole("img", { name: /Relationship diagram\. 2 objects and 1 relationship/ })
     ).toBeInTheDocument();
@@ -135,5 +138,118 @@ describe("AccessibleDiagram — canonical graph parity", () => {
     expect(container.querySelectorAll("rect")).toHaveLength(0);
     expect(container.querySelectorAll("polygon")).toHaveLength(0);
     expect(container.textContent).not.toContain("Decorative");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Interactive gate (A1/Diagram parity): when the caller provides the canonical
+// callbacks and the scene is a graph with no engine coupling, the diagram
+// nodes become real buttons firing the SAME onNodeSelect/onNodeManipulate
+// surface as the 3D stage — so the lesson interact step completes through the
+// 2D diagram, not only through the canvas.
+// ---------------------------------------------------------------------------
+
+describe("AccessibleDiagram — interactive graph surface (2D/3D parity)", () => {
+  function interactiveSpec(): DemoSpecV1 {
+    return makeSpec({
+      objects: [
+        { id: "a", kind: "process_node", label: "Cause A", position: { x: -3, y: 1, z: 0 } },
+        { id: "b", kind: "process_node", label: "Effect B", position: { x: 0, y: 1, z: 0 } },
+      ],
+      relationships: [{ id: "r1", type: "causes", from: "a", to: "b" }],
+      animations: [],
+    });
+  }
+
+  it("opens the interactive gate when callbacks are provided: nodes become role=button with aria-pressed", () => {
+    render(
+      <AccessibleDiagram
+        spec={interactiveSpec()}
+        onNodeSelect={vi.fn()}
+        onNodeManipulate={vi.fn()}
+      />
+    );
+    const causeA = screen.getByRole("button", { name: "Cause A" });
+    const effectB = screen.getByRole("button", { name: "Effect B" });
+    expect(causeA).toHaveAttribute("aria-pressed", "false");
+    expect(effectB).toHaveAttribute("aria-pressed", "false");
+    expect(causeA).toHaveAttribute("tabindex", "0");
+  });
+
+  it("fires onNodeManipulate on EVERY activation — click, re-click, Enter, Space — and onNodeSelect only on change", async () => {
+    const user = userEvent.setup();
+    const onNodeSelect = vi.fn();
+    const onNodeManipulate = vi.fn();
+    render(
+      <AccessibleDiagram
+        spec={interactiveSpec()}
+        onNodeSelect={onNodeSelect}
+        onNodeManipulate={onNodeManipulate}
+      />
+    );
+    const causeA = screen.getByRole("button", { name: "Cause A" });
+
+    // Pointer click on node "b" semantics are covered by the click on "a":
+    // the click resolves to the canonical node id the lesson references.
+    await user.click(causeA);
+    expect(onNodeSelect).toHaveBeenLastCalledWith("a");
+    expect(onNodeManipulate).toHaveBeenLastCalledWith("a");
+
+    // Re-activating the selected node still counts as a manipulation (no
+    // duplicate select — every activation manipulates, mirroring the stage).
+    await user.click(causeA);
+    expect(onNodeSelect).toHaveBeenCalledTimes(1);
+    expect(onNodeManipulate).toHaveBeenCalledTimes(2);
+
+    // Keyboard: Enter and Space both activate the focused node.
+    causeA.focus();
+    await user.keyboard("{Enter}");
+    expect(onNodeManipulate).toHaveBeenCalledTimes(3);
+    expect(onNodeManipulate).toHaveBeenLastCalledWith("a");
+    await user.keyboard(" ");
+    expect(onNodeManipulate).toHaveBeenCalledTimes(4);
+  });
+
+  it("Escape clears the selection (onNodeSelect(null)) and returns aria-pressed to false", async () => {
+    const user = userEvent.setup();
+    const onNodeSelect = vi.fn();
+    const onNodeManipulate = vi.fn();
+    render(
+      <AccessibleDiagram
+        spec={interactiveSpec()}
+        onNodeSelect={onNodeSelect}
+        onNodeManipulate={onNodeManipulate}
+      />
+    );
+    const causeA = screen.getByRole("button", { name: "Cause A" });
+    await user.click(causeA);
+    expect(causeA).toHaveAttribute("aria-pressed", "true");
+
+    causeA.focus();
+    await user.keyboard("{Escape}");
+    expect(onNodeSelect).toHaveBeenLastCalledWith(null);
+    expect(causeA).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("A10 role contract: the interactive diagram is role='group', the static diagram keeps role='img'", () => {
+    // Interactive (callbacks provided): the svg is a group of interactive
+    // nodes, announced as a group, never a bare image.
+    render(
+      <AccessibleDiagram
+        spec={interactiveSpec()}
+        onNodeSelect={vi.fn()}
+        onNodeManipulate={vi.fn()}
+      />
+    );
+    expect(
+      screen.getByRole("group", { name: /Relationship diagram/ })
+    ).toBeInTheDocument();
+
+    // Static (no callbacks): unchanged — still an image.
+    const { unmount } = render(<AccessibleDiagram spec={interactiveSpec()} />);
+    expect(
+      screen.getByRole("img", { name: /Relationship diagram/ })
+    ).toBeInTheDocument();
+    unmount();
   });
 });

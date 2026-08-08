@@ -23,6 +23,10 @@ import type {
   SceneGraphRelationship,
 } from "@/demonstrations/renderers/primitive-3d";
 import { engineMappingForSpec } from "@/demonstrations/showcases/coupling";
+import {
+  controlReferenceContextForSpec,
+  filterUnavailableControlPrompts,
+} from "@/demonstrations/validation/control-references";
 import { cn } from "@/lib/utils";
 
 import type { AdaptationSuggestion } from "./adaptation-panel";
@@ -184,6 +188,29 @@ function describeChain(
 }
 
 /**
+ * Render-side defense for the lesson-action contract: observation prompts
+ * that instruct the learner to manipulate a control are run through the same
+ * filter the validation boundary uses, so the rail only ever offers actions
+ * the learner can actually perform. When every prompt is dropped (nothing
+ * actionable remains), a single valid observation option derived from what
+ * the learner CAN do keeps the observe step completable.
+ */
+function filteredObserveOptions(
+  spec: DemoSpecV1,
+  fallback: string
+): ObserveOption[] {
+  const filtered = filterUnavailableControlPrompts(
+    spec.observationPrompts,
+    spec.controls,
+    controlReferenceContextForSpec(spec)
+  );
+  if (filtered.length > 0) {
+    return filtered.map((p) => ({ id: p.prompt, label: p.prompt }));
+  }
+  return [{ id: fallback, label: fallback }];
+}
+
+/**
  * Resolve the lesson plan against the spec's canonical graph and controls.
  * Graph-like scenes (conceptual templates) drive a node interaction; engine
  * specs drive a real control; timeline-only specs get a watch-and-confirm
@@ -276,10 +303,10 @@ export function deriveLessonPlan(spec: DemoSpecV1): LessonPlan {
       controlId: control.id,
       controlLabel: control.label,
       observeQuestion: "What did you observe?",
-      observeOptions: spec.observationPrompts.map((p) => ({
-        id: p.prompt,
-        label: p.prompt,
-      })),
+      observeOptions: filteredObserveOptions(
+        spec,
+        `Watch how the readout changes when you use the ${control.label} control.`
+      ),
       explainQuestion: spec.simulation
         ? "Why did the result change? Compare the readouts before and after your change."
         : "Explain the behavior you observed in your own words.",
@@ -291,10 +318,10 @@ export function deriveLessonPlan(spec: DemoSpecV1): LessonPlan {
     mode: "timeline",
     interactInstruction: "Watch the animation play through.",
     observeQuestion: "What did you observe?",
-    observeOptions: spec.observationPrompts.map((p) => ({
-      id: p.prompt,
-      label: p.prompt,
-    })),
+    observeOptions: filteredObserveOptions(
+      spec,
+      "Describe what you saw happen, in order."
+    ),
     explainQuestion:
       "Why do the stages happen in this order? Explain in your own words.",
     explainOptions: null,

@@ -1,0 +1,366 @@
+/**
+ * control-references.ts — the lesson-action contract for observation prompts.
+ *
+ * Every observation prompt that asks the learner to manipulate something must
+ * resolve to a control the spec actually exposes. Two mechanisms:
+ *
+ *  1. Explicit binding: a prompt may carry `controlId` naming a control in the
+ *     spec's controls array. Prompts whose controlId is not an available
+ *     control are DROPPED (never silently remapped to something else).
+ *
+ *  2. Defensive legacy-text check: prompts WITHOUT controlId (free text from
+ *     the model or a legacy author) are scanned for manipulation intent —
+ *     an imperative verb (try/increase/decrease/lower/raise/change/move/turn/
+ *     adjust/set) followed by a "the ..." noun phrase. When the noun phrase
+ *     matches a KNOWN control vocabulary label/key (the curated engine
+ *     control catalog — a valid "known control" vocabulary even when the
+ *     materializer dropped the control at budget) that is NOT available in
+ *     this spec, the prompt is dropped. A curated ALIAS layer extends that
+ *     vocabulary with the exact free-text phrasings a model uses for a
+ *     catalog control (e.g. "the gravitational constant" names the gravity
+ *     catalog entries), resolved back to the underlying catalog control for
+ *     the availability decision. The check is deliberately narrow and
+ *     exact: purely observational prompts (watch/notice/describe/follow,
+ *     no control noun) are always kept, and a prompt whose noun phrase
+ *     resolves to an available control is never dropped.
+ *
+ * The filter is pure and shared by the validation boundary (sanitize.ts,
+ * both server and client) and the render-side defense (deriveLessonPlan).
+ */
+
+import type {
+  ControlSpec,
+  DemoSpecV1,
+  ObservationPrompt,
+  VerifiedEngineId,
+} from "@/demonstrations/spec/demo-spec";
+import { ENGINE_CONTROL_CATALOG } from "@/demonstrations/generation/controls/catalog";
+
+export interface ControlReferenceContext {
+  /**
+   * Known control vocabulary (catalog labels + keys for the spec's engine),
+   * used only by the legacy-text check on prompts without controlId.
+   */
+  knownControlVocabulary?: string[];
+  /**
+   * Engine parameter labels by parameter key (spec.simulation.parameters),
+   * folded into the resolvable set for parameter-targeted controls.
+   */
+  parameterLabels?: Record<string, string>;
+}
+
+/** Imperative verbs that signal an instruction to manipulate a control. */
+const MANIPULATION_VERBS = [
+  "try",
+  "increase",
+  "decrease",
+  "reduce",
+  "lower",
+  "raise",
+  "boost",
+  "crank up",
+  "crank",
+  "turn up",
+  "turn down",
+  "turn",
+  "cut",
+  "change",
+  "move",
+  "adjust",
+  "set",
+];
+
+/** Words that end a captured noun phrase ("Increase the speed and watch…"). */
+const PHRASE_STOP_WORDS = new Set([
+  "and",
+  "or",
+  "as",
+  "when",
+  "while",
+  "then",
+  "if",
+  "to",
+  "with",
+  "until",
+  "but",
+  "so",
+]);
+
+/** Trailing adverbial/prepositional words trimmed from the END of a captured
+ * noun phrase ("gravity down", "speed up a bit", "pull by 10") so the phrase
+ * reduces to the control noun itself before matching. Curated and small;
+ * matching stays exact. Bare trailing numbers ("by 10", "to 0" — the "to"
+ * itself is already a phrase stop) are trimmed too. */
+const TRAILING_TRIM_WORDS = new Set([
+  "a",
+  "bit",
+  "lot",
+  "up",
+  "down",
+  "on",
+  "off",
+  "back",
+  "around",
+  "slightly",
+  "little",
+  "much",
+  "just",
+  "only",
+  "again",
+  "further",
+  "by",
+  "slowly",
+  "gradually",
+  "quickly",
+  "zero",
+]);
+
+/** Normalize a label/key/id for matching: lowercase, letters+digits only,
+ * single spaces. */
+function normalizeTerm(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Bidirectional containment: term matches the phrase when one normalized
+ * string contains the other. "launch speed" matches "the launch speed
+ * slider"; "separation" matches the available label "Source separation".
+ * Terms shorter than 2 characters are ignored so single-letter keys ("g")
+ * never produce noise matches.
+ */
+function termMatchesPhrase(term: string, phrase: string): boolean {
+  if (term.length < 2 || phrase.length < 2) return false;
+  return term === phrase || phrase.includes(term) || term.includes(phrase);
+}
+
+/**
+ * Trim trailing adverbial/prepositional words and bare trailing numbers from
+ * a captured noun-phrase word list ("gravity down" -> "gravity"), in place.
+ */
+function trimTrailingAdverbials(words: string[]): string[] {
+  while (words.length > 0) {
+    const last = words[words.length - 1].toLowerCase();
+    if (TRAILING_TRIM_WORDS.has(last) || /^[0-9]+$/.test(last)) {
+      words.pop();
+    } else {
+      break;
+    }
+  }
+  return words;
+}
+
+/**
+ * Noun phrases following manipulation verbs, e.g. "Increase the Launch speed
+ * and watch…" -> ["launch speed"]. Sentence punctuation ends the window; the
+ * phrase is capped at 5 words, stops at conjunction/relative words so
+ * trailing clauses ("…and observe the orbit shape") never pollute it, and
+ * trailing adverbial words ("down", "up a bit") are trimmed so the phrase
+ * reduces to the control noun itself.
+ */
+export function extractManipulationNounPhrases(prompt: string): string[] {
+  const phrases: string[] = [];
+  for (const verb of MANIPULATION_VERBS) {
+    const verbRe = new RegExp(`\\b${verb}\\b`, "gi");
+    let match: RegExpExecArray | null;
+    while ((match = verbRe.exec(prompt)) !== null) {
+      const rest = prompt.slice(match.index + match[0].length);
+      const sentenceEnd = rest.search(/[.,;:!?—\n]/);
+      const window = (sentenceEnd === -1 ? rest : rest.slice(0, sentenceEnd)).slice(
+        0,
+        80
+      );
+      const article =
+        /(?:^|\s)(?:the|a|an)\s+([a-z0-9]+(?:\s+[a-z0-9]+){0,4})/i.exec(window);
+      if (article) {
+        const words = article[1].split(/\s+/);
+        const phrase: string[] = [];
+        for (const word of words) {
+          if (PHRASE_STOP_WORDS.has(word.toLowerCase())) break;
+          phrase.push(word);
+        }
+        trimTrailingAdverbials(phrase);
+        if (phrase.length > 0) phrases.push(normalizeTerm(phrase.join(" ")));
+      } else {
+        const words = trimTrailingAdverbials(
+          (window.match(/[a-z0-9-]+/gi) ?? []).slice(0, 3)
+        );
+        if (words.length > 0) {
+          phrases.push(normalizeTerm(words.join(" ")));
+        }
+      }
+      // Resume scanning after this verb occurrence (no infinite loop when
+      // the regex can match a zero-width position).
+      verbRe.lastIndex = match.index + Math.max(1, match[0].length);
+    }
+  }
+  return phrases;
+}
+
+/** The full set of terms this spec's controls resolve to: control id, control
+ * label, the target ref, and the engine parameter label of a parameter ref. */
+export function availableControlTerms(
+  controls: ControlSpec[],
+  parameterLabels?: Record<string, string>
+): string[] {
+  const terms = new Set<string>();
+  for (const control of controls) {
+    terms.add(normalizeTerm(control.id));
+    terms.add(normalizeTerm(control.label));
+    if (control.target.kind === "parameter") {
+      terms.add(normalizeTerm(control.target.ref));
+      const parameterLabel = parameterLabels?.[control.target.ref];
+      if (parameterLabel) terms.add(normalizeTerm(parameterLabel));
+    } else {
+      terms.add(normalizeTerm(control.target.ref));
+    }
+  }
+  return [...terms].filter((term) => term.length >= 2);
+}
+
+/**
+ * The curated engine control catalog is a valid "known control vocabulary":
+ * labels and keys are the exact vocabulary the author (model or curated code)
+ * would reference, even when the materializer dropped the control at budget.
+ */
+export function knownControlVocabularyForEngine(
+  engineId: VerifiedEngineId | undefined
+): string[] {
+  if (engineId === undefined) return [];
+  const entries = ENGINE_CONTROL_CATALOG[engineId];
+  if (!entries) return [];
+  return entries
+    .flatMap((entry) => [entry.label, entry.key])
+    .filter((term) => term.length >= 2);
+}
+
+/**
+ * Curated alias layer — exact free-text phrasings a model might use for a
+ * catalog control, keyed to the catalog label/key the phrasing names (the
+ * gravity family: "Gravity strength", catalog key "g" in orbits, and
+ * "Gravity", catalog key "gravity" in projectile/gas/pendulum). Static and
+ * hand-curated: never derived from user input, never fuzzy. Matching stays
+ * exact (normalized containment, like the catalog vocabulary itself); an
+ * alias never resolves to anything outside the curated table.
+ */
+const CATALOG_CONTROL_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  // Catalog label "Gravity strength" (catalog key "g").
+  "gravity strength": [
+    "gravitational constant",
+    "gravitational pull",
+    "gravity strength",
+  ],
+  // Catalog label "Gravity" (catalog key "gravity").
+  gravity: [
+    "gravitational constant",
+    "gravitational pull",
+    "gravitational acceleration",
+    "gravity strength",
+  ],
+};
+
+/** Normalized alias -> the normalized catalog label/key terms it names.
+ * Built once from the curated table at module load. */
+const ALIAS_TERMS_BY_ALIAS: ReadonlyMap<string, readonly string[]> = (() => {
+  const map = new Map<string, string[]>();
+  for (const [catalogTerm, aliases] of Object.entries(CATALOG_CONTROL_ALIASES)) {
+    const normalizedCatalogTerm = normalizeTerm(catalogTerm);
+    if (normalizedCatalogTerm.length < 2) continue;
+    for (const alias of aliases) {
+      const normalizedAlias = normalizeTerm(alias);
+      if (normalizedAlias.length < 2) continue;
+      const existing = map.get(normalizedAlias);
+      if (existing) {
+        if (!existing.includes(normalizedCatalogTerm)) {
+          existing.push(normalizedCatalogTerm);
+        }
+      } else {
+        map.set(normalizedAlias, [normalizedCatalogTerm]);
+      }
+    }
+  }
+  return map;
+})();
+
+/** Build the filter context straight from a spec (validation + rail use). */
+export function controlReferenceContextForSpec(
+  spec: Pick<DemoSpecV1, "simulation">
+): ControlReferenceContext {
+  const parameterLabels: Record<string, string> = {};
+  for (const parameter of spec.simulation?.parameters ?? []) {
+    parameterLabels[parameter.key] = parameter.label;
+  }
+  return {
+    knownControlVocabulary: knownControlVocabularyForEngine(
+      spec.simulation?.engineId
+    ),
+    parameterLabels,
+  };
+}
+
+/**
+ * Drop observation prompts that instruct the learner to manipulate a control
+ * the spec does not expose. Never remaps; purely observational prompts are
+ * always kept.
+ */
+export function filterUnavailableControlPrompts(
+  prompts: ObservationPrompt[],
+  controls: ControlSpec[],
+  context?: ControlReferenceContext
+): ObservationPrompt[] {
+  const available = availableControlTerms(controls, context?.parameterLabels);
+  const availableIds = new Set(controls.map((c) => normalizeTerm(c.id)));
+  const vocabulary = new Set(
+    (context?.knownControlVocabulary ?? []).map(normalizeTerm)
+  );
+
+  const kept: ObservationPrompt[] = [];
+  for (const prompt of prompts) {
+    // Explicit binding is authoritative and EXACT: controlId must name a
+    // control id in the spec's controls array (never fuzzy-matched, never
+    // remapped). Purely observational prompts omit controlId.
+    if (prompt.controlId !== undefined) {
+      if (availableIds.has(normalizeTerm(prompt.controlId))) {
+        kept.push(prompt);
+      }
+      continue;
+    }
+
+    const phrases = extractManipulationNounPhrases(prompt.prompt);
+    if (phrases.length === 0) {
+      kept.push(prompt); // purely observational
+      continue;
+    }
+
+    let vocabMatch = false;
+    let availableMatch = false;
+    for (const phrase of phrases) {
+      const phraseMatch = [...vocabulary].some((term) =>
+        termMatchesPhrase(term, phrase)
+      );
+      // Curated alias layer: a phrase that names a catalog alias (e.g. "the
+      // gravitational constant") is a vocabulary hit whose availability is
+      // the availability of the catalog control(s) it aliases — dropped when
+      // none of those controls are available, kept when one is.
+      const aliasCatalogTerms = [...ALIAS_TERMS_BY_ALIAS.entries()]
+        .filter(([alias]) => termMatchesPhrase(alias, phrase))
+        .flatMap(([, terms]) => terms);
+      const resolves = available.some((term) =>
+        termMatchesPhrase(term, phrase)
+      );
+      const aliasResolves = aliasCatalogTerms.some((term) =>
+        available.includes(term)
+      );
+      if (phraseMatch || aliasCatalogTerms.length > 0) vocabMatch = true;
+      if (resolves || aliasResolves) availableMatch = true;
+    }
+    // Drop only when manipulation intent names a known control that is NOT
+    // available; a prompt that resolves to an available control is kept.
+    if (vocabMatch && !availableMatch) continue;
+    kept.push(prompt);
+  }
+  return kept;
+}

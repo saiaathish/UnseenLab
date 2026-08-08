@@ -1495,6 +1495,219 @@ describe("graph interaction surface", () => {
     renderer.dispose();
   });
 
+  it("pointer: a single click fires onNodeManipulate exactly once (activation is singular)", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const onNodeManipulate = vi.fn();
+    const renderer = new PrimitiveSceneRenderer(canvas, {
+      onNodeManipulate,
+    });
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+
+    threeStub.raycastHits.push({
+      object: { name: "b", parent: null } as never,
+      distance: 1,
+      point: {},
+    });
+    clickCanvas(canvas);
+    expect(onNodeManipulate).toHaveBeenCalledTimes(1);
+    expect(onNodeManipulate).toHaveBeenCalledWith("b");
+    renderer.dispose();
+  });
+
+  it("keyboard: Space activates the focused node (same surface as Enter)", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const onNodeSelect = vi.fn();
+    const onNodeManipulate = vi.fn();
+    const renderer = new PrimitiveSceneRenderer(canvas, {
+      onNodeSelect,
+      onNodeManipulate,
+    });
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+
+    canvas.dispatchEvent(new FocusEvent("focus"));
+    pressKey(canvas, " ");
+    expect(onNodeSelect).toHaveBeenLastCalledWith("a");
+    expect(onNodeManipulate).toHaveBeenLastCalledWith("a");
+
+    pressKey(canvas, "ArrowRight");
+    pressKey(canvas, " ");
+    expect(onNodeSelect).toHaveBeenLastCalledWith("b");
+    expect(onNodeManipulate).toHaveBeenLastCalledWith("b");
+    renderer.dispose();
+  });
+
+  it("pointer: an empty-space click must not seed a phantom keyboard activation (Enter/Space stay inert)", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const onNodeSelect = vi.fn();
+    const onNodeManipulate = vi.fn();
+    const renderer = new PrimitiveSceneRenderer(canvas, {
+      onNodeSelect,
+      onNodeManipulate,
+    });
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+
+    // Browser behavior: pointerdown on the focusable canvas focuses it, which
+    // (on the defect) seeds focusNodeId with the first node. An empty-space
+    // click must not leave that phantom focus behind: the learner never asked
+    // to interact with any node.
+    canvas.dispatchEvent(
+      new PointerEvent("pointerdown", { clientX: 120, clientY: 80, bubbles: true })
+    );
+    canvas.dispatchEvent(new FocusEvent("focus"));
+    canvas.dispatchEvent(
+      new PointerEvent("pointerup", { clientX: 120, clientY: 80, bubbles: true })
+    );
+
+    pressKey(canvas, "Enter");
+    expect(onNodeSelect).not.toHaveBeenCalled();
+    expect(onNodeManipulate).not.toHaveBeenCalled();
+    pressKey(canvas, " ");
+    expect(onNodeSelect).not.toHaveBeenCalled();
+    expect(onNodeManipulate).not.toHaveBeenCalled();
+    renderer.dispose();
+  });
+
+  it("pointer: the announce hint is source-aware — suppressed after a pointer activation, present after keyboard focus", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const renderer = new PrimitiveSceneRenderer(canvas, {});
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+
+    // Keyboard focus: the hint belongs to the keyboard path.
+    canvas.dispatchEvent(new FocusEvent("focus"));
+    expect(canvas.getAttribute("aria-label")).toContain(
+      "Use arrow keys to move focus, Enter to select."
+    );
+
+    // Pointer activation: the same hint must be suppressed (the learner
+    // already knows the pointer works; the announce is selection-only).
+    threeStub.raycastHits.push({
+      object: { name: "b", parent: null } as never,
+      distance: 1,
+      point: {},
+    });
+    clickCanvas(canvas);
+    expect(canvas.getAttribute("aria-label")).toContain("Effect B");
+    expect(canvas.getAttribute("aria-label")).not.toContain(
+      "Use arrow keys to move focus, Enter to select."
+    );
+    renderer.dispose();
+  });
+
+  it("pointer: after clicking a node, Enter re-activates that same node (focusNodeId follows the click)", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const onNodeManipulate = vi.fn();
+    const renderer = new PrimitiveSceneRenderer(canvas, {
+      onNodeManipulate,
+    });
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+
+    threeStub.raycastHits.push({
+      object: { name: "b", parent: null } as never,
+      distance: 1,
+      point: {},
+    });
+    clickCanvas(canvas);
+    expect(onNodeManipulate).toHaveBeenLastCalledWith("b");
+
+    // The clicked node is where keyboard activation continues from.
+    pressKey(canvas, "Enter");
+    expect(onNodeManipulate).toHaveBeenLastCalledWith("b");
+    expect(onNodeManipulate).toHaveBeenCalledTimes(2);
+    renderer.dispose();
+  });
+
+  it("pointer: empty-space click focus does not seed a phantom keyboard focus or announce instructions", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const onNodeSelect = vi.fn();
+    const onNodeManipulate = vi.fn();
+    const renderer = new PrimitiveSceneRenderer(canvas, {
+      onNodeSelect,
+      onNodeManipulate,
+    });
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+
+    // Real-browser order for a click on empty canvas space: pointerdown,
+    // then focus (the click focuses the tabIndex=0 canvas), then pointerup.
+    canvas.dispatchEvent(
+      new PointerEvent("pointerdown", { clientX: 120, clientY: 80, bubbles: true })
+    );
+    canvas.dispatchEvent(new FocusEvent("focus"));
+    canvas.dispatchEvent(
+      new PointerEvent("pointerup", { clientX: 120, clientY: 80, bubbles: true })
+    );
+
+    // Clear-selection only: no phantom first-node focus, no keyboard
+    // instructions, no callbacks.
+    const label = canvas.getAttribute("aria-label") ?? "";
+    expect(label).not.toContain("Cause A");
+    expect(label).not.toContain("Use arrow keys to move focus, Enter to select.");
+    expect(onNodeSelect).not.toHaveBeenCalled();
+    expect(onNodeManipulate).not.toHaveBeenCalled();
+
+    // Enter must not activate anything — nothing was ever focused.
+    pressKey(canvas, "Enter");
+    expect(onNodeManipulate).not.toHaveBeenCalled();
+    renderer.dispose();
+  });
+
+  it("pointer: clicking a node announces the selection without keyboard instructions and Enter then activates the clicked node", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const onNodeSelect = vi.fn();
+    const onNodeManipulate = vi.fn();
+    const renderer = new PrimitiveSceneRenderer(canvas, {
+      onNodeSelect,
+      onNodeManipulate,
+    });
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+
+    threeStub.raycastHits.push({
+      object: { name: "b", parent: null } as never,
+      distance: 1,
+      point: {},
+    });
+    canvas.dispatchEvent(
+      new PointerEvent("pointerdown", { clientX: 120, clientY: 80, bubbles: true })
+    );
+    canvas.dispatchEvent(new FocusEvent("focus"));
+    canvas.dispatchEvent(
+      new PointerEvent("pointerup", { clientX: 120, clientY: 80, bubbles: true })
+    );
+
+    expect(onNodeSelect).toHaveBeenCalledWith("b");
+    expect(onNodeManipulate).toHaveBeenCalledWith("b");
+    const label = canvas.getAttribute("aria-label") ?? "";
+    expect(label).toContain("Effect B");
+    expect(label).toContain("Selected");
+    expect(label).not.toContain("Use arrow keys to move focus, Enter to select.");
+
+    // Enter after the click activates the node the learner clicked
+    // (pointer activation seeds the keyboard focus predictably).
+    pressKey(canvas, "Enter");
+    expect(onNodeManipulate).toHaveBeenLastCalledWith("b");
+    renderer.dispose();
+  });
+
+  it("keyboard: focus announcement keeps the arrow-key/Enter instructions suffix", () => {
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const renderer = new PrimitiveSceneRenderer(canvas);
+    renderer.setSpec(makeSpec(GRAPH_SCENE));
+
+    canvas.dispatchEvent(new FocusEvent("focus"));
+    const label = canvas.getAttribute("aria-label") ?? "";
+    expect(label).toContain("Cause A");
+    expect(label).toContain("Use arrow keys to move focus, Enter to select.");
+    renderer.dispose();
+  });
+
+
   it("pointer: clicking an edge selects it (edge-path dim) and clears node selection", () => {
     const canvas = makeCanvas();
     mockWebGL(canvas);
