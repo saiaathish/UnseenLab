@@ -307,6 +307,7 @@ const threeStub = vi.hoisted(() => {
   class OctahedronGeometry extends Geometry {}
 
   class Mesh extends Object3D {
+    isMesh = true;
     geometry: BufferGeometry;
     material: Material | Material[];
     constructor(geometry: BufferGeometry, material: Material) {
@@ -315,9 +316,18 @@ const threeStub = vi.hoisted(() => {
       this.material = material;
     }
   }
-  class Line extends Mesh {}
-  class LineSegments extends Mesh {}
-  class Points extends Mesh {}
+  class Line extends Mesh {
+    isLine = true;
+    isMesh = false;
+  }
+  class LineSegments extends Mesh {
+    isLine = true;
+    isMesh = false;
+  }
+  class Points extends Mesh {
+    isPoints = true;
+    isMesh = false;
+  }
   class Sprite extends Object3D {
     material: Material;
     constructor(material: Material) {
@@ -503,6 +513,41 @@ describe("semantic hover contract (L2-L5, L10-L11)", () => {
 
     // Root cause §5: hoverPick early-returns when !graphMode — the orbit
     // stage emits ZERO identity today.
+    expect(onHoverIdentity).toHaveBeenCalledWith("planet");
+    renderer.dispose();
+  });
+
+  it("E1 pin: a mesh under the pointer wins identity over a nearer line hit (the orbit ring must not mask the planet)", () => {
+    // E1 final-gate regression (measured in real Chromium): three.js Line
+    // raycasting uses a 1-world-unit threshold (~55px at the default frame),
+    // and the orbit guide ring's FRONT arc sits between the camera and the
+    // planet — its hits sorted nearer (21.89) than the planet's sphere
+    // (23.54), so first-hit picking resolved the RING while the learner
+    // hovered the PLANET (~96% of picks). The identity pick must prefer the
+    // nearest MESH hit and fall back to line/other hits only when no mesh
+    // resolves (the ring stays hoverable on its empty arc).
+    const onHoverIdentity = vi.fn();
+    const { canvas, renderer } = makeOrbitRenderer(onHoverIdentity);
+
+    const ring = new threeStub.THREE.Line(
+      new threeStub.THREE.BufferGeometry(),
+      new threeStub.THREE.LineBasicMaterial(),
+    );
+    ring.name = "orbit-path-planet"; // the "Default orbit guide" ring node id
+    const planet = new threeStub.THREE.Mesh(
+      new threeStub.THREE.BufferGeometry(),
+      new threeStub.THREE.MeshStandardMaterial(),
+    );
+    planet.name = "planet";
+    threeStub.raycastHits.push(
+      { object: ring as never, distance: 21.89, point: {} },
+      { object: planet as never, distance: 23.54, point: {} },
+    );
+
+    canvas.dispatchEvent(
+      new PointerEvent("pointermove", { clientX: 120, clientY: 80, bubbles: true }),
+    );
+
     expect(onHoverIdentity).toHaveBeenCalledWith("planet");
     renderer.dispose();
   });

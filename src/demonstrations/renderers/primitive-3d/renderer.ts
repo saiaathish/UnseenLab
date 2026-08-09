@@ -954,15 +954,32 @@ export class PrimitiveSceneRenderer {
     }
 
     const objects: SceneSeam["objects"] = [];
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    const bodyV = new THREE.Vector3();
     for (const p of this.readLabelProjections() ?? []) {
       const rn = this.runtime.get(p.nodeId);
       if (!rn) continue;
       const radiusPx = this.projectedRadiusPx(rn);
       if (radiusPx === null) continue;
+      // E1 (final gate, additive): the body's own projection — the label
+      // anchor (`projected`) is not a hover target (it flips
+      // above/right/left/below), so the seam also reports exactly where the
+      // mesh renders for deterministic hover probing. Absent when the body
+      // is outside the frustum (never a stale/phantom point).
+      let body: { x: number; y: number } | undefined;
+      if (w > 0 && h > 0) {
+        rn.group.getWorldPosition(bodyV);
+        bodyV.project(this.camera);
+        if (Number.isFinite(bodyV.x) && bodyV.z >= -1 && bodyV.z <= 1) {
+          body = { x: ((bodyV.x + 1) / 2) * w, y: ((1 - bodyV.y) / 2) * h };
+        }
+      }
       objects.push({
         id: p.nodeId,
         label: p.label,
         projected: { x: p.x, y: p.y },
+        body,
         projectedRadiusPx: radiusPx,
       });
     }
@@ -1779,18 +1796,37 @@ export class PrimitiveSceneRenderer {
    */
   private identityHoverPick(clientX: number, clientY: number): void {
     const ndc = this.ndcFromClient(clientX, clientY) ?? { x: 0, y: 0 };
-    let found: string | null = null;
-    for (const hit of this.raycastHits(ndc.x, ndc.y)) {
-      const nodeId = this.resolveNodePick(hit.object);
-      if (nodeId && this.isIdentityPickableNodeId(nodeId)) {
-        found = nodeId;
-        break;
-      }
-    }
+    const found = this.pickIdentityNode(this.raycastHits(ndc.x, ndc.y));
     if (found !== this.hoverIdentityId) {
       this.hoverIdentityId = found;
       this.emitIdentity();
     }
+  }
+
+  /**
+   * Resolve the identity node under the pointer with MESH-first precedence
+   * (E1, orbit-learning FIX 3/4): the orbit guide ring (orbit_path) is a
+   * full circle in the orbit plane, and three.js Line raycasting carries a
+   * 1-world-unit threshold (~55px at the default frame) — the ring's FRONT
+   * arc lies between the camera and the planet, so its hits sort nearer
+   * than the planet's sphere and the first-hit pick resolved the RING while
+   * the learner hovered the PLANET (measured: ring won ~96% of picks at the
+   * live body position). A solid body's identity must win over a decorative
+   * line/points under the same cursor: take the nearest MESH hit that
+   * resolves to a pickable node; only when no mesh resolves fall back to
+   * the nearest line/other hit (the ring stays hoverable on its empty arc).
+   * Scenes without line/points objects are byte-identical to the old
+   * first-hit behavior (the nearest mesh IS the first pickable hit).
+   */
+  private pickIdentityNode(hits: THREE.Intersection[]): string | null {
+    let fallback: string | null = null;
+    for (const hit of hits) {
+      const nodeId = this.resolveNodePick(hit.object);
+      if (!nodeId || !this.isIdentityPickableNodeId(nodeId)) continue;
+      if ((hit.object as { isMesh?: boolean }).isMesh === true) return nodeId;
+      if (fallback === null) fallback = nodeId;
+    }
+    return fallback;
   }
 
   /**
@@ -1801,14 +1837,7 @@ export class PrimitiveSceneRenderer {
    */
   private identityPickAt(clientX: number, clientY: number): void {
     const ndc = this.ndcFromClient(clientX, clientY) ?? { x: 0, y: 0 };
-    let found: string | null = null;
-    for (const hit of this.raycastHits(ndc.x, ndc.y)) {
-      const nodeId = this.resolveNodePick(hit.object);
-      if (nodeId && this.isIdentityPickableNodeId(nodeId)) {
-        found = nodeId;
-        break;
-      }
-    }
+    const found = this.pickIdentityNode(this.raycastHits(ndc.x, ndc.y));
     if (found !== this.pinnedIdentityId) {
       this.pinnedIdentityId = found;
       if (found) this.identityPinAt = this.now();

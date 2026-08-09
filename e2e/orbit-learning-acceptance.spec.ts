@@ -117,7 +117,7 @@ const ESCAPE_SPEED = 1.45;
 const SHOT_DIR = path.join(__dirname, "..", "validation-pack", "screenshots", "orbit-learning");
 
 interface TrailSeam { points: Array<{ x: number; y: number; z: number }>; epoch: number; }
-interface ObjectSeam { id: string; label: string; projected: { x: number; y: number }; projectedRadiusPx: number; }
+interface ObjectSeam { id: string; label: string; projected: { x: number; y: number }; body?: { x: number; y: number }; projectedRadiusPx: number; }
 interface CameraSeam { reframed: boolean; reframeCount: number; distance: number; }
 interface EngineSeam { classification: "bound" | "escape" | null; }
 interface SceneSeam { trail: TrailSeam; objects: ObjectSeam[]; camera: CameraSeam; engine: EngineSeam; }
@@ -401,31 +401,42 @@ async function hoverObjectExpectTooltip(
   }
   if (!extreme) return { text: "", x: 0, y: 0 };
 
-  // Phase 2 — park at the turning point and sweep a ±20px cross with a
-  // 120ms settle per point. The turning point is the apoapsis, where the
-  // body is SLOWEST (Kepler), so the pointer stays on-target across a pass;
-  // the ±20 cross absorbs anchor-direction uncertainty (the seam's
-  // `projected` is the label anchor, which flips above/right/left/below).
-  // The 40ms jiggle of the original helper never let the tooltip's
-  // show/hide-grace timing settle — 120ms does.
+  // Phase 2 — track the LIVE body and sweep a small cross around it with a
+  // 120ms settle per point. E1 (final gate): the seam now also exposes the
+  // BODY's own projection (`body`) — the label anchor (`projected`) flips
+  // above/right/left/below and is NOT a hover target, so anchoring the sweep
+  // on the anchor+26 assumption missed the sphere whenever the anchor was
+  // not "above" (and the static ring's fat raycast band stole the pick —
+  // fixed product-side with mesh-first identity picking). Tracking `body`
+  // with a fresh seam read per pass is deterministic; fall back to
+  // anchor+26 only when the body is outside the frustum.
   const parkDeadline = Date.now() + 12_000;
-  const offsets = [-20, -10, 0, 10, 20];
+  const offsets = [-10, 0, 10];
   while (Date.now() < parkDeadline) {
-    for (const dy of offsets) {
-      for (const dx of offsets) {
-        await page.mouse.move(extreme.x + dx, extreme.y + dy);
-        await page.waitForTimeout(120);
-        const texts = await page.evaluate(() =>
-          Array.from(document.querySelectorAll('[role="tooltip"]'))
-            .filter((el) => (el as HTMLElement).getClientRects().length > 0)
-            .map((el) => (el as HTMLElement).innerText)
-            .filter((t) => t.trim().length > 0),
-        );
-        if (texts.some((t) => t.includes(expectedName))) {
-          const hit = texts.find((t) => t.includes(expectedName)) ?? texts[0];
-          return { text: hit, x: extreme.x + dx, y: extreme.y + dy };
+    const fresh = await readSeam(page);
+    const obj = fresh?.objects.find((o) => o.id === seamObject.id);
+    if (obj) {
+      const body = obj.body
+        ? { x: box!.x + obj.body.x, y: box!.y + obj.body.y }
+        : { x: box!.x + obj.projected.x, y: box!.y + obj.projected.y + bodyOffsetY };
+      for (const dy of offsets) {
+        for (const dx of offsets) {
+          await page.mouse.move(body.x + dx, body.y + dy);
+          await page.waitForTimeout(120);
+          const texts = await page.evaluate(() =>
+            Array.from(document.querySelectorAll('[role="tooltip"]'))
+              .filter((el) => (el as HTMLElement).getClientRects().length > 0)
+              .map((el) => (el as HTMLElement).innerText)
+              .filter((t) => t.trim().length > 0),
+          );
+          if (texts.some((t) => t.includes(expectedName))) {
+            const hit = texts.find((t) => t.includes(expectedName)) ?? texts[0];
+            return { text: hit, x: body.x + dx, y: body.y + dy };
+          }
         }
       }
+    } else {
+      await page.waitForTimeout(120);
     }
   }
   return { text: "", x: 0, y: 0 };

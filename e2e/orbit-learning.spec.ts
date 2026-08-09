@@ -172,6 +172,10 @@ interface ObjectSeam {
   id: string;
   label: string;
   projected: { x: number; y: number };
+  /** E1 (additive): the object BODY's projected position — where the mesh
+   * actually renders (the label anchor `projected` flips and is not a hover
+   * target). Absent when outside the frustum. */
+  body?: { x: number; y: number };
   projectedRadiusPx: number;
 }
 interface CameraSeam {
@@ -578,7 +582,10 @@ test("L1/L7 — label identity: persistent DOM labels >=14px in the stage; hover
     ? projectShowcaseDefault(box, { x: RING_RADIUS_WORLD, y: 0, z: 0 })
     : null;
   const tooltip = page.locator('[role="tooltip"]');
-  const dyBand = [18, 26, 34, 10, -18, -26, 42, -10];
+  // E1 (final gate): the seam's `body` is the planet's OWN projected
+  // position (the label anchor `projected` flips and is not a hover target);
+  // the ±10 cross absorbs the tooltip grace timing.
+  const dyBand = [0, 10, -10];
   const dxBand = [0, -8, 8];
   let tooltipHit = false;
   for (let attempt = 0; attempt < 16 && !tooltipHit; attempt++) {
@@ -586,11 +593,13 @@ test("L1/L7 — label identity: persistent DOM labels >=14px in the stage; hover
     const planet = seam?.objects.find((o) => o.id === "planet");
     const base =
       planet && box
-        ? { x: box.x + planet.projected.x, y: box.y + planet.projected.y }
+        ? planet.body
+          ? { x: box.x + planet.body.x, y: box.y + planet.body.y }
+          : { x: box.x + planet.projected.x, y: box.y + planet.projected.y + 26 }
         : fallbackPoint;
     if (!base) throw new Error("3D stage canvas must be measurable");
     const x = base.x + dxBand[attempt % 3];
-    const y = base.y + dyBand[attempt % 8];
+    const y = base.y + dyBand[attempt % 3];
     await page.mouse.move(x, y);
     await page.waitForTimeout(250);
     tooltipHit =

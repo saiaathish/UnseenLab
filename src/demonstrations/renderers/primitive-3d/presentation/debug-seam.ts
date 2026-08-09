@@ -55,6 +55,14 @@ export interface SceneSeamObject {
   label: string;
   /** Projected anchor in canvas CSS px (y down) — the label overlay anchor. */
   projected: { x: number; y: number };
+  /**
+   * E1 (final gate, additive): the OBJECT BODY's projected position in canvas
+   * CSS px (y down) — the runtime node's world position through the live
+   * camera, i.e. exactly where the mesh renders. The label anchor (`projected`)
+   * flips above/right/left/below and is NOT a hover target; `body` is (the
+   * e2e hover probes track it). Absent when the body is outside the frustum.
+   */
+  body?: { x: number; y: number };
   /** The object's world radius projected to CSS px at the live camera. */
   projectedRadiusPx: number;
 }
