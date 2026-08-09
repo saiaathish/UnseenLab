@@ -6,7 +6,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -69,17 +68,14 @@ export function SignOutDialog({
             Choose what happens to it when you sign out.
           </DialogDescription>
         </DialogHeader>
-        <DialogFooter>
+        {/* Stacked, full-width choices — the single-row footer wraps badly on
+            narrow dialogs. Keep = soft surface (least destructive, current
+            behavior), clear = soft red tint, Cancel = quiet ghost below. */}
+        <div className="mt-4 flex flex-col gap-2">
           <Button
             type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={busy !== null}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
+            variant="secondary"
+            className="w-full justify-center"
             onClick={() => void handleSignOut(false)}
             disabled={busy !== null}
           >
@@ -88,12 +84,22 @@ export function SignOutDialog({
           <Button
             type="button"
             variant="destructive"
+            className="w-full justify-center"
             onClick={() => void handleSignOut(true)}
             disabled={busy !== null}
           >
             Sign out and clear data on this device
           </Button>
-        </DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full justify-center text-muted-foreground"
+            onClick={() => onOpenChange(false)}
+            disabled={busy !== null}
+          >
+            Cancel
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );
