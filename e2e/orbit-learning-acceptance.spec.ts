@@ -689,10 +689,23 @@ test("acceptance: hover Planet identifies Planet; tooltip stays in the viewport;
     const fresh = await readSeam(page);
     const obj = fresh?.objects.find((o) => o.id === "planet");
     if (!obj) continue;
-    await page.mouse.click(box!.x + obj.projected.x, box!.y + obj.projected.y + 26);
+    // E1: click the BODY (`body` — the exact mesh position), never the label
+    // anchor (`projected` flips above/right/left/below; anchor+26 missed the
+    // sphere whenever the anchor was not "above", so the ring claimed the
+    // click — the W5A-3 failure mode). With mesh-first identity picking the
+    // body click pins the planet deterministically.
+    const clickX = obj.body ? box!.x + obj.body.x : box!.x + obj.projected.x;
+    const clickY = obj.body ? box!.y + obj.body.y : box!.y + obj.projected.y + 26;
+    await page.mouse.click(clickX, clickY);
     try {
       await planetCard.first().waitFor({ state: "visible", timeout: 1_200 });
-      pinned = true;
+      // The waitFor can catch the PRE-CLICK card (hover identity) while the
+      // click's pin switch re-renders a frame later — settle one frame and
+      // confirm the card is still the planet's before declaring victory.
+      await page.waitForTimeout(150);
+      if ((await planetCard.first().isVisible().catch(() => false))) {
+        pinned = true;
+      }
     } catch {
       // The body moved between the seam read and the click (or the ring
       // claimed the click) — re-read the seam and try again.
