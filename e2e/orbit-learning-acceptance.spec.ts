@@ -139,27 +139,6 @@ async function seedShowcase(page: Page): Promise<void> {
   await page.waitForURL(/\/demos\/showcase-orbits/);
 }
 
-async function seedFixture(page: Page): Promise<void> {
-  const orbitSpec = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "fixtures", "orbit-spec.json"), "utf8"),
-  );
-  await page.route("**/api/demonstrations/generate", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        data: { outcome: "spec", spec: orbitSpec, source: "model", reason: "e2e fixture" },
-      }),
-    }),
-  );
-  await page.goto("/");
-  await page.getByLabel("What topic do you need help with?").fill("Show why planets stay in orbit.");
-  await page.getByRole("button", { name: "Find my learning path" }).click();
-  await expect(page.getByRole("button", { name: "Enter demonstration" })).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("button", { name: "Enter demonstration" }).click();
-  await page.waitForURL(/\/demos\/demo-orbits-001/);
-}
-
 // ---------------------------------------------------------------------------
 // Journey helpers
 // ---------------------------------------------------------------------------
@@ -1015,9 +994,7 @@ test("visual E: escape state — speed past sqrt(2), seam-confirmed, never label
 // 5. Visual acceptance F–J (hover/pin states + tablet + mobile)
 // ---------------------------------------------------------------------------
 
-test("visual F/G/H: hover Star, hover Planet, pinned Planet (already captured in the identity tests)", async ({
-  page,
-}) => {
+test("visual F/G/H: hover Star, hover Planet, pinned Planet (already captured in the identity tests)", async () => {
   // The after-06/07/08 captures happen inside the identity tests above (they
   // need the exact hover/pin state). This test just records the evidence
   // files' existence so the visual inventory is explicit.

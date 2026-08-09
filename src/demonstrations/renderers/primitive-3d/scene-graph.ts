@@ -28,7 +28,6 @@ import type {
   PrimitiveObjectSpec,
   RelationshipOperator,
   RelationshipSpec,
-  SceneSemanticSpec,
   Vec3,
 } from "@/demonstrations/spec/demo-spec";
 import {
