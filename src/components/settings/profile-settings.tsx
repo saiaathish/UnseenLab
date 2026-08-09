@@ -5,7 +5,13 @@ import Link from "next/link";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
@@ -84,116 +90,148 @@ export function ProfileSettings({
   };
 
   return (
-    <section aria-labelledby="profile-heading" className="space-y-4">
-      <h1
-        id="profile-heading"
-        className="text-2xl font-semibold tracking-tight"
-      >
-        Profile
-      </h1>
+    <section aria-labelledby="profile-heading" className="space-y-6">
+      <div>
+        <p className="text-sm font-medium text-primary">Account details</p>
+        <h2
+          id="profile-heading"
+          className="mt-1 text-2xl font-semibold tracking-tight"
+        >
+          Profile
+        </h2>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+          Update the name and account information used across your learning
+          workspace.
+        </p>
+      </div>
 
-      <Card>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex items-center gap-4">
-            <Avatar className="h-14 w-14">
-              {avatarUrl ? <AvatarImage src={avatarUrl} alt="" /> : null}
-              <AvatarFallback>{initialsFor(displayName)}</AvatarFallback>
-            </Avatar>
-            <div className="min-w-0">
-              <p className="text-sm font-medium">
-                {displayName.trim() || "Learner"}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {user.email ?? "No email on file"}
-              </p>
+      <Card className="overflow-hidden">
+        <div className="grid lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+          <div className="flex flex-col justify-between gap-8 bg-muted/30 p-6 sm:p-8 lg:border-r">
+            <div className="flex items-center gap-4">
+              <Avatar className="h-16 w-16 ring-4 ring-background sm:h-20 sm:w-20">
+                {avatarUrl ? <AvatarImage src={avatarUrl} alt="" /> : null}
+                <AvatarFallback className="text-xl">
+                  {initialsFor(displayName)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <p className="truncate text-base font-semibold">
+                  {displayName.trim() || "Learner"}
+                </p>
+                <p className="mt-1 truncate text-sm text-muted-foreground">
+                  {user.email ?? "No email on file"}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">Sign-in method</span>
+                <span className="font-medium">{providerLabel(provider)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">Learning setup</span>
+                <span className="font-medium text-right">
+                  {onboardingComplete ? "Complete" : "In progress"}
+                </span>
+              </div>
             </div>
           </div>
 
-          <Separator />
+          <div className="min-w-0">
+            <CardHeader className="p-6 pb-0 sm:p-8 sm:pb-0">
+              <CardTitle className="text-base">Personal information</CardTitle>
+              <CardDescription>
+                This is how your account appears in UnseenLab.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6 p-6 sm:p-8">
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label
+                    htmlFor="profile-display-name"
+                    className="text-sm font-medium"
+                  >
+                    Display name
+                  </label>
+                  <Input
+                    id="profile-display-name"
+                    value={displayName}
+                    maxLength={60}
+                    onChange={(event) => {
+                      setDisplayName(event.target.value);
+                      setStatus("idle");
+                    }}
+                    placeholder="Your name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <span className="block text-sm font-medium">Email</span>
+                  <p className="min-h-10 break-all rounded-lg border border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                    {user.email ?? "—"}
+                  </p>
+                </div>
+              </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <label
-                htmlFor="profile-display-name"
-                className="text-sm font-medium"
-              >
-                Display name
-              </label>
-              <Input
-                id="profile-display-name"
-                value={displayName}
-                maxLength={60}
-                onChange={(event) => {
-                  setDisplayName(event.target.value);
-                  setStatus("idle");
-                }}
-                placeholder="Your name"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <span className="block text-sm font-medium">Email</span>
-              <p className="text-sm text-muted-foreground">
-                {user.email ?? "—"}
-              </p>
-            </div>
-          </div>
+              <Separator />
 
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-              {provider === "google" ? (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Signed in with Google
+                  Changes apply across your learning workspace.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleSave}
+                  disabled={saving}
+                  aria-busy={saving}
+                >
+                  {saving ? "Saving…" : "Save changes"}
+                </Button>
+              </div>
+
+              {status === "saved" ? (
+                <p role="status" className="text-sm text-ok">
+                  Saved.
                 </p>
               ) : null}
-              <p className="text-sm text-muted-foreground">
-                {onboardingComplete
-                  ? "Onboarding complete"
-                  : "Onboarding in progress"}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleSave}
-              disabled={saving}
-              aria-busy={saving}
-            >
-              {saving ? "Saving…" : "Save changes"}
-            </Button>
+              {status === "error" ? (
+                <Alert>
+                  <AlertDescription>
+                    We couldn&apos;t save your profile. Try again.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+            </CardContent>
           </div>
-
-          {status === "saved" ? (
-            <p role="status" className="text-sm text-ok">
-              Saved.
-            </p>
-          ) : null}
-          {status === "error" ? (
-            <Alert>
-              <AlertDescription>
-                We couldn&apos;t save your profile. Try again.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-        </CardContent>
+        </div>
       </Card>
 
       <Card>
-        <CardContent className="flex flex-col gap-2">
-          <p className="text-sm font-medium">Onboarding</p>
-          <p className="text-sm text-muted-foreground">
-            Rerun the four questions to update how the dashboard guides you.
-            Your current choices stay until you finish again.
-          </p>
-          <div>
-            <Link
-              href="/onboarding?rerun=1"
-              className={buttonVariants({ variant: "outline" })}
-            >
-              Rerun onboarding
-            </Link>
+        <CardContent className="flex flex-col gap-5 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+          <div className="max-w-2xl space-y-1.5">
+            <p className="text-base font-semibold">Learning setup</p>
+            <p className="text-sm leading-6 text-muted-foreground">
+              Rerun the four questions to update how the dashboard guides you.
+              Your current choices stay until you finish again.
+            </p>
           </div>
+          <Link
+            href="/onboarding?rerun=1"
+            className={buttonVariants({ variant: "outline" })}
+          >
+            Rerun onboarding
+          </Link>
         </CardContent>
       </Card>
     </section>
   );
+}
+
+function providerLabel(provider: string | null): string {
+  if (provider === "google" || provider === "google.com" || provider === "Google") {
+    return "Google";
+  }
+  return provider ?? "Account";
 }
