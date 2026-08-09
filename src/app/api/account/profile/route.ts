@@ -44,18 +44,28 @@ export async function PATCH(request: Request): Promise<NextResponse> {
   }
 
   const updatedAt = new Date().toISOString();
+  // A body-provided field must apply via `$set` only: setting the same path
+  // in both `$set` and `$setOnInsert` is a ConflictingUpdateOperators error
+  // (MongoDB code 40) that 500s every first-time profile write. Insert
+  // defaults below therefore exist only for fields the body omitted, and
+  // `onboarding_version` absence reads as 0 (`?? 0` at call sites).
+  const { display_name, onboarding_version, onboarding_completed_at } =
+    parsed.data;
+  const setOnInsert: Record<string, unknown> = {
+    created_at: updatedAt,
+    avatar_url: null,
+  };
+  if (display_name === undefined) setOnInsert.display_name = null;
+  if (onboarding_version === undefined) setOnInsert.onboarding_version = 0;
+  if (onboarding_completed_at === undefined) {
+    setOnInsert.onboarding_completed_at = null;
+  }
   try {
     await db.collection<ProfileRow>(COLLECTIONS.profiles).updateOne(
       { user_id: user.uid },
       {
         $set: { ...parsed.data, updated_at: updatedAt },
-        $setOnInsert: {
-          created_at: updatedAt,
-          display_name: null,
-          avatar_url: null,
-          onboarding_version: 0,
-          onboarding_completed_at: null,
-        },
+        $setOnInsert: setOnInsert,
       },
       { upsert: true }
     );
