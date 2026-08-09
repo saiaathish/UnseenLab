@@ -67,38 +67,97 @@ export function SettingsTabs({
 
   return (
     <main id="main-content" className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto w-full max-w-3xl px-4 pt-28 pb-20 sm:px-6">
+      <div className="mx-auto w-full max-w-6xl px-4 pt-24 pb-20 sm:px-6 lg:px-8">
+        <header className="mb-8 max-w-2xl">
+          <p className="text-sm font-medium tracking-wide text-primary">
+            Account workspace
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+            Settings
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground sm:text-base">
+            Keep your profile, learning experience, and saved data working the
+            way you want.
+          </p>
+        </header>
+
         <Tabs defaultValue="profile">
-          <TabsList aria-label="Settings sections">
-            <TabsTrigger value="profile">Profile</TabsTrigger>
-            <TabsTrigger value="preferences">
-              Learning preferences
-            </TabsTrigger>
-            <TabsTrigger value="accessibility">Accessibility</TabsTrigger>
-            <TabsTrigger value="privacy">Privacy and data</TabsTrigger>
-          </TabsList>
-          <TabsContent value="profile" className="mt-6">
-            <ProfileSettings
-              profile={profile}
-              onProfileChange={setProfile}
-              user={user}
-            />
-          </TabsContent>
-          <TabsContent value="preferences" className="mt-6">
-            <LearningPreferencesSettings
-              preferences={preferences}
-              onPreferencesChange={setPreferences}
-            />
-          </TabsContent>
-          <TabsContent value="accessibility" className="mt-6">
-            <AccessibilitySettings
-              preferences={preferences}
-              onPreferencesChange={setPreferences}
-            />
-          </TabsContent>
-          <TabsContent value="privacy" className="mt-6">
-            <PrivacySettings />
-          </TabsContent>
+          <div className="grid gap-8 lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start">
+            <TabsList
+              aria-label="Settings sections"
+              className="grid h-auto w-full grid-cols-2 gap-1 rounded-2xl bg-muted/60 p-1 sm:grid-cols-4 lg:grid-cols-1"
+            >
+              <TabsTrigger
+                value="profile"
+                className="min-h-11 justify-start px-3 py-2 text-left"
+              >
+                <span>
+                  <span className="block">Profile</span>
+                  <span className="mt-0.5 hidden text-xs font-normal text-muted-foreground sm:block lg:block">
+                    Your account details
+                  </span>
+                </span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="preferences"
+                className="min-h-11 justify-start px-3 py-2 text-left"
+              >
+                <span>
+                  <span className="block">Learning preferences</span>
+                  <span className="mt-0.5 hidden text-xs font-normal text-muted-foreground sm:block lg:block">
+                    Shape your path
+                  </span>
+                </span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="accessibility"
+                className="min-h-11 justify-start px-3 py-2 text-left"
+              >
+                <span>
+                  <span className="block">Accessibility</span>
+                  <span className="mt-0.5 hidden text-xs font-normal text-muted-foreground sm:block lg:block">
+                    Tune the interface
+                  </span>
+                </span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="privacy"
+                className="min-h-11 justify-start px-3 py-2 text-left"
+              >
+                <span>
+                  <span className="block">Privacy and data</span>
+                  <span className="mt-0.5 hidden text-xs font-normal text-muted-foreground sm:block lg:block">
+                    Manage saved data
+                  </span>
+                </span>
+              </TabsTrigger>
+            </TabsList>
+
+            <div className="min-w-0">
+              <TabsContent value="profile" className="mt-0">
+                <ProfileSettings
+                  profile={profile}
+                  onProfileChange={setProfile}
+                  user={user}
+                />
+              </TabsContent>
+              <TabsContent value="preferences" className="mt-0">
+                <LearningPreferencesSettings
+                  preferences={preferences}
+                  onPreferencesChange={setPreferences}
+                />
+              </TabsContent>
+              <TabsContent value="accessibility" className="mt-0">
+                <AccessibilitySettings
+                  preferences={preferences}
+                  onPreferencesChange={setPreferences}
+                />
+              </TabsContent>
+              <TabsContent value="privacy" className="mt-0">
+                <PrivacySettings />
+              </TabsContent>
+            </div>
+          </div>
         </Tabs>
       </div>
     </main>

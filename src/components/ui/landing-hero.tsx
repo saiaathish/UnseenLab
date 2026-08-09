@@ -4,6 +4,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useSyncExternalStore } from "react";
 import { AskDemoForm } from "@/components/demonstrations/ask-demo-form";
+import { useSession } from "@/lib/firebase/use-session";
 
 const HeroWaveBackground = dynamic(
   () =>
@@ -28,6 +29,8 @@ export function LandingHero() {
     isClientSnapshot,
     isServerSnapshot,
   );
+  const { user, loading } = useSession();
+  const showSignInPrompt = !loading && user === null;
 
   return (
     <section
@@ -53,12 +56,14 @@ export function LandingHero() {
             <AskDemoForm ctaLabel="Find my learning path" />
           </div>
 
-          <Link
-            href="/?auth=open"
-            className="mt-4 inline-block rounded text-sm text-gray-400/80 transition-colors hover:text-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60"
-          >
-            Sign in to save preferences and continue across devices.
-          </Link>
+          {showSignInPrompt ? (
+            <Link
+              href="/?auth=open"
+              className="mt-4 inline-block rounded text-sm text-gray-400/80 transition-colors hover:text-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60"
+            >
+              Sign in to save preferences and continue across devices.
+            </Link>
+          ) : null}
         </div>
       </div>
     </section>
