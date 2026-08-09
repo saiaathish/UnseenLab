@@ -30,6 +30,11 @@ export function SignInDialog({
 
   const [submitting, setSubmitting] = useState(false);
   const [errorKey, setErrorKey] = useState<null | "popup" | "offline" | "generic">(null);
+  // The raw Firebase error code (e.g. auth/unauthorized-domain) for diagnosis.
+  // Surfaced as a muted secondary line — the primary copy stays the pinned
+  // generic message (e2e/auth-dialog.spec.ts) so learner-facing text is stable
+  // while operators can read the exact rejection.
+  const [errorCode, setErrorCode] = useState<string | null>(null);
 
   const authMode = searchParams.get("auth");
   const next = searchParams.get("next");
@@ -53,6 +58,7 @@ export function SignInDialog({
   const close = useCallback(() => {
     onOpenChange(false);
     setErrorKey(null);
+    setErrorCode(null);
     setSubmitting(false);
   }, [onOpenChange]);
 
@@ -66,6 +72,16 @@ export function SignInDialog({
     // `next` destination are handled in exactly one place.
     const error = await signInWithGoogle();
     if (error) {
+      // The UI deliberately keeps learner copy generic, but the exact
+      // FirebaseError code must be visible for diagnosis (e.g.
+      // auth/unauthorized-domain when a hostname is missing from the
+      // project's Authorized domains in the Firebase console).
+      const code =
+        error instanceof Error && "code" in error && typeof error.code === "string"
+          ? error.code
+          : null;
+      console.error("[sign-in] Google sign-in failed", { code, error });
+      setErrorCode(code);
       setErrorKey("generic");
       setSubmitting(false);
       return;
@@ -129,6 +145,11 @@ export function SignInDialog({
                 {effectiveErrorKey === "generic"
                   ? "We couldn't sign you in with Google. Please try again."
                   : "Sign-in needs an internet connection. You can keep using the lab without an account."}
+                {errorCode && (
+                  <span className="mt-1 block font-mono text-[11px] leading-none text-muted-foreground/80">
+                    {errorCode}
+                  </span>
+                )}
               </AlertDescription>
             </Alert>
           )}
