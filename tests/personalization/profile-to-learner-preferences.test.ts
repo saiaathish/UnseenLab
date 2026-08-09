@@ -140,7 +140,12 @@ describe("draftToPreferencesRow", () => {
     expect(row.text_scale).toBe(1.25);
     expect(row.high_contrast).toBe(false);
     expect(row.topic_interests).toEqual(["physics", "nuclear"]);
-    // Representation is not part of onboarding; it stays at the DB default.
-    expect(row).not.toHaveProperty("preferred_representation");
+    // Representation is not part of onboarding; the canonical default is sent
+    // explicitly so the payload satisfies the preferences API schema (no DB
+    // default exists). schema_version is likewise required by the route.
+    expect(row.preferred_representation).toBe(
+      DEFAULT_LEARNER_PREFERENCES.preferredRepresentations[0]
+    );
+    expect(row.schema_version).toBe(1);
   });
 });

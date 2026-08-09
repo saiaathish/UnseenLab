@@ -112,21 +112,20 @@ export function preferenceSummary(
  * Builds the learner_preferences upsert payload from an onboarding draft.
  * `learning_pace` drives the initial animation speed; both are stored so a
  * later explicit animation-speed adjustment can diverge from the pace label.
- * `preferred_representation` is not part of the four onboarding steps and is
- * left at the database default; it can be changed in Settings.
+ * `preferred_representation` is not part of the four onboarding steps, so the
+ * canonical default ("animation") is sent explicitly — the API route requires
+ * the field and there is no database default. It can be changed in Settings.
  */
 export function draftToPreferencesRow(
   draft: OnboardingDraft
 ): Omit<
   LearnerPreferencesRow,
-  | "user_id"
-  | "created_at"
-  | "updated_at"
-  | "schema_version"
-  | "preferred_representation"
+  "user_id" | "created_at" | "updated_at"
 > {
   return {
     learning_goal: draft.learningGoal,
+    preferred_representation:
+      DEFAULT_LEARNER_PREFERENCES.preferredRepresentations[0],
     explanation_style: draft.explanationStyle,
     learning_pace: draft.learningPace,
     animation_speed: PACE_TO_SPEED[draft.learningPace],
@@ -136,5 +135,8 @@ export function draftToPreferencesRow(
     text_scale: draft.textScale,
     one_variable_mode: true,
     topic_interests: draft.topicInterests,
+    // No shared schema-version constant exists (settings components write
+    // literal 1 too); the preferences route requires an int >= 1.
+    schema_version: 1,
   };
 }
