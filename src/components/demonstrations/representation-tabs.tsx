@@ -136,6 +136,24 @@ export function DemonstrationRepresentationTabs({
   const hasStageRep = ordered.some(isStageRep);
   const hybridEngineDriver = !!spec.simulation && spec.renderer.kind !== "lumina_2d";
   const { onVisualState, visualState, engineMapping, ...stageBase } = stage;
+  // P2-4 hidden/pause seam (Wave-4b R4 → R3): the SAME boolean that hides
+  // the 3D wrapper is forwarded to the stage, so the stage can defer its
+  // DRAW work while the learner is on another tab (perf rule: never render
+  // wastefully behind a hidden wrapper — the 2D driver stage is exempt: it
+  // MUST keep running, it owns the readouts and the coupled engine).
+  // Stage-side contract (lands with R3 — StageProps.hidden + the
+  // Primitive3DStage consumption): only the DRAW may be skipped. The frame
+  // loop must keep running while hidden — trail points are appended
+  // per-frame (visuals.ts pushTrailPoint, dt > 0) and the coupled body
+  // keeps moving on engine pushes; a stopped loop would freeze the body
+  // and gap the trail (teleport-connector misinformation, root cause §2).
+  // Type note: `hidden` joins StageProps with R3's stage-side change; the
+  // object spreads cleanly into the stage until then (no excess-property
+  // check on spreads), and the prop is inert — the stage animates exactly
+  // as when visible.
+  const stage3dHiddenProps: { hidden: boolean } = {
+    hidden: active.kind !== "stage_3d",
+  };
 
   return (
     <section aria-label="Representations" className="min-w-0">
@@ -185,14 +203,23 @@ export function DemonstrationRepresentationTabs({
             <div hidden={active.kind !== "stage_2d"}>
               <DemonstrationStage {...stageBase} mode="2d" onVisualState={onVisualState} />
             </div>
-            {active.kind === "stage_3d" && (
+            {/* P2-4 (tab switch must not destroy the 3D stage): the 3D stage
+                stays MOUNTED across tab switches (hidden, exactly like the 2D
+                stage above) — unmounting it on every tab change loses the
+                trail history and re-inflates the camera to the build frame
+                (grow-only can never shrink back, so the tight engine-anchored
+                frame is lost for the rest of the session). The same hidden
+                boolean is forwarded to the stage as the pause seam
+                (stage3dHiddenProps). */}
+            <div hidden={active.kind !== "stage_3d"}>
               <DemonstrationStage
                 {...stageBase}
                 mode="3d"
                 visualState={visualState ?? null}
                 engineMapping={engineMapping ?? null}
+                {...stage3dHiddenProps}
               />
-            )}
+            </div>
           </>
         )}
         {!stageActive && (

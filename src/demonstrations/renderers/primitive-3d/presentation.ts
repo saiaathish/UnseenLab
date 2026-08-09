@@ -2,6 +2,7 @@ import type {
   DemoSpecV1,
   PrimitiveObjectSpec,
   RelationshipSpec,
+  SceneSemanticSpec,
 } from "@/demonstrations/spec/demo-spec";
 
 const DECORATIVE_KINDS = new Set([
@@ -26,6 +27,15 @@ export interface StageGuideEntity {
   id: string;
   label: string;
   color: string;
+  /** FIX 3 semantic identity (additive). Present ONLY on entities whose object
+   * carries semantic metadata — auto-derived fallback entities never include
+   * these keys (existing guide output stays byte-identical). */
+  name?: string;
+  type?: string;
+  shortDescription?: string;
+  role?: string;
+  interactive?: boolean;
+  relationshipSummary?: string;
 }
 
 export interface StageGuideRelationship {
@@ -103,21 +113,108 @@ export function presentationSpecForStage(spec: DemoSpecV1): DemoSpecV1 {
   };
 }
 
-/** Human-readable guide shown around the canvas; uses original semantics. */
+/**
+ * FIX 3 semantic identity (root cause §4/§5): true when the object carries
+ * explicit semantic metadata (the `semantic` block or the top-level
+ * `role`/`description` shorthands). Such objects are author-intended
+ * presentation subjects — uncapped, and exempt from the decorative-kind
+ * exclusion (e.g. the orbit showcase's "Default orbit guide" ring).
+ */
+function hasSemanticMetadata(node: PrimitiveObjectSpec): boolean {
+  return (
+    node.semantic !== undefined ||
+    node.role !== undefined ||
+    node.description !== undefined
+  );
+}
+
+/** The object's semantic block with the top-level `role`/`description`
+ * shorthands merged in as fallbacks (the block wins), or undefined. */
+function semanticOf(node: PrimitiveObjectSpec): SceneSemanticSpec | undefined {
+  const block = node.semantic;
+  const role = block?.role ?? node.role;
+  const shortDescription = block?.shortDescription ?? node.description;
+  if (block === undefined && role === undefined && shortDescription === undefined) {
+    return undefined;
+  }
+  return {
+    ...(block ?? {}),
+    ...(role !== undefined ? { role } : {}),
+    ...(shortDescription !== undefined ? { shortDescription } : {}),
+  };
+}
+
+/**
+ * One-sentence entity summary derived from the scene's own relationships
+ * ("The planet orbits the star", "Gravity pulls the planet toward the star"):
+ * every relationship touching the entity directly, or whose from/to is the
+ * GROUP containing the entity, contributes its label. Distinct labels joined
+ * in spec order; undefined when no relationship touches the entity.
+ */
+function derivedRelationshipSummary(
+  nodeId: string,
+  relationships: RelationshipSpec[],
+  childrenOf: Map<string, string[]>
+): string | undefined {
+  const touching = relationships.filter((rel) => {
+    if (rel.from === nodeId || rel.to === nodeId) return true;
+    return (
+      childrenOf.get(rel.from)?.includes(nodeId) === true ||
+      childrenOf.get(rel.to)?.includes(nodeId) === true
+    );
+  });
+  const labels = touching
+    .map((rel) => rel.label?.trim() || humanize(rel.type).toLowerCase())
+    .filter((label) => label.length > 0);
+  const distinct = [...new Set(labels)];
+  return distinct.length > 0 ? distinct.join(" ") : undefined;
+}
+
+/**
+ * Human-readable guide shown around the canvas; uses original semantics.
+ *
+ * FIX 3 generalization (root cause §4/§5): when ANY object in the scene
+ * carries semantic metadata, objects with metadata become learner-facing
+ * entities for EVERY scene type (conceptual AND verified_simulation/hybrid),
+ * uncapped, carrying their semantic identity (name/type/shortDescription/
+ * role/interactive/relationshipSummary), and relationships are uncapped —
+ * the relationship labels ARE the summaries. When NO object carries semantic
+ * metadata the legacy auto-derived fallback runs byte-identically (max 5
+ * entities, max 4 relationships, decorative kinds hidden), so existing
+ * consumers see exactly what they saw before.
+ */
 export function stageGuideForSpec(spec: DemoSpecV1): StageGuide {
   const scene = spec.scene3d;
   if (!scene) return { entities: [], relationships: [] };
 
   const labels = new Map<string, string>();
   for (const node of scene.objects) {
-    labels.set(node.id, node.label?.trim() || fallbackObjectLabel(node));
+    const semantic = semanticOf(node);
+    labels.set(
+      node.id,
+      semantic?.name?.trim() || node.label?.trim() || fallbackObjectLabel(node)
+    );
   }
 
-  const entities = scene.objects
-    .filter(
-      (node) =>
-        node.kind !== "group" &&
-        !DECORATIVE_KINDS.has(
+  const childrenOf = new Map<string, string[]>();
+  for (const node of scene.objects) {
+    if (node.kind === "group" && Array.isArray(node.children)) {
+      childrenOf.set(node.id, node.children);
+    }
+  }
+
+  const semanticMode = scene.objects.some(hasSemanticMetadata);
+
+  const entities: StageGuideEntity[] = [];
+  let fallbackCount = 0;
+  for (const node of scene.objects) {
+    if (node.kind === "group") continue;
+    const semantic = semanticOf(node);
+    if (!semantic) {
+      // Auto-derived fallback: decorative kinds hidden, capped at 5 — the
+      // pre-FIX-3 behavior, kept byte-identical for no-semantic scenes.
+      if (
+        DECORATIVE_KINDS.has(
           node.kind as
             | "label"
             | "line"
@@ -126,16 +223,46 @@ export function stageGuideForSpec(spec: DemoSpecV1): StageGuide {
             | "graph_surface"
             | "process_edge"
             | "vector_field",
-        ),
-    )
-    .slice(0, 5)
-    .map((node) => ({
+        )
+      ) {
+        continue;
+      }
+      if (fallbackCount >= 5) continue;
+      fallbackCount++;
+      entities.push({
+        id: node.id,
+        label: labels.get(node.id) ?? fallbackObjectLabel(node),
+        color: node.color ?? "#72d6cc",
+      });
+      continue;
+    }
+    const summary =
+      semantic.relationshipSummary?.trim() ||
+      derivedRelationshipSummary(node.id, scene.relationships, childrenOf);
+    entities.push({
       id: node.id,
-      label: labels.get(node.id) ?? fallbackObjectLabel(node),
+      label:
+        semantic.name?.trim() ||
+        (labels.get(node.id) ?? fallbackObjectLabel(node)),
       color: node.color ?? "#72d6cc",
-    }));
+      ...(semantic.name !== undefined ? { name: semantic.name } : {}),
+      ...(semantic.type !== undefined ? { type: semantic.type } : {}),
+      ...(semantic.shortDescription !== undefined
+        ? { shortDescription: semantic.shortDescription }
+        : {}),
+      ...(semantic.role !== undefined ? { role: semantic.role } : {}),
+      ...(semantic.interactive !== undefined
+        ? { interactive: semantic.interactive }
+        : {}),
+      ...(summary !== undefined ? { relationshipSummary: summary } : {}),
+    });
+  }
 
-  const relationships = scene.relationships.slice(0, 4).map((rel) => ({
+  // In semantic mode the relationship list is uncapped: each relationship's
+  // label is the learner-facing summary ("The planet orbits the star").
+  // Without semantic metadata the legacy 4-relationship cap applies.
+  const relationshipCap = semanticMode ? scene.relationships.length : 4;
+  const relationships = scene.relationships.slice(0, relationshipCap).map((rel) => ({
     id: rel.id,
     from: labels.get(rel.from) ?? humanize(rel.from),
     to: labels.get(rel.to) ?? humanize(rel.to),

@@ -13,6 +13,28 @@ import type {
 } from "@/demonstrations/spec/demo-spec";
 
 /**
+ * FIX 3 semantic identity (root cause §4/§5): learner-facing metadata carried
+ * from the spec's SceneSemanticSpec (mirror; normalized by buildSceneGraph —
+ * the top-level spec shorthands `role`/`description` are merged in here).
+ * All fields optional; absent semantic means presentation layers fall back to
+ * auto-derived identity (id/label/kind/relationships).
+ */
+export interface SceneSemantic {
+  /** Canonical display name (e.g. "Star"), capped at 24 chars upstream. */
+  name?: string;
+  /** Object category, e.g. "star" | "planet" | "orbit guide". */
+  type?: string;
+  /** One-sentence learner-facing description of what the object is. */
+  shortDescription?: string;
+  /** Short role label, e.g. "central body" | "orbiter" | "satellite". */
+  role?: string;
+  /** Whether the learner can directly interact with this object. */
+  interactive?: boolean;
+  /** One-sentence summary of how this object relates to the scene. */
+  relationshipSummary?: string;
+}
+
+/**
  * A validated scene node. `children` holds ids of child group nodes; a node
  * that is nobody's child is a root. `depth` is 1 for roots and counts group
  * nesting levels (capped by SPEC_LIMITS.maxGroupDepth — over-deep nodes are
@@ -31,6 +53,14 @@ export interface SceneGraphNode {
   /** particle_field only; clamped to the active particle budget. */
   particleCount: number;
   depth: number;
+  /**
+   * Visibility contract (additive — Wave-2 semantic work, root-cause seam 4):
+   * a hidden object renders nothing. Its label is suppressed at placement (no
+   * orphan label) and its envelope never blocks another label's anchors.
+   */
+  hidden?: boolean;
+  /** FIX 3 semantic identity (additive; see SceneSemantic above). */
+  semantic?: SceneSemantic;
 }
 
 /** A relationship whose from/to refs both resolved to kept nodes. */
@@ -171,6 +201,35 @@ export interface PrimitiveSceneRendererOptions {
   onNodeSelect?: (nodeId: string | null) => void;
   onEdgeSelect?: (edgeId: string | null) => void;
   onNodeManipulate?: (nodeId: string) => void;
+  /**
+   * Hover identity surface (ALL scenes, including non-graph hybrid/engine
+   * scenes — orbit-learning root cause §5 "non-graph hover callbacks").
+   *
+   * - `onHoverIdentity(nodeId | null)`: the object under the pointer, as a
+   *   semantic NODE id (never a mesh), or null when the pointer is over
+   *   empty space / has left the stage / nothing is pinned. Emitted only on
+   *   identity CHANGES, never per frame.
+   *
+   * For graph-like scenes this mirrors hover (visual-only; selection state
+   * is unchanged). For NON-GRAPH scenes (engine-coupled hybrids) it is the
+   * only interaction surface: a click/tap on an object PINNS its identity
+   * (persists independent of hover, FIX 14) and an empty-space click clears
+   * the pin — but selection/manipulation callbacks are never fired for
+   * non-graph scenes (frozen contract: non-graph scenes ignore pointer
+   * picks for SELECTION).
+   */
+  onHoverIdentity?: (nodeId: string | null) => void;
+  /**
+   * Graph-edge hover surface (Wave 3 — FIX 17/18, additive): the graph
+   * EDGE under the pointer (the relationship id, never a mesh), or null
+   * when the pointer is over a node / empty space / has left the stage.
+   * Emitted only on CHANGES, never per frame. Hover is visual-only: the
+   * existing edge-path dimming is unchanged, and this callback never fires
+   * selection or manipulation events (frozen contract). The stage consumes
+   * it to show the edge's learner-facing readout (see
+   * resolveGraphEdgeContent in presentation/tooltip-controller.ts).
+   */
+  onEdgeHover?: (edgeId: string | null) => void;
 }
 
 // ---------------------------------------------------------------------------

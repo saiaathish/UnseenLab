@@ -13,6 +13,7 @@
 
 import type {
   EngineMeta,
+  EngineVisualState,
   Readout,
   SimulationModule,
   SimContext,
@@ -30,8 +31,12 @@ export const NEWTON_META: EngineMeta = {
   },
 };
 
-/** Simulation time cap — readouts stay finite and bounded. */
-const MAX_SIM_TIME = 20;
+/**
+ * Simulation time cap — readouts stay finite and bounded. Exported so the
+ * stage's semantic overlay can mirror the draw() position mapping (maxTravel)
+ * with the same canonical constant.
+ */
+export const MAX_SIM_TIME = 20;
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -177,6 +182,30 @@ export function createNewtonSecondLaw(): SimulationModule {
         { label: "Velocity", value: `${velocity.toFixed(2)} m/s` },
         { label: "Distance", value: `${position.toFixed(1)} m` },
       ];
+    },
+
+    /**
+     * Canonical state for coupled surfaces: the block's full one-dimensional
+     * kinematic state, in the engine's own units. Every number is the closure's
+     * real value — position/velocity from the semi-implicit Euler integration
+     * above, acceleration = force/mass, force/mass the current parameters — so
+     * the semantic identity layer (persistent labels, hover regions, details
+     * card) reads exactly what the readouts and sliders show. P4/P5 contract:
+     * the emitted vectors derive from the engine math, never from display
+     * formatting. PURE READ — never mutates simulation state.
+     */
+    getVisualState(): EngineVisualState {
+      return {
+        scalarBodies: {
+          block: {
+            position,
+            velocity,
+            acceleration: acceleration(),
+            force: params.force,
+            mass: params.mass,
+          },
+        },
+      };
     },
 
     serializeState(): NewtonState {

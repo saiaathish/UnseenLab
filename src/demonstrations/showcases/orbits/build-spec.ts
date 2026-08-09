@@ -53,6 +53,13 @@ const READOUTS: ReadoutSpec[] = [
   { key: "distance", label: "Distance", format: "fixed2" },
 ];
 
+/**
+ * Visual hierarchy (root-cause FIX 1/FIX 8/FIX 13): the star reads as a
+ * luminous source, the planet as the engine's single body, the moon as a
+ * subdued illustrative companion, and the ring as a REFERENCE guide — never
+ * the same style as the live trajectory (the planet's cyan #67e8f9 trail is
+ * the ACTUAL trajectory; the ring is the "Default orbit guide").
+ */
 function sceneObjects(mobile: boolean): PrimitiveObjectSpec[] {
   return [
     {
@@ -62,6 +69,18 @@ function sceneObjects(mobile: boolean): PrimitiveObjectSpec[] {
       position: { x: 0, y: 0, z: 0 },
       size: 2.4,
       color: "#ffd166",
+      // Emissive glow is applied in materials.ts via the additive (kind:color)
+      // pair "sphere:#ffd166" — gated so NO other sphere becomes emissive.
+      // FIX 3 semantic identity (W3): learner-facing metadata for hover cards,
+      // legends and relationship guides (root cause §4/§5).
+      semantic: {
+        name: "Star",
+        type: "star",
+        shortDescription: "Central massive body.",
+        role: "central body",
+        interactive: false,
+        relationshipSummary: "Gravity pulls the planet toward it.",
+      },
     },
     {
       id: "star-glow",
@@ -77,10 +96,30 @@ function sceneObjects(mobile: boolean): PrimitiveObjectSpec[] {
       // Design-2 (C3): re-label so the static ring reads as the ILLUSTRATIVE
       // reference it is, never the quantitative orbit — at Launch speed 1.2
       // the live orbit reaches 15.4 world units vs the ring's 6 (sh-orbit-01).
+      //
+      // FIX 1 (Wave 2): the ring's STYLE is kept clearly distinct from the
+      // live trajectory — muted slate (#64748b) at low opacity (materials.ts
+      // MUTED_LINE_COLORS) while the planet's trail is solid cyan (#67e8f9).
+      // A dashed line would be the stronger cue, but LineDashedMaterial is
+      // outside the 5-class material allowlist (materials.ts), so dash is
+      // deliberately NOT used — opacity/color distinction only.
       label: "Default orbit guide",
       position: { x: 0, y: 0, z: 0 },
       size: 12,
       color: "#64748b",
+      // FIX 3 semantic identity (W3): the ring is a presentable semantic
+      // entity for legends/guides (decorative kinds carry no entities in the
+      // auto-derived fallback, so explicit metadata opts it in).
+      semantic: {
+        name: "Default orbit guide",
+        type: "orbit guide",
+        shortDescription:
+          "Reference ring marking the default circular orbit at launch speed 1.",
+        role: "reference guide",
+        interactive: false,
+        relationshipSummary:
+          "It marks the default circular orbit; the live path can differ when the launch speed changes.",
+      },
     },
     {
       id: "planet-system",
@@ -93,9 +132,28 @@ function sceneObjects(mobile: boolean): PrimitiveObjectSpec[] {
       kind: "sphere",
       label: "Planet",
       position: { x: 6, y: 0, z: 0 },
-      size: 1,
+      // FIX 13: VISUAL radius (0.65 world) is NOT the physics radius — the
+      // engine integrates point masses (the orbit radius 6 / distance 150 is
+      // the only quantitative length). 1.3 is a readability bump only; it is
+      // visual, never physical, and the engine/readouts are untouched.
+      size: 1.3,
       color: "#67e8f9",
       trailPoints: 140,
+      // FIX 10 direction cue: a spec-level arrow CANNOT track the engine
+      // velocity (it would be wrong the moment the orbit leaves the circle —
+      // a fresh misinformation risk). The renderer must draw a short,
+      // labeled velocity arrowhead at the planet from W1's EngineVisualState
+      // velocity data once it lands; see the Wave-2 handoff note in the
+      // showcase summary.
+      // FIX 3 semantic identity (W3): the planet is the one interactive body.
+      semantic: {
+        name: "Planet",
+        type: "planet",
+        shortDescription: "A body in orbit around the star.",
+        role: "orbiter",
+        interactive: true,
+        relationshipSummary: "It orbits the star, and the moon orbits it.",
+      },
     },
     {
       id: "moon",
@@ -103,16 +161,20 @@ function sceneObjects(mobile: boolean): PrimitiveObjectSpec[] {
       label: "Moon (illustrative)",
       position: { x: 7.4, y: 0, z: 0 },
       size: 0.35,
-      color: "#d6d3d1",
+      // Subdued: dimmer neutral tone so the moon never competes with the
+      // star or planet (FIX 8 — hierarchy).
+      color: "#a8a29e",
       trailPoints: 80,
-    },
-    {
-      id: "camera-marker",
-      kind: "camera_marker",
-      label: "Camera view",
-      position: { x: 11, y: 7, z: 12 },
-      size: 0.8,
-      color: "#a78bfa",
+      // FIX 3 semantic identity (W3): the moon is illustrative — its semantic
+      // role says so, so hover cards never present it as quantitative.
+      semantic: {
+        name: "Moon",
+        type: "moon",
+        shortDescription: "A small body circling the planet (illustrative).",
+        role: "satellite",
+        interactive: false,
+        relationshipSummary: "It orbits the planet.",
+      },
     },
   ];
 }
@@ -230,8 +292,12 @@ const PREDICTION = {
 
 const OBSERVATION_PROMPTS = [
   {
+    // A13 (Wave 2): at the curated defaults (launch speed 1, eccentricity 0)
+    // the orbit is CIRCULAR and the speed is constant — "fastest at closest
+    // approach" was false at defaults. Watch-then-manipulate sequence: the
+    // steady default first, then prompt 2 makes the speed vary.
     prompt:
-      "Watch the Speed readout as the planet swings around: it is fastest at closest approach to the star.",
+      "Watch the Speed readout as the planet orbits the star: with the default settings the planet moves at a steady speed the whole way around the circle.",
   },
   {
     prompt:
@@ -280,7 +346,12 @@ export function buildOrbitsShowcase(prefs?: ShowcasePrefs): DemoSpecV1 {
   const controlList = controls(reducedMotion);
 
   const limitations: string[] = [
-    "Idealized point-mass gravity; the engine simulates exactly one star and one planet (RK4 two-body).",
+    // P3 (Wave 2): the curated UI caps Launch speed at 1.2, but the
+    // adapted/offline path exposes up to 3.0 — above sqrt(2) the escape is
+    // REAL and must be disclosed, never faked (root cause §2, "Must be
+    // LABELED, never faked"). Folded into this entry (not a separate one) to
+    // keep every variant's limitation count <= 4 (showcases contract).
+    "Idealized point-mass gravity; the engine simulates exactly one star and one planet (RK4 two-body). At very high launch speeds the planet can escape the star's gravity — the simulation shows this honestly rather than hiding it.",
     "The moon and the 3D orbit ring are illustrative stage guides (the ring marks the default orbit); the engine's live path, readouts, and table are the quantitative source.",
   ];
   if (reducedMotion) {

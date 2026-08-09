@@ -232,7 +232,10 @@ function DemoExperienceReady({
   }, [spec]);
 
   const [parameters, setParameters] = useState<Record<string, number>>(paramDefaults);
-  const [playing, setPlaying] = useState(true);
+  // Root-cause P7: the reduced-motion promise — when motion is reduced the
+  // demo never starts continuous motion (the stage additionally forces
+  // setPlaying(false) under reducedMotion, trajectory-contract P7 pin).
+  const [playing, setPlaying] = useState(!reducedMotion);
   const [speed, setSpeed] = useState(1);
   const [resetSignal, setResetSignal] = useState(0);
   const [readouts, setReadouts] = useState<Readout[]>([]);

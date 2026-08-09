@@ -153,6 +153,12 @@ const primitiveObjectSchema = z
     trailPoints: wideIntScalar.optional(),
     particleCount: wideIntScalar.optional(),
     children: z.array(idString).min(1).max(SPEC_LIMITS.maxObjects).optional(),
+    // FIX 3 semantic identity (additive, W3): accepted wide like `size` — the
+    // downstream sanitizer strips invalid types/empties and truncates
+    // over-length values with repair reasons (never a new rejection class).
+    role: z.unknown().optional(),
+    description: z.unknown().optional(),
+    semantic: z.unknown().optional(),
   })
   .strict();
 

@@ -406,6 +406,59 @@ function applyEngineField(
   vt.attribute.needsUpdate = true;
 }
 
+/**
+ * Build the world-space trail state (root-cause §1 — TRAJECTORY): a trail for
+ * ANY node carrying trailPoints>0, not just kind "trail". The planet/moon are
+ * kind "sphere" and carried trailPoints 140/80 — they must build the same
+ * ring-buffer + scene-parented Line the trail kind gets. Capacity is capped
+ * by the scene's trail budget (T6: never exceed limits.maxTrailPoints).
+ *
+ * F-18: the trail Line lives in the SCENE (world space), not the moving
+ * holder — pushTrailPoint records world positions, so the history stays where
+ * it happened instead of being dragged along by the body.
+ */
+function buildTrailState(
+  ctx: VisualContext,
+  rn: RuntimeNode,
+  node: SceneGraphNode,
+  holder: THREE.Group,
+  color: string
+): void {
+  const budget = ctx.graph?.limits.maxTrailPoints ?? node.trailPoints;
+  const capacity = Math.min(Math.max(2, node.trailPoints), Math.max(2, budget));
+  // Exact-history CPU ring (Float64 — P1/T12: the recorded samples equal the
+  // engine snapshot exactly) + the float32 GPU copy pushTrailPoint syncs on
+  // every write (three.js WebGLAttributes requires float32 position arrays).
+  const buffer = new Float64Array(capacity * 3);
+  const geo = new THREE.BufferGeometry();
+  const attribute = new THREE.BufferAttribute(new Float32Array(capacity * 3), 3);
+  geo.setAttribute("position", attribute);
+  geo.setDrawRange(0, 0);
+  const line = new THREE.Line(geo, materialFor("line", color));
+  // A17 (root-cause §3 "trail culling"): the boundingSphere is computed once
+  // from the all-zero buffer (r=0 at the origin) and never recomputed — a
+  // trail whose origin leaves the frustum would be culled while its points
+  // are on screen. The trail is a world-space history overlay: it never
+  // participates in bounding tests.
+  line.frustumCulled = false;
+  if (ctx.scene) {
+    ctx.scene.add(line);
+  } else {
+    holder.add(line);
+  }
+  rn.trail = {
+    capacity,
+    buffer,
+    geometry: geo,
+    attribute,
+    line,
+    written: 0,
+    last: null,
+    epoch: 0,
+  };
+  ctx.trackDisposable(geo);
+}
+
 /** Build the visual (meshes/lines/points/sprites) for a primitive node. */
 export function buildVisual(
   ctx: VisualContext,
@@ -415,6 +468,14 @@ export function buildVisual(
 ): void {
   const color = node.color;
   const size = node.size;
+
+  // TRAJECTORY (root-cause §1): trail state for ANY node with a trail budget
+  // — engine bodies (kind "sphere") included. The kind-"trail" case below is
+  // now only a label for the same construction (a trail node with trailPoints
+  // 0 keeps its historical capacity-2 stub — parity preserved).
+  if ((node.trailPoints > 0 || node.kind === "trail") && !rn.trail) {
+    buildTrailState(ctx, rn, node, holder, color);
+  }
 
   switch (node.kind) {
     case "sphere": {
@@ -501,31 +562,8 @@ export function buildVisual(
       break;
     }
     case "trail": {
-      const capacity = Math.max(2, node.trailPoints);
-      const buffer = new Float32Array(capacity * 3);
-      const geo = new THREE.BufferGeometry();
-      const attribute = new THREE.BufferAttribute(buffer, 3);
-      geo.setAttribute("position", attribute);
-      geo.setDrawRange(0, 0);
-      const line = new THREE.Line(geo, materialFor("line", color));
-      // F-18: the trail Line lives in the SCENE (world space), not the moving
-      // holder — pushTrailPoint records world positions, so the history stays
-      // where it happened instead of being dragged along by the body.
-      if (ctx.scene) {
-        ctx.scene.add(line);
-      } else {
-        holder.add(line);
-      }
-      rn.trail = {
-        capacity,
-        buffer,
-        geometry: geo,
-        attribute,
-        line,
-        written: 0,
-        last: null,
-      };
-      ctx.trackDisposable(geo);
+      // The trail state was built above (any node with trailPoints>0). The
+      // case exists so the switch stays exhaustive over PrimitiveKind.
       break;
     }
     case "graph_surface": {

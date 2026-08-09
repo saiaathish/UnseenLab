@@ -204,6 +204,33 @@ export interface VerifiedSimulationSpec {
   focusParameterKeys?: string[];
 }
 
+/**
+ * FIX 3 semantic identity (orbit-learning root cause §4/§5): learner-facing
+ * metadata an author may attach to a scene object so hover cards, legends,
+ * and relationship guides can explain WHAT the object is, WHAT it does, and
+ * whether the learner can interact with it — for every scene type, not just
+ * conceptual graphs. All fields optional; when absent, presentation layers
+ * auto-derive a fallback from id/label/kind/relationships (existing
+ * behavior, byte-identical). Additive-only: no wire-shape change, no new
+ * rejection for specs that omit it.
+ */
+export interface SceneSemanticSpec {
+  /** Canonical display name (e.g. "Star"); capped at 24 chars. */
+  name?: string;
+  /** Object category, e.g. "star" | "planet" | "orbit guide". */
+  type?: string;
+  /** One-sentence learner-facing description of what the object is. */
+  shortDescription?: string;
+  /** Short role label, e.g. "central body" | "orbiter" | "satellite". */
+  role?: string;
+  /** Whether the learner can directly interact with this object. */
+  interactive?: boolean;
+  /** One-sentence summary of how this object relates to the scene, e.g.
+   * "Gravity pulls the planet toward it." When absent, presentation layers
+   * derive one from the scene's relationships. */
+  relationshipSummary?: string;
+}
+
 export interface PrimitiveObjectSpec {
   id: string;
   kind: PrimitiveKind;
@@ -218,6 +245,27 @@ export interface PrimitiveObjectSpec {
   particleCount?: number;
   /** group only: child object ids (depth clamped). */
   children?: string[];
+  /**
+   * FIX 3 shorthand (additive): the object's learner-facing role, e.g.
+   * "central body". Merged into `semantic.role` by the scene-graph and
+   * presentation layers when `semantic.role` is absent.
+   */
+  role?: string;
+  /**
+   * FIX 3 shorthand (additive): a short learner-facing description of what
+   * the object is (capped at 160 chars). Merged into
+   * `semantic.shortDescription` by the scene-graph and presentation layers
+   * when `semantic.shortDescription` is absent.
+   */
+  description?: string;
+  /**
+   * FIX 3 semantic identity block (additive): rich learner-facing metadata
+   * for hover cards, legends, and relationship guides, for every scene type
+   * (conceptual AND verified_simulation/hybrid). All fields optional; the
+   * union is the canonical shape { name, type, shortDescription, role,
+   * interactive, relationshipSummary } keyed by the object's own `id`.
+   */
+  semantic?: SceneSemanticSpec;
 }
 
 export interface RelationshipSpec {

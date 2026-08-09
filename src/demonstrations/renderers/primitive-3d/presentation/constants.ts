@@ -152,16 +152,76 @@ export const GLYPH_HALF_H_NODE = 0.096;
  * texture), height follows the node. Same rule for node labels AND
  * `label`-kind nodes (fixes F-23). `textPx` must include TEXT_SAFETY_PX
  * at the call site.
+ *
+ * When a `frame` is supplied (Wave-2 screen-constant path, root-cause §4 —
+ * "glyphs are 5.6-11.2 CSS px"), the height is governed by the
+ * MIN_NODE_LABEL_PX CSS-px floor projected at that frame instead of
+ * min(size,2): every primary label projects >= 14 CSS px at desktop AND at
+ * the 320px viewport (the floor recomputes from the current viewport px), and
+ * the width is text-measured WITHOUT the size multiplier (the min(size,2)
+ * cap is raised for small nodes — the moon is no longer 8x smaller than the
+ * star). The 2.2u texture cap stays. Without a frame the legacy scale is
+ * returned verbatim (frozen pins).
  */
 export function nodeLabelSpriteScale(
   size: number,
-  textPx: number
+  textPx: number,
+  frame?: GlyphFrame | null
 ): { w: number; h: number } {
   const cap = Math.min(size, 2);
+  if (frame && frame.halfH > 0 && frame.viewportPx > 0) {
+    const glyphWorldH = 2 * nodeLabelGlyphHalfH(size, frame);
+    return {
+      w: Math.min(2.2, (textPx + TEXT_SAFETY_PX) / NODE_PX_PER_UNIT),
+      h: glyphWorldH / GLYPH_TEX_FRACTION,
+    };
+  }
   return {
     w: Math.min(2.2, (textPx + TEXT_SAFETY_PX) / NODE_PX_PER_UNIT) * cap,
     h: NODE_SPRITE_H_UNIT * cap,
   };
+}
+
+// ---------------------------------------------------------------------------
+// 1.2b Screen-constant glyph floor (orbit-learning Wave 2, root-cause §4)
+// ---------------------------------------------------------------------------
+
+/** Primary node-label glyph floor in CSS px (mission brief: 14-16 px desktop,
+ * readable at the 320px viewport and at 125%/150% zoom — a CSS-px floor is
+ * zoom-invariant). */
+export const MIN_NODE_LABEL_PX = 14;
+
+/** Secondary chrome labels (guides / camera markers) may render at 12-14 px. */
+export const MIN_SECONDARY_LABEL_PX = 12;
+
+/** Fraction of the label texture height occupied by the 30px glyph (28/72):
+ * the sprite height that maps a target glyph world height onto the texture. */
+export const GLYPH_TEX_FRACTION = 28 / 72;
+
+/** Camera frame for screen-constant glyph sizing: the visible half-height in
+ * world units at the label plane (perspective: distance * tan(fov/2); ortho:
+ * the ortho base half-height) and the viewport height in CSS px. */
+export interface GlyphFrame {
+  halfH: number;
+  viewportPx: number;
+}
+
+/**
+ * Glyph half-height of a node label in world units. Without a frame this is
+ * the legacy GLYPH_HALF_H_NODE * min(size,2) (frozen pins). With a frame the
+ * screen-constant floor is applied: the glyph projects to >= MIN_NODE_LABEL_PX
+ * CSS px at that frame (glyphWorldH = 2·halfH·MIN/viewportPx), so the
+ * smallest body (moon, size 0.35) is never 2-8x smaller than the star's glyph
+ * again.
+ */
+export function nodeLabelGlyphHalfH(
+  size: number,
+  frame?: GlyphFrame | null
+): number {
+  const base = GLYPH_HALF_H_NODE * Math.min(size, 2);
+  if (!frame || frame.halfH <= 0 || frame.viewportPx <= 0) return base;
+  const floor = MIN_NODE_LABEL_PX * (frame.halfH / frame.viewportPx);
+  return Math.max(base, floor);
 }
 
 /** World→px conversion for edge label sprites (audit3: 320px / 1.9u). */
