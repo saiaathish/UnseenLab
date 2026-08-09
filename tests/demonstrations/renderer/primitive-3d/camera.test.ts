@@ -330,6 +330,33 @@ describe("perspectiveDistance", () => {
     expect(distance).toBeGreaterThan(4);
     expect(distance).toBeLessThan(4.2);
   });
+
+  it("P1-1: the [4,120] clamp is the BUILD contract — an explicit clampMax: null lifts it (engine-anchored reframes)", () => {
+    // A huge flat scene whose exact canonical requirement exceeds the build
+    // cap (an escape's trail span): the BUILD frame binds at 120...
+    const huge: ContentExtent = {
+      min: { x: -10, y: -2.5, z: -120 },
+      max: { x: 10, y: 2.5, z: 120 },
+    };
+    const capped = perspectiveDistance(huge, DEFAULT_FOV_DEG, ASPECT_4_3);
+    expect(capped).toBe(120);
+    // ...while an engine-anchored REFRAME (clampMax: null) grows past it —
+    // the canonical distance is exact, never a blind zoom-out.
+    const uncapped = perspectiveDistance(huge, DEFAULT_FOV_DEG, ASPECT_4_3, {
+      clampMax: null,
+    });
+    expect(uncapped).toBeGreaterThan(120);
+    // An explicit numeric cap still binds.
+    expect(
+      perspectiveDistance(huge, DEFAULT_FOV_DEG, ASPECT_4_3, { clampMax: 200 })
+    ).toBe(200);
+    // The 4 floor stays for both paths.
+    expect(
+      perspectiveDistance(contentExtentEmpty(), DEFAULT_FOV_DEG, ASPECT_4_3, {
+        clampMax: null,
+      })
+    ).toBe(4);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -652,6 +679,30 @@ describe("contentAABBFromGraph", () => {
   it("empty / null graphs yield the zero extent", () => {
     expect(contentAABBFromGraph(null)).toEqual(contentExtentEmpty());
     expect(contentAABBFromGraph(graph([]))).toEqual(contentExtentEmpty());
+  });
+
+  it("P2-1: an engine mapping re-anchors mapped nodes to their mapping pivot (never the phantom spec position)", () => {
+    // The orbit pattern: a "planet-system" group at spec (6,0,0) carrying the
+    // planet mesh at local (6,0,0). The curated mapping folds the local child
+    // offset (offsetX −6), so the anchored group pivot lands at (0,0,0) and
+    // the planet at world (6,0,0) — the engine-anchored truth — instead of
+    // the never-rendered spec world (12,0,0).
+    const g = graph([
+      node("planet-system", "group", 6, 0, 1, undefined, ["planet"]),
+      node("planet", "sphere", 6, 0, 1.3, "Planet"),
+    ]);
+    const mapping: EngineMapping = {
+      "planet-system": { body: "planet", scale: 0.04, offsetX: -6, offsetY: 0 },
+    };
+    const spec = contentAABBFromGraph(g);
+    const anchored = contentAABBFromGraph(g, { engineMapping: mapping });
+    // Spec positions stack the phantom: planet at world 12.
+    expect(spec.max.x).toBeGreaterThan(12);
+    // The anchored frame covers the engine-anchored planet at world 6.
+    expect(anchored.max.x).toBeLessThan(7.5);
+    expect(anchored.max.x).toBeGreaterThan(6.5);
+    // Without a mapping the frame is unchanged (opt-in only).
+    expect(contentAABBFromGraph(g, { engineMapping: null })).toEqual(spec);
   });
 });
 

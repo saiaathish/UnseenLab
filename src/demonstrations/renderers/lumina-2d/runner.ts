@@ -255,10 +255,19 @@ export class SimRunner {
     }
   }
 
-  /** Emit the module's canonical visual state when it provides one. */
-  private emitVisualState() {
+  /** Emit the module's canonical visual state when it provides one. The
+   * `oneShotReaim` flag (P2-2) wraps the emission with `reaimed: true` —
+   * ONE-SHOT: the state object is cloned, never the module's snapshot, and
+   * the NEXT emission is the engine's pure read again (the module's own
+   * flags are untouched, so the coupling replay-parity contract holds). */
+  private emitVisualState(oneShotReaim = false) {
     const state = this.module?.getVisualState?.() ?? null;
-    if (state) this.onVisualState(state);
+    if (!state) return;
+    if (oneShotReaim) {
+      this.onVisualState({ ...state, reaimed: true });
+      return;
+    }
+    this.onVisualState(state);
   }
 
   // -------------------------------------------------------------------------
@@ -309,7 +318,18 @@ export class SimRunner {
     if (this.module) this.onReadouts(this.module.getReadouts());
     // A reset re-seeds body positions; push the canonical state immediately so
     // coupled surfaces snap back without waiting for the next emission.
-    this.emitVisualState();
+    //
+    // P2-2 (reset connector): a reset teleports the body back to launch — the
+    // coupled 3D surface must break its trail on THAT emission, not ~66ms
+    // later when the stage's parameter re-application bumps the engine epoch
+    // (a transient old-last -> new-start connector + lost first post-reset
+    // samples). The engine's OWN reset() keeps its no-bump semantics
+    // (coupling replay parity: reset + params == params alone), so the RUNNER
+    // — the party that knows a reset happened — flags the discontinuity with
+    // a ONE-SHOT `reaimed: true` on the immediate emission. The renderer's
+    // boolean false->true edge clears exactly once; the next emission is the
+    // engine's pure read again.
+    this.emitVisualState(true);
   }
 
   getModule(): SimulationModule | null {

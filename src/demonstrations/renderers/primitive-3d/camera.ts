@@ -270,9 +270,14 @@ export function extentFromDynamic(dynamic: DynamicExtent): ContentExtent {
 /**
  * World position of every node (child positions in the scene graph are local
  * to their parent group; the renderer stacks holders, so content extents must
- * be accumulated through the parent chain).
+ * be accumulated through the parent chain). `anchorDelta` (P2-1) adds the
+ * engine-mapping world offsets of mapped nodes to their own position
+ * contribution — see contentAABBFromGraph.
  */
-function worldPositions(graph: SceneGraph): Map<string, Vec3> {
+function worldPositions(
+  graph: SceneGraph,
+  anchorDelta?: Map<string, Vec3>
+): Map<string, Vec3> {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const parentOf = new Map<string, string>();
   for (const n of graph.nodes) {
@@ -286,16 +291,40 @@ function worldPositions(graph: SceneGraph): Map<string, Vec3> {
     if (!node) return { x: 0, y: 0, z: 0 };
     const parent = parentOf.get(id);
     const p = parent ? resolve(parent) : { x: 0, y: 0, z: 0 };
+    const delta = anchorDelta?.get(id) ?? { x: 0, y: 0, z: 0 };
     const w = {
-      x: p.x + node.position.x,
-      y: p.y + node.position.y,
-      z: p.z + node.position.z,
+      x: p.x + node.position.x + delta.x,
+      y: p.y + node.position.y + delta.y,
+      z: p.z + node.position.z + delta.z,
     };
     world.set(id, w);
     return w;
   };
   for (const n of graph.nodes) resolve(n.id);
   return world;
+}
+
+export interface ContentAABBFromGraphOptions {
+  graphMode?: boolean;
+  /**
+   * ENGINE-ANCHORED static content (Wave-4b P2-1 — the build-frame dead space
+   * repair): when an engine mapping is present (hybrid showcases), mapped
+   * nodes render at the mapping pivot — worldX = (offsetX ?? 0) + body·scale,
+   * worldZ = (offsetY ?? 0) + body·scale (applyTransforms overrides the spec
+   * position every frame) — so the SPEC position is a phantom that is never
+   * rendered (orbits: the "planet-system" group at spec (6,0,0) re-anchors to
+   * (0,0,0) and the planet mesh lands on the engine's radius-6 orbit instead
+   * of world 12). The frame must cover the anchored positions, or the initial
+   * frame and EVERY reframe inflate ~2x (planet@12/moon@13.4 → distance
+   * 32.13 vs the rendered planet@6/moon@7.4 → 26.12) and — grow-only — the
+   * tight frame becomes unreachable (orbit disc 3.54% < C1's 5% floor in
+   * production). The curated mappings fold the local child offsets into
+   * offsetX/offsetY, so applying the offsets to the mapped nodes' OWN
+   * positions yields exactly the engine-default anchored frame — the state
+   * the renderer applies within one emission (same math the C1 fixture's
+   * visibleOrbitGraph() uses).
+   */
+  engineMapping?: EngineMapping | null;
 }
 
 /**
@@ -314,10 +343,20 @@ function worldPositions(graph: SceneGraph): Map<string, Vec3> {
  */
 export function contentAABBFromGraph(
   graph: SceneGraph | null,
-  opts?: { graphMode?: boolean }
+  opts?: ContentAABBFromGraphOptions
 ): ContentExtent {
   if (!graph || graph.nodes.length === 0) return contentExtentEmpty();
-  const world = worldPositions(graph);
+  const anchorDelta = new Map<string, Vec3>();
+  if (opts?.engineMapping) {
+    for (const [id, entry] of Object.entries(opts.engineMapping)) {
+      anchorDelta.set(id, {
+        x: entry.offsetX ?? 0,
+        y: 0,
+        z: entry.offsetY ?? 0,
+      });
+    }
+  }
+  const world = worldPositions(graph, anchorDelta);
   const parts: ContentExtent[] = [];
   for (const node of graph.nodes) {
     if (node.kind === "group") continue;
@@ -463,11 +502,25 @@ export function graphFrameHalfHeight(
  * front/top/left/right + the 9-combo orbit band — the same directions
  * canonicalViews enumerates for non-graph scenes — so the gate's I5 verdict
  * and the rendered frame agree in every canonical view.
+ *
+ * Wave-4b (P1-1 escape reframe cap): the [4, 120] clamp applies to the BUILD
+ * frame only. An engine-anchored REFRAME (maybeReframe grow/shrink) passes
+ * `clampMax: null`: the canonical distance is EXACT (never a blind zoom-out),
+ * so an escape's grown frame may legitimately exceed 120 — a speed-3.0 escape
+ * needs ~260 at |y| = 3000, and capping the grow at 120 walks the planet and
+ * trail out of the frustum (contract C4).
  */
+export interface PerspectiveDistanceOptions {
+  /** Upper clamp (default 120 — the build-frame contract). null = no upper
+   * clamp (engine-anchored reframes; the canonical distance is exact). */
+  clampMax?: number | null;
+}
+
 export function perspectiveDistance(
   aabb: ContentExtent,
   fovDeg: number,
-  aspect: number
+  aspect: number,
+  opts?: PerspectiveDistanceOptions
 ): number {
   const halfX = (aabb.max.x - aabb.min.x) / 2;
   const halfY = (aabb.max.y - aabb.min.y) / 2;
@@ -475,7 +528,13 @@ export function perspectiveDistance(
   const margin = frameMarginFor(half);
   let distance = (half + margin) / Math.tan((fovDeg * Math.PI) / 360);
   distance = Math.max(distance, perspectiveCanonicalDistance(aabb, fovDeg));
-  return clampNum(distance, 4, 120);
+  // Explicit `clampMax: null` (reframe) means "no upper clamp" — `??` cannot
+  // express that (null ?? 120 === 120), so distinguish undefined from null.
+  const clampMax =
+    opts?.clampMax !== undefined ? opts.clampMax : 120;
+  return clampMax === null
+    ? Math.max(distance, 4)
+    : clampNum(distance, 4, clampMax);
 }
 
 /**
@@ -656,7 +715,14 @@ export function maybeReframe(input: MaybeReframeInput): ReframeResult | null {
     }
     return null;
   }
-  const required = perspectiveDistance(aabb, input.fovDeg, input.aspect);
+  const required = perspectiveDistance(aabb, input.fovDeg, input.aspect, {
+    // P1-1: engine-anchored reframes are NOT capped at the build-frame 120 —
+    // the canonical distance is exact, so an escape's grown frame (260 at
+    // |y|=3000) stays honest instead of walking the planet + trail out of
+    // the frustum. The build frame keeps the [4,120] contract (frameCamera's
+    // build path calls perspectiveDistance without opts).
+    clampMax: null,
+  });
   if (required > input.orbit.distance * REFRAME_HYSTERESIS) {
     return {
       graphMode: false,
@@ -1071,6 +1137,13 @@ export interface FrameInput {
   graphMode: boolean;
   orbit: OrbitState;
   orthoBaseHalf: number;
+  /**
+   * Engine mapping (hybrid showcases, P2-1): the static content frame is
+   * ENGINE-ANCHORED — mapped nodes render at the mapping pivot, never at
+   * their spec position — so the build frame matches what renders (the
+   * orbit disc >= 5% floor instead of the phantom-inflated 3.54%).
+   */
+  engineMapping?: EngineMapping | null;
   /** Build-time aspect (defaults to the stage-enforced 4/3; per-frame
    * applyCamera uses the live canvas aspect). */
   aspect?: number;
@@ -1143,7 +1216,13 @@ export function frameCamera(
         distance: input.orbit.distance,
       },
       orthoBaseHalf: input.orthoBaseHalf,
-      content: contentAABBFromGraph(ref.graph, { graphMode: input.graphMode }),
+      content: contentAABBFromGraph(ref.graph, {
+        graphMode: input.graphMode,
+        // P2-1: the static content of an engine-coupled scene is anchored at
+        // the mapping pivots — never the phantom spec positions — so the
+        // reframe union covers exactly what renders.
+        engineMapping: ref.engineMapping,
+      }),
       dynamic,
       releaseLatch: ref.releaseLatch,
       shrink: ref.shrink,
@@ -1159,7 +1238,13 @@ export function frameCamera(
 
   if (!graph) return null;
   const aspect = input.aspect ?? FRAME_ASPECT_DEFAULT;
-  const content = contentAABBFromGraph(graph, { graphMode: input.graphMode });
+  const content = contentAABBFromGraph(graph, {
+    graphMode: input.graphMode,
+    // P2-1: engine-anchored static content — the build frame covers the
+    // positions the engine mapping renders (hybrid showcases), not the
+    // never-rendered spec positions.
+    engineMapping: input.engineMapping,
+  });
   const center3 = contentExtentCenter(content);
   const center = new THREE.Vector3(center3.x, center3.y, center3.z);
 

@@ -62,6 +62,16 @@ export interface SceneSeamObject {
 export interface SceneSeamCamera {
   reframed: boolean;
   reframeCount: number;
+  /**
+   * The CURRENT perspective orbit distance (world units) of the live camera —
+   * the engine-anchored frame the renderer applied (Wave-4b P2-1): the build
+   * frame after setSpec and every engine-state/reframe push. Exposed so the
+   * product's ACTUAL initial frame can be pinned (the A22 hostile Q1 floor
+   * test runs the real setSpec → buildScene → frameCamera path and asserts
+   * the orbit disc >= 5% contract on this distance). Additive: existing
+   * consumers read only reframed/reframeCount.
+   */
+  distance: number;
 }
 
 export interface SceneSeamEngine {

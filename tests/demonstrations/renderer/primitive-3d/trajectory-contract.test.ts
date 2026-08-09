@@ -24,7 +24,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { createElement } from "react";
-import { render } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import type { SceneGraph, SceneGraphNode } from "@/demonstrations/renderers/primitive-3d/types";
 import type { RuntimeNode } from "@/demonstrations/renderers/primitive-3d/renderer";
 import type { EngineMapping } from "@/demonstrations/renderers/primitive-3d/types";
@@ -38,7 +38,10 @@ import {
   type DynamicExtent,
 } from "@/demonstrations/renderers/primitive-3d/camera";
 import { createOrbits } from "@/demonstrations/renderers/lumina-2d/engines/orbits";
-import { VISUAL_STATE_INTERVAL } from "@/demonstrations/renderers/lumina-2d/runner";
+import {
+  SimRunner,
+  VISUAL_STATE_INTERVAL,
+} from "@/demonstrations/renderers/lumina-2d/runner";
 import type { EngineVisualState } from "@/demonstrations/renderers/lumina-2d/types";
 import type { SimContext } from "@/demonstrations/renderers/lumina-2d/types";
 import { buildOrbitsShowcase } from "@/demonstrations/showcases/orbits/build-spec";
@@ -65,6 +68,7 @@ beforeAll(async () => {
 vi.mock("@/demonstrations/renderers/primitive-3d", () => {
   const calls: Array<{ method: string; args: unknown[] }> = [];
   class MockPrimitiveSceneRenderer {
+    static classificationResult: "bound" | "escape" | null = null;
     constructor() {
       calls.push({ method: "constructor", args: [] });
     }
@@ -82,6 +86,18 @@ vi.mock("@/demonstrations/renderers/primitive-3d", () => {
     }
     resetView() {
       calls.push({ method: "resetView", args: [] });
+    }
+    getEscapeClassification() {
+      return MockPrimitiveSceneRenderer.classificationResult;
+    }
+    readLabelProjections() {
+      return null;
+    }
+    getIdentityAnchor() {
+      return null;
+    }
+    getEdgeAnchor() {
+      return null;
     }
     dispose() {}
     static get calls() {
@@ -310,26 +326,25 @@ describe("trajectory contract (T1-T12)", () => {
   });
 
   it("T5: the ENGINE emits a reaimed/epoch flag when a re-aim teleports the body", () => {
-    const module = createOrbits();
+    const orbitsEngine = createOrbits();
     const ctx: SimContext = { width: 800, height: 600, dpr: 1, time: 0 };
-    module.init(ctx);
-    for (let i = 0; i < 30; i++) module.step(1 / 60);
+    orbitsEngine.init(ctx);
+    for (let i = 0; i < 30; i++) orbitsEngine.step(1 / 60);
 
     // Wave-2 API (root-cause seam): EngineVisualState gains a `reaimed`
     // boolean (or an epoch counter) set by the engine whenever placeBodies()
     // teleports the body (setParameter of any non-g key, reset, drag release).
     type ReaimedVisualState = EngineVisualState & { reaimed?: boolean };
-    const before = module.getVisualState!() as ReaimedVisualState;
+    const before = orbitsEngine.getVisualState!() as ReaimedVisualState;
     expect(before.reaimed).toBeFalsy(); // steady-state frames carry no flag
 
     // Any non-g parameter change re-aims (placeBodies — orbits.ts:263): the
     // visual state emitted right after MUST flag the discontinuity so the
     // renderer can start a new segment instead of connecting.
-    module.setParameter("speed", 1.2);
-    const after = module.getVisualState!() as ReaimedVisualState;
+    orbitsEngine.setParameter("speed", 1.2);
+    const after = orbitsEngine.getVisualState!() as ReaimedVisualState;
     expect(after.reaimed).toBe(true);
   });
-
   it("T6: trail capacity respects the maxTrailPoints budget (capacity cap)", () => {
     const graph = graphWithNodes(
       [node("t", "trail", { x: 0, y: 0, z: 0 }, 1, 500)],
@@ -455,14 +470,14 @@ describe("trajectory contract (T1-T12)", () => {
     expect(body.center.z).toBe(4000 * 0.04);
     // (b) the engine itself never clamps an escaping body back inside the
     // world: at speed 3.0 the body distance keeps growing past 150.
-    const module = createOrbits();
+    const orbitsEngine = createOrbits();
     const ctx: SimContext = { width: 800, height: 600, dpr: 1, time: 0 };
-    module.init(ctx);
-    module.setParameter("speed", 3);
+    orbitsEngine.init(ctx);
+    orbitsEngine.setParameter("speed", 3);
     let maxDist = 0;
     for (let i = 0; i < 600; i++) {
-      module.step(1 / 60);
-      const s = module.getVisualState!()!;
+      orbitsEngine.step(1 / 60);
+      const s = orbitsEngine.getVisualState!()!;
       const p = s.bodies!.planet;
       maxDist = Math.max(maxDist, Math.hypot(p.x, p.y));
     }
@@ -482,6 +497,113 @@ describe("trajectory contract (T1-T12)", () => {
     // The trail's last sample must equal the mapped snapshot exactly — the
     // renderer and the trail agree on the engine position (no lag/offset).
     expect(bufferTriples(t)[0]).toEqual([mapped.x, mapped.y, mapped.z]);
+  });
+
+  it("T13: runner.reset() emits ONE-SHOT reaimed:true immediately; the next emission reverts and the module is untouched (P2-2)", () => {
+    // P2-2 (reset connector): a reset teleports the body back to launch — the
+    // coupled 3D surface must break its trail on THAT emission, not ~66ms
+    // later when the stage's parameter re-application bumps the engine epoch
+    // (a transient old-last -> new-start connector + lost first post-reset
+    // samples). The ENGINE's reset() keeps its no-bump semantics (coupling
+    // replay parity: reset + params == params alone) — the RUNNER, the party
+    // that knows a reset happened, wraps ONLY the emission with a one-shot
+    // `reaimed: true`.
+    const rafQueue: Array<(t: number) => void> = [];
+    let rafId = 0;
+    const originalRaf = globalThis.requestAnimationFrame;
+    const originalCaf = globalThis.cancelAnimationFrame;
+    globalThis.requestAnimationFrame = ((cb: (t: number) => void) => {
+      rafQueue.push(cb);
+      return ++rafId;
+    }) as typeof requestAnimationFrame;
+    globalThis.cancelAnimationFrame = (() => {}) as typeof cancelAnimationFrame;
+    try {
+      const canvas = document.createElement("canvas");
+      const runner = new SimRunner(canvas);
+      const emissions: EngineVisualState[] = [];
+      runner.onVisualState = (s) => emissions.push(s);
+      runner.setScene({ engineId: "orbits", parameters: {}, seed: 1 });
+      // setScene emitted the baseline (no flag). Let the loop emit a couple
+      // of steady-state snapshots (the runner keeps emitting while paused).
+      const fire = (now: number) => {
+        const cb = rafQueue.shift();
+        if (cb) cb(now);
+      };
+      fire(1000);
+      fire(1100);
+      fire(1200);
+      const steady = emissions[emissions.length - 1];
+      expect(steady.reaimed).toBeFalsy();
+
+      runner.reset();
+      // The IMMEDIATE reset emission carries the one-shot flag.
+      const resetEmission = emissions[emissions.length - 1];
+      expect(resetEmission.reaimed).toBe(true);
+      expect(resetEmission).not.toBe(steady); // a clone, never a mutation
+
+      // The NEXT loop emission (the runner clamps dt to MAX_DT 0.05, so the
+      // visual-state interval needs two ~100ms frames) is the engine's pure
+      // read again.
+      fire(1300);
+      fire(1400);
+      const nextEmission = emissions[emissions.length - 1];
+      expect(nextEmission.reaimed).toBeFalsy();
+      expect(nextEmission).not.toBe(resetEmission);
+      // The module itself was NOT mutated (replay parity): a fresh read has
+      // no flag and the epoch did not bump.
+      const engineModule = runner.getModule()!;
+      const fresh = engineModule.getVisualState!() as EngineVisualState;
+      expect(fresh.reaimed).toBeFalsy();
+      expect(fresh.epoch).toBe(steady.epoch ?? 0);
+      runner.dispose();
+    } finally {
+      globalThis.requestAnimationFrame = originalRaf;
+      globalThis.cancelAnimationFrame = originalCaf;
+    }
+  });
+
+  it("T14: resetting through the RUNNER keeps the engine epoch stable (replay parity) while the emission flags the re-aim", () => {
+    // P2-2 (reset connector) — the two halves must hold TOGETHER:
+    //  (a) the module's epoch does NOT bump on reset (coupling replay
+    //      parity: a parameter-only restore reproduces the same canonical
+    //      state as a from-scratch run), and
+    //  (b) the runner's one-shot `reaimed: true` on the immediate emission
+    //      is the ONLY re-aim signal — the renderer's false->true edge
+    //      consumes exactly this emission (the renderer-level setEngineState
+    //      path is pinned in renderer-coupling.test.ts).
+    const rafQueue: Array<(t: number) => void> = [];
+    let rafId = 0;
+    const originalRaf = globalThis.requestAnimationFrame;
+    const originalCaf = globalThis.cancelAnimationFrame;
+    globalThis.requestAnimationFrame = ((cb: (t: number) => void) => {
+      rafQueue.push(cb);
+      return ++rafId;
+    }) as typeof requestAnimationFrame;
+    globalThis.cancelAnimationFrame = (() => {}) as typeof cancelAnimationFrame;
+    try {
+      const canvas = document.createElement("canvas");
+      const runner = new SimRunner(canvas);
+      const emissions: EngineVisualState[] = [];
+      runner.onVisualState = (s) => emissions.push(s);
+      runner.setScene({ engineId: "orbits", parameters: {}, seed: 1 });
+      const fire = (now: number) => {
+        const cb = rafQueue.shift();
+        if (cb) cb(now);
+      };
+      fire(1000);
+      fire(1100);
+      const epochBefore = emissions[emissions.length - 1].epoch;
+      runner.reset();
+      const resetEmission = emissions[emissions.length - 1];
+      // (a) no epoch bump — the engine's reset() keeps its no-bump semantics.
+      expect(resetEmission.epoch).toBe(epochBefore);
+      // (b) the one-shot flag is the re-aim signal on the immediate emission.
+      expect(resetEmission.reaimed).toBe(true);
+      runner.dispose();
+    } finally {
+      globalThis.requestAnimationFrame = originalRaf;
+      globalThis.cancelAnimationFrame = originalCaf;
+    }
   });
 });
 
@@ -511,15 +633,15 @@ describe("physics honesty contract (P1-P7)", () => {
   it("P2: escape is real at the engine level — never faked into a bound orbit (PIN)", () => {
     // PIN (passes today — engine physics are verified): launch speed >= sqrt(2)
     // is a TRUE escape; the body distance grows well past the launch radius.
-    const module = createOrbits();
+    const orbitsEngine = createOrbits();
     const ctx: SimContext = { width: 800, height: 600, dpr: 1, time: 0 };
-    module.init(ctx);
-    module.setParameter("speed", 2);
+    orbitsEngine.init(ctx);
+    orbitsEngine.setParameter("speed", 2);
     const distances: number[] = [];
     for (let i = 0; i < 1200; i++) {
-      module.step(1 / 60);
+      orbitsEngine.step(1 / 60);
       if (i % 120 === 0) {
-        const p = module.getVisualState!()!.bodies!.planet;
+        const p = orbitsEngine.getVisualState!()!.bodies!.planet;
         distances.push(Math.hypot(p.x, p.y));
       }
     }
@@ -560,10 +682,10 @@ describe("physics honesty contract (P1-P7)", () => {
   });
 
   it("P7: the reduced-motion promise holds — the stage pauses continuous motion", async () => {
-    const module = (await import("@/demonstrations/renderers/primitive-3d")) as unknown as {
+    const rendererBarrel = (await import("@/demonstrations/renderers/primitive-3d")) as unknown as {
       PrimitiveSceneRenderer: { calls: Array<{ method: string; args: unknown[] }> };
     };
-    module.PrimitiveSceneRenderer.calls.length = 0;
+    rendererBarrel.PrimitiveSceneRenderer.calls.length = 0;
     render(
       createElement(DemonstrationStage, {
         spec: ORBITS_SPEC,
@@ -580,12 +702,143 @@ describe("physics honesty contract (P1-P7)", () => {
         engineMapping: engineMappingFor("orbits"),
       })
     );
-    const setPlaying = module.PrimitiveSceneRenderer.calls.filter(
+    const setPlaying = rendererBarrel.PrimitiveSceneRenderer.calls.filter(
       (c) => c.method === "setPlaying"
     );
     expect(setPlaying.length).toBeGreaterThan(0);
     // Root cause §6: "Reduced-motion promise is FALSE (playing=true
     // unconditional)". The stage must not keep the coupled 3D scene moving.
     expect(setPlaying[setPlaying.length - 1].args[0]).toBe(false);
+  });
+
+  it("P8: under reduced motion the ENGINE runner never moves the body (Play is gated — hostile Q2 body-doesn't-move pin)", async () => {
+    // P2-3: the P7 pin gates the 3D renderer's own animation loop, but the
+    // hidden 2D engine runner ALSO advances the coupled body through its
+    // visual-state emissions. Under reduced motion the runner must be told
+    // playing=false even when the page passes playing=true — the emitted
+    // body positions then stay EXACTLY constant (the 3D body cannot move).
+    const rafQueue: Array<(t: number) => void> = [];
+    const originalRaf = globalThis.requestAnimationFrame;
+    const originalCaf = globalThis.cancelAnimationFrame;
+    globalThis.requestAnimationFrame = ((cb: (t: number) => void) => {
+      rafQueue.push(cb);
+      return ++rafQueue.length;
+    }) as typeof requestAnimationFrame;
+    globalThis.cancelAnimationFrame = (() => {}) as typeof cancelAnimationFrame;
+    const states: EngineVisualState[] = [];
+    try {
+      render(
+        createElement(DemonstrationStage, {
+          spec: ORBITS_SPEC,
+          mode: "2d", // the Lumina runner path (the hidden engine driver)
+          parameters: {},
+          playing: true, // the page forces playing=true unconditionally
+          speed: 1,
+          resetSignal: 0,
+          reducedMotion: true,
+          readouts: [],
+          onReadouts: () => {},
+          onVisualState: (s) => states.push(s),
+        })
+      );
+      const fire = (now: number) => {
+        const cb = rafQueue.shift();
+        if (cb) cb(now);
+      };
+      // Drive enough loop frames to cross several visual-state intervals.
+      for (let i = 0; i < 6; i++) fire(1000 + i * 100);
+      expect(states.length).toBeGreaterThanOrEqual(2);
+      const planet = (s: EngineVisualState) => s.bodies!.planet;
+      const last = planet(states[states.length - 1]);
+      for (const s of states) {
+        // The body does NOT move under reduced motion — every emission is
+        // the launch position.
+        expect(planet(s)).toEqual(last);
+      }
+      // Sanity: the launch position is the engine default, not a stale read.
+      expect(last).toEqual({ x: 150, y: 0 });
+    } finally {
+      globalThis.requestAnimationFrame = originalRaf;
+      globalThis.cancelAnimationFrame = originalCaf;
+    }
+  });
+
+  it("Q5: the planet's details card discloses the honest trajectory classification (Bound / Escape), never for the star", async () => {
+    // Hostile Q5: the classification exists only in window.__unseenlabScene —
+    // the learner must SEE it on the stage's details card (FIX 15), driven by
+    // the SAME honest rule (engine speed + radial growth; null/absent → no
+    // line; an escape is never labeled "orbiting").
+    const rendererBarrel = (await import("@/demonstrations/renderers/primitive-3d")) as unknown as {
+      PrimitiveSceneRenderer: {
+        calls: Array<{ method: string; args: unknown[] }>;
+        classificationResult: "bound" | "escape" | null;
+      };
+    };
+    const Renderer = rendererBarrel.PrimitiveSceneRenderer;
+    Renderer.calls.length = 0;
+    Renderer.classificationResult = "escape";
+
+    const user = (await import("@testing-library/user-event")).default;
+    const { rerender } = render(
+      createElement(DemonstrationStage, {
+        spec: ORBITS_SPEC,
+        parameters: {},
+        playing: false,
+        speed: 1,
+        resetSignal: 0,
+        reducedMotion: false,
+        readouts: [{ label: "Speed", value: "3.0" }],
+        onReadouts: () => {},
+        visualState: {
+          bodies: { star: { x: 0, y: 0 }, planet: { x: 150, y: 0 } },
+          speed: 3.0,
+          distance: 150,
+        },
+        engineMapping: engineMappingFor("orbits"),
+      })
+    );
+
+    // Pin the PRIMARY object (the planet — first in the identity list).
+    const planetItem = screen.getByRole("listitem", { name: "Planet" });
+    await user.click(planetItem);
+    // The details card discloses the honest classification.
+    const details = await screen.findByRole("region", { name: "Details: Planet" });
+    expect(within(details).getByText("Trajectory")).toBeInTheDocument();
+    expect(within(details).getByText("escape")).toBeInTheDocument();
+
+    // The STAR card never carries a trajectory line (the classification is
+    // about the primary moving body).
+    Renderer.classificationResult = "bound";
+    const starItem = screen.getByRole("listitem", { name: "Star" });
+    await user.click(starItem);
+    const starDetails = await screen.findByRole("region", { name: "Details: Star" });
+    expect(within(starDetails).queryByText("Trajectory")).not.toBeInTheDocument();
+
+    // null/absent classification → no line on the planet card (re-render
+    // with a changed state re-reads the renderer's classification).
+    Renderer.classificationResult = null;
+    rerender(
+      createElement(DemonstrationStage, {
+        spec: ORBITS_SPEC,
+        parameters: {},
+        playing: false,
+        speed: 1,
+        resetSignal: 0,
+        reducedMotion: false,
+        readouts: [{ label: "Speed", value: "3.0" }],
+        onReadouts: () => {},
+        visualState: {
+          bodies: { star: { x: 0, y: 0 }, planet: { x: 150, y: 5 } },
+          speed: 3.0,
+          distance: 150,
+        },
+        engineMapping: engineMappingFor("orbits"),
+      })
+    );
+    await user.click(planetItem);
+    const planetCard = await screen.findByRole("region", { name: "Details: Planet" });
+    await waitFor(() => {
+      expect(within(planetCard).queryByText("Trajectory")).not.toBeInTheDocument();
+    });
   });
 });

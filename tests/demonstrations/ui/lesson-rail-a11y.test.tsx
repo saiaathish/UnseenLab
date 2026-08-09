@@ -95,6 +95,18 @@ vi.mock("@/demonstrations/renderers/primitive-3d", () => {
       }
     }
     setSpec() {}
+    getEscapeClassification() {
+      return null;
+    }
+    readLabelProjections() {
+      return null;
+    }
+    getIdentityAnchor() {
+      return null;
+    }
+    getEdgeAnchor() {
+      return null;
+    }
     setPlaying() {}
     setSpeed() {}
     setEngineState() {}

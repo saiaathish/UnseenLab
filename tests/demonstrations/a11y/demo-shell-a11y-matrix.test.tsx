@@ -69,6 +69,18 @@ vi.mock("@/demonstrations/renderers/primitive-3d", () => {
       options.onError?.({ reason: "webgl_unavailable" });
     }
     setSpec() {}
+    getEscapeClassification() {
+      return null;
+    }
+    readLabelProjections() {
+      return null;
+    }
+    getIdentityAnchor() {
+      return null;
+    }
+    getEdgeAnchor() {
+      return null;
+    }
     setPlaying() {}
     setSpeed() {}
     setEngineState() {}

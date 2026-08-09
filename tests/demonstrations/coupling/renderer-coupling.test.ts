@@ -23,6 +23,9 @@ import { SPEC_LIMITS } from "@/demonstrations/spec/demo-spec";
 import type { DemoSpecV1 } from "@/demonstrations/spec/demo-spec";
 import type { EngineMapping } from "@/demonstrations/renderers/primitive-3d/types";
 import { PrimitiveSceneRenderer } from "@/demonstrations/renderers/primitive-3d/renderer";
+import { DEFAULT_FOV_DEG } from "@/demonstrations/renderers/primitive-3d/camera";
+import { engineMappingFor } from "@/demonstrations/showcases/coupling";
+import { buildOrbitsShowcase } from "@/demonstrations/showcases/orbits/build-spec";
 
 // ---------------------------------------------------------------------------
 // Mock 'three' (hoisted so it applies to renderer.ts + materials.ts imports)
@@ -715,6 +718,113 @@ describe("primitive renderer canonical-state coupling", () => {
     expect(attr[idxB * 3 + 1]).toBeCloseTo(base[idxB * 3 + 1] + lift, 6);
     // The base in-plane coordinate is preserved (additive, not replaced).
     expect(attr[idxA * 3]).toBeCloseTo(base[idxA * 3], 6);
+    renderer.dispose();
+  });
+
+  it("the runner's reset emission clears the trail IMMEDIATELY — no reset connector, first post-reset sample kept (P2-2)", () => {
+    // P2-2 (reset connector): SimRunner.reset() emits the immediate state
+    // with a ONE-SHOT reaimed:true. The renderer must break the trail on THAT
+    // emission (the boolean false->true edge) — never ~66ms later — so no
+    // old-last -> new-start connector is drawn and the first post-reset
+    // sample (the launch position) survives.
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const renderer = new PrimitiveSceneRenderer(canvas);
+    const mapping: EngineMapping = {
+      planet: { body: "planet", scale: 0.04, offsetX: 0, offsetY: 0 },
+    };
+    renderer.setSpec(
+      makeSpec({
+        objects: [
+          {
+            id: "planet",
+            kind: "sphere",
+            position: { x: 0, y: 0, z: 0 },
+            size: 1.3,
+            trailPoints: 140,
+          },
+        ],
+        relationships: [],
+        animations: [],
+      }),
+      { engineMapping: mapping }
+    );
+
+    // Steady state (no re-aim flags): engine (150, 40) -> world (6, 0, 1.6).
+    renderer.setEngineState({ bodies: { planet: { x: 150, y: 40 } } });
+    fireFrame(1000); // establishes the clock
+    fireFrame(1100); // updateScene: applyTransforms + pushTrailPoint
+    const seamBefore = renderer.getSceneSeam()!;
+    expect(seamBefore.trail.points).toHaveLength(1);
+    expect(seamBefore.trail.points[0]).toMatchObject({ x: 6, z: 1.6 });
+
+    // The runner's reset one-shot emission (reset → module.reset() keeps the
+    // epoch; the runner wraps the emission with reaimed:true).
+    renderer.setEngineState({
+      bodies: { planet: { x: 150, y: 0 } },
+      reaimed: true,
+      epoch: 0,
+    });
+    // Cleared IMMEDIATELY on the reset emission — no connector.
+    expect(renderer.getSceneSeam()!.trail.points).toHaveLength(0);
+
+    // The first post-reset sample is the launch position and is PRESERVED
+    // (the next pure-read emission must not re-clear the fresh segment).
+    fireFrame(1200); // push at the launch position (6, 0, 0)
+    expect(renderer.getSceneSeam()!.trail.points).toHaveLength(1);
+    expect(renderer.getSceneSeam()!.trail.points[0]).toMatchObject({
+      x: 6,
+      y: 0,
+      z: 0,
+    });
+    renderer.setEngineState({ bodies: { planet: { x: 150, y: 3 } } });
+    fireFrame(1300); // push at (6, 0, 0.12)
+    const seamSteady = renderer.getSceneSeam()!;
+    // Both post-reset samples kept — the pure read never re-cleared.
+    expect(seamSteady.trail.points).toHaveLength(2);
+    expect(seamSteady.trail.points[0]).toMatchObject({ x: 6, y: 0, z: 0 });
+    renderer.dispose();
+  });
+
+  it("P2-1: the PRODUCT'S ACTUAL initial frame is engine-anchored (orbit disc >= 5% floor; the first engine emission never inflates it)", () => {
+    // A22 hostile Q1: the C1/C2 pins pass on a test fixture (visibleOrbitGraph)
+    // that production never renders. Here the REAL production path runs — the
+    // curated orbits showcase + the real engine mapping through setSpec →
+    // buildScene → frameCamera (build aspect 4/3) — and the build frame must
+    // be the engine-anchored one (distance ≈ 26.12: planet on the radius-6
+    // ring, moon at +7.4), NEVER the phantom spec frame (planet@12/moon@13.4
+    // → distance 32.13 → orbit disc 3.54% < the 5% floor, root-cause §3).
+    const canvas = makeCanvas();
+    mockWebGL(canvas);
+    const renderer = new PrimitiveSceneRenderer(canvas);
+    renderer.setSpec(buildOrbitsShowcase(), {
+      engineMapping: engineMappingFor("orbits"),
+    });
+    const seam = renderer.getSceneSeam()!;
+    const distance = seam.camera.distance;
+    expect(distance).toBeGreaterThan(25);
+    expect(distance).toBeLessThan(27);
+    // The honest >= 5% disc floor at the 16:9 contract aspect (measured
+    // 5.36% at the engine-anchored 26.12 frame; the phantom 32.13 frame
+    // yields 3.54% — the reproduced failure).
+    const halfH = distance * Math.tan((DEFAULT_FOV_DEG * Math.PI) / 360);
+    const discFraction =
+      (Math.PI * 6 * 6 * Math.cos(Math.PI / 3)) /
+      (4 * halfH * halfH * (16 / 9));
+    expect(discFraction).toBeGreaterThanOrEqual(0.05);
+    expect(discFraction).toBeLessThanOrEqual(0.08); // the tight frame — never a zoom-in
+
+    // P2-1 interplay with the grow-only rule: the FIRST engine emission (the
+    // curated default state — the same state the mapping offsets encode) must
+    // NOT push the frame out. The build frame was never inflated, so grow-only
+    // has nothing to grow and the camera never needed a shrink it is forbidden
+    // to do — distance stays exactly at the build frame.
+    renderer.setEngineState({
+      bodies: { star: { x: 0, y: 0 }, planet: { x: 150, y: 0 } },
+    });
+    const seamAfterFirstPush = renderer.getSceneSeam()!;
+    expect(seamAfterFirstPush.camera.reframed).toBe(false);
+    expect(seamAfterFirstPush.camera.distance).toBe(distance);
     renderer.dispose();
   });
 });

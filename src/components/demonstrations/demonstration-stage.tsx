@@ -340,8 +340,13 @@ function Lumina2DStage({
   }, [parameters]);
 
   useEffect(() => {
-    runnerRef.current?.setPlaying(playing);
-  }, [playing]);
+    // P2-3 (reduced-motion Play): under reduced motion the runner NEVER runs
+    // continuous motion — even when the page hands it playing=true (the same
+    // gate the 3D renderer applies, P7). Without this the hidden engine keeps
+    // stepping and its visual-state pushes move the coupled 3D body with no
+    // trail — the spec's "stage stays still" promise breaks.
+    runnerRef.current?.setPlaying(reducedMotion ? false : playing);
+  }, [playing, reducedMotion]);
 
   useEffect(() => {
     runnerRef.current?.setSpeed(speed);
@@ -795,6 +800,19 @@ function Primitive3DStage({
   const identityObject = hoverIdentityId
     ? (semanticObjects.find((o) => o.id === hoverIdentityId) ?? null)
     : null;
+  // Wave-4b (hostile Q5 — escape disclosure): the learner-visible trajectory
+  // line on the planet's details card, driven by the SAME honest
+  // classification the debug seam exposes (renderer.getEscapeClassification —
+  // the seam's own tracker + rule; never inferred). React bails out when the
+  // value did not change, so the 15 Hz emission cadence is not a re-render
+  // source.
+  const [trajectoryClassification, setTrajectoryClassification] = useState<
+    "bound" | "escape" | null
+  >(null);
+  const primaryObjectId = useMemo(
+    () => primaryEngineObjectId(spec, engineMapping ?? null),
+    [spec, engineMapping]
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -912,6 +930,11 @@ function Primitive3DStage({
     if (last && last.specId === spec.id && last.json === json) return;
     lastAppliedRef.current = { specId: spec.id, json };
     renderer?.setEngineState(visualState ?? null);
+    // Wave-4b (hostile Q5): refresh the details card's trajectory line from
+    // the renderer's OWN classification (same tracker + rule as the debug
+    // seam, so the learner-visible line can never diverge from
+    // window.__unseenlabScene.engine.classification).
+    setTrajectoryClassification(renderer?.getEscapeClassification() ?? null);
   }, [visualState, engineMapping, spec.id]);
 
   useEffect(() => {
@@ -1032,7 +1055,13 @@ function Primitive3DStage({
         />
       ) : null}
       {identityObject ? (
-        <ObjectDetailsCard object={identityObject} readouts={readouts} />
+        <ObjectDetailsCard
+          object={identityObject}
+          readouts={readouts}
+          trajectory={
+            identityObject.id === primaryObjectId ? trajectoryClassification : null
+          }
+        />
       ) : null}
 
       {showChrome ? <RelationshipGuide guide={guide} /> : null}
@@ -1145,6 +1174,38 @@ function humanizeObjectId(value: string): string {
 }
 
 /**
+ * The engine-coupled PRIMARY object id — the moving body that is a mapping
+ * body key but NOT a mapping key itself (the orbit "planet": mapping keys are
+ * "star" and "planet-system", the planet mesh is the mapped group's child) —
+ * or null when the scene has no such object. Mirrors the primary-first
+ * ordering of semanticObjectsFor; the trajectory disclosure line (Wave-4b,
+ * hostile Q5) is scoped to THIS object, never to the star.
+ */
+function primaryEngineObjectId(
+  spec: DemoSpecV1,
+  engineMapping: EngineMapping | null
+): string | null {
+  if (!engineMapping || Object.keys(engineMapping).length === 0) return null;
+  const scene = spec.scene3d;
+  if (!scene) return null;
+  const mappingKeys = new Set(Object.keys(engineMapping));
+  const bodyKeys = new Set<string>();
+  for (const entry of Object.values(engineMapping)) {
+    if (entry.body && !entry.body.startsWith("@")) bodyKeys.add(entry.body);
+  }
+  for (const obj of scene.objects) {
+    if (
+      SEMANTIC_LIST_KINDS.has(obj.kind) &&
+      bodyKeys.has(obj.id) &&
+      !mappingKeys.has(obj.id)
+    ) {
+      return obj.id;
+    }
+  }
+  return null;
+}
+
+/**
  * The scene's learner-facing objects in keyboard order — primary identity
  * node first (the engine body that is not the mapping key, e.g. the orbit
  * "planet" whose mapping key is the "planet-system" group), then scene order.
@@ -1157,23 +1218,7 @@ function semanticObjectsFor(
   const scene = spec.scene3d;
   if (!scene) return [];
   const objects = scene.objects.filter((o) => SEMANTIC_LIST_KINDS.has(o.kind));
-  const mappingKeys =
-    engineMapping && Object.keys(engineMapping).length > 0
-      ? new Set(Object.keys(engineMapping))
-      : null;
-  let primary: string | null = null;
-  if (engineMapping && mappingKeys) {
-    const bodyKeys = new Set<string>();
-    for (const entry of Object.values(engineMapping)) {
-      if (entry.body && !entry.body.startsWith("@")) bodyKeys.add(entry.body);
-    }
-    for (const obj of objects) {
-      if (bodyKeys.has(obj.id) && !mappingKeys.has(obj.id)) {
-        primary = obj.id;
-        break;
-      }
-    }
-  }
+  const primary = primaryEngineObjectId(spec, engineMapping);
   const orderedIds = primary
     ? [primary, ...objects.filter((o) => o.id !== primary).map((o) => o.id)]
     : objects.map((o) => o.id);
@@ -1271,13 +1316,24 @@ function SceneObjectList({
 /** FIX 15 details surface: compact — name, type, one-line description and
  * the orbit Speed/Distance readouts when the engine provides them. The
  * readouts arrive at the existing low-rate readout cadence (never per-frame);
- * no live region, so the lesson rail's single-announcement contract holds. */
+ * no live region, so the lesson rail's single-announcement contract holds.
+ *
+ * Wave-4b (hostile Q5 — escape disclosure): when the card shows the PRIMARY
+ * engine body and the honest classification is known, a learner-visible
+ * "Trajectory: Bound / Escape" line is rendered — driven by the SAME
+ * classification the debug seam exposes (engine speed + radial growth, never
+ * inferred); null/absent → no line, and an escape is never labeled
+ * "orbiting". The rail is untouched. */
 function ObjectDetailsCard({
   object,
   readouts,
+  trajectory,
 }: {
   object: SceneSemanticObject;
   readouts: Readout[];
+  /** Honest bound/escape classification of the primary trajectory (null →
+   * no line — the UI stays honestly silent, never inferred). */
+  trajectory?: "bound" | "escape" | null;
 }) {
   const detailReadouts = readouts.filter(
     (r) => r.label === "Speed" || r.label === "Distance"
@@ -1292,6 +1348,16 @@ function ObjectDetailsCard({
         {object.type}
       </p>
       <p className="mt-0.5 text-xs leading-5 text-muted">{object.description}</p>
+      {trajectory ? (
+        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+          <span>
+            <span className="font-semibold uppercase tracking-widest text-muted">
+              Trajectory
+            </span>{" "}
+            <span className="font-mono capitalize">{trajectory}</span>
+          </span>
+        </div>
+      ) : null}
       {detailReadouts.length > 0 ? (
         <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
           {detailReadouts.map((readout) => (

@@ -63,6 +63,7 @@ import {
   perspectiveCanonicalDistance,
   perspectiveCanonicalViewDirs,
   perspectiveDistance,
+  unionExtent,
   type ContentExtent,
 } from "@/demonstrations/renderers/primitive-3d/camera";
 import { buildSceneGraph } from "@/demonstrations/renderers/primitive-3d/scene-graph";
@@ -191,6 +192,18 @@ vi.mock("@/demonstrations/renderers/primitive-3d", () => {
     setPlaying() {}
     setSpeed() {}
     resetView() {}
+    getEscapeClassification() {
+      return null;
+    }
+    readLabelProjections() {
+      return null;
+    }
+    getIdentityAnchor() {
+      return null;
+    }
+    getEdgeAnchor() {
+      return null;
+    }
     dispose() {}
   }
   return { PrimitiveSceneRenderer: MockPrimitiveSceneRenderer };
@@ -349,6 +362,140 @@ describe("camera contract (C1-C6)", () => {
     expect(
       screen.getByRole("button", { name: "Reset view" })
     ).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wave-4b repairs (P1-1 escape reframe cap + P2-1 engine-anchored frame):
+// the PRODUCTION frame path — contentAABBFromGraph with the REAL mapping —
+// must equal what the C1/C2 fixture's visibleOrbitGraph() manually produced
+// (delta 0), the initial frame must clear the ≥5% floor, engine-anchored
+// reframes must grow past the 120 build cap, and the distance-slider extreme
+// (world 80 → required 109.87 < 120) must stay covered by the capped build
+// frame.
+// ---------------------------------------------------------------------------
+
+describe("Wave-4b camera repairs (C7-C9)", () => {
+  it("C7: the PRODUCT'S ACTUAL initial frame is engine-anchored (≥5% floor, delta 0 vs the fixture)", () => {
+    // A22 hostile Q1: the C1/C2 pins pass on a fixture (visibleOrbitGraph)
+    // that production never renders — frameCamera's build path calls
+    // contentAABBFromGraph over the RAW graph. With P2-1 the production path
+    // takes the mapping itself, so the fixture and the real frame AGREE.
+    const graph = orbitGraph();
+    const production = contentAABBFromGraph(graph, {
+      graphMode: false,
+      engineMapping: ORBITS_MAPPING,
+    });
+    const fixture = contentAABBFromGraph(visibleOrbitGraph(), {
+      graphMode: false,
+    });
+    // Delta 0: the production engine-anchored frame IS the fixture's frame.
+    expect(production.min.x).toBeCloseTo(fixture.min.x, 9);
+    expect(production.max.x).toBeCloseTo(fixture.max.x, 9);
+    expect(production.min.z).toBeCloseTo(fixture.min.z, 9);
+    expect(production.max.z).toBeCloseTo(fixture.max.z, 9);
+
+    const distance = perspectiveDistance(
+      production,
+      DEFAULT_FOV_DEG,
+      ORBITS_ASPECT
+    );
+    // The engine-anchored default frame: distance ≈ 26.12 (the spec's 26.12;
+    // the phantom spec frame was 32.13).
+    expect(distance).toBeGreaterThan(25);
+    expect(distance).toBeLessThan(27);
+    const halfH = distance * Math.tan((DEFAULT_FOV_DEG * Math.PI) / 360);
+    // The ≥5% disc floor holds on the PRODUCTION initial frame (measured
+    // 5.36% at the honest 26.12 frame; the production 3.54% failure is gone).
+    expect(orbitDiscFrameFraction(halfH, ORBITS_ASPECT)).toBeGreaterThanOrEqual(
+      ORBIT_DISC_FRACTION_MIN
+    );
+  });
+
+  it("C8: an engine-anchored escape reframe grows PAST the 120 build cap (P1-1)", () => {
+    // The speed-3.0 escape: the canonical-corner requirement exceeds the
+    // build cap — the grow path must NOT clamp at 120 or the planet + trail
+    // walk out of the frustum (root-cause §3 latch-freeze analogue).
+    const graph = orbitGraph();
+    const content = contentAABBFromGraph(graph, {
+      graphMode: false,
+      engineMapping: ORBITS_MAPPING,
+    });
+    // An escaping body far out (engine y=3000 → world z=120) plus its trail.
+    const state: EngineVisualState = {
+      bodies: { star: { x: 0, y: 0 }, planet: { x: 150, y: 3000 } },
+    };
+    const dyn = dynamicExtentFromEngineState(ORBITS_MAPPING, state, graph);
+    expect(dyn).not.toBeNull();
+    const result = maybeReframe({
+      graphMode: false,
+      aspect: ORBITS_ASPECT,
+      fovDeg: DEFAULT_FOV_DEG,
+      orbit: { userControlled: false, distance: 120 }, // at the build cap
+      orthoBaseHalf: 5,
+      content,
+      dynamic: dyn,
+    });
+    // The reframe must exceed the 120 cap (measured 152.15 for this snapshot;
+    // with a grown trail the requirement reaches ~260 at |y|=3000).
+    expect(result).not.toBeNull();
+    expect(result!.distance).toBeGreaterThan(120);
+    // The BUILD frame for the SAME content keeps the [4,120] contract.
+    const union = dyn
+      ? (() => {
+          const parts: ContentExtent[] = [content];
+          for (const b of dyn.trailBounds ?? []) parts.push(b);
+          for (const b of dyn.engineBodies ?? []) {
+            parts.push({
+              min: {
+                x: b.center.x - b.radius,
+                y: b.center.y - b.radius,
+                z: b.center.z - b.radius,
+              },
+              max: {
+                x: b.center.x + b.radius,
+                y: b.center.y + b.radius,
+                z: b.center.z + b.radius,
+              },
+            });
+          }
+          if (dyn.engineFieldBounds) parts.push(dyn.engineFieldBounds);
+          return parts.reduce(unionExtent);
+        })()
+      : content;
+    expect(perspectiveDistance(union, DEFAULT_FOV_DEG, ORBITS_ASPECT)).toBe(120);
+  });
+
+  it("C9: the distance-slider extreme (world 80 → required 109.87) stays covered by the capped build frame", () => {
+    // The max distance parameter (2000 engine units → world 80) must still be
+    // framed WITHOUT the cap binding: required ≈ 109.87 < 120, so the build
+    // frame (capped at 120) covers it exactly and the reframe is not
+    // distorted by the cap.
+    const graph = orbitGraph();
+    const content = contentAABBFromGraph(graph, {
+      graphMode: false,
+      engineMapping: ORBITS_MAPPING,
+    });
+    const state: EngineVisualState = {
+      bodies: { star: { x: 0, y: 0 }, planet: { x: 2000, y: 0 } },
+    };
+    const dyn = dynamicExtentFromEngineState(ORBITS_MAPPING, state, graph);
+    expect(dyn).not.toBeNull();
+    const result = maybeReframe({
+      graphMode: false,
+      aspect: ORBITS_ASPECT,
+      fovDeg: DEFAULT_FOV_DEG,
+      orbit: { userControlled: false, distance: 26.12 }, // the default frame
+      orthoBaseHalf: 5,
+      content,
+      dynamic: dyn,
+    });
+    expect(result).not.toBeNull();
+    // Measured 109.867 — under the 120 build cap, so the frame covers the
+    // world-80 body without any cap truncation.
+    expect(result!.distance).toBeGreaterThan(109);
+    expect(result!.distance).toBeLessThan(111);
+    expect(result!.distance).toBeLessThan(120);
   });
 });
 

@@ -683,6 +683,25 @@ export class PrimitiveSceneRenderer {
     // both work; the orbits engine's flag is persistent by design — pure
     // getVisualState). The first epoch sighting is the baseline, never a
     // re-aim.
+    //
+    // COUPLING NOTES (Wave-4b P3):
+    //  - NUMERIC `reaimed` (renderer.ts below): when an engine flags re-aims
+    //    with a NUMBER instead of the epoch counter, the FIRST sighting is
+    //    treated as a re-aim (no baseline) — the baseline concept does not
+    //    exist for numeric flags, so a module must emit a stable baseline
+    //    BEFORE any real re-aim or the initial emission clears the (empty)
+    //    trails once. Harmless for an empty trail; never emit a numeric flag
+    //    on the very first getVisualState after a trail is already populated.
+    //  - BOOLEAN `reaimed` ONE-SHOT limitation (renderer.ts below): the
+    //    false->true edge fires exactly ONCE per false->true transition — a
+    //    persistent true flag (the orbits engine never consumes the flag) can
+    //    never signal a SECOND discontinuity by itself. Repeated re-aims must
+    //    bump the `epoch` counter; the boolean edge only covers the FIRST
+    //    transition. SimRunner.reset()'s one-shot `reaimed: true` emission
+    //    (P2-2) relies on this: it re-fires whenever the last emission was
+    //    NOT flagged true (the common case — a reset after a plain run), and
+    //    resets after a prior slider re-aim fall back to the epoch flip the
+    //    stage's synchronous parameter re-application produces.
     const raw = (state as
       | (EngineVisualState & { reaimed?: boolean | number; epoch?: number })
       | null);
@@ -841,7 +860,13 @@ export class PrimitiveSceneRenderer {
     if (!last) return true; // first sighting: the trail is filling the frame
     const center = this.graph
       ? contentExtentCenter(
-          contentAABBFromGraph(this.graph, { graphMode: false })
+          contentAABBFromGraph(this.graph, {
+            graphMode: false,
+            // P2-1: the radial reach is measured from the ENGINE-ANCHORED
+            // static center — the same frame the camera uses (the phantom
+            // spec center would skew the growth guard for hybrid scenes).
+            engineMapping: this.engineMapping,
+          })
         )
       : contentExtentCenter(union);
     const radialReach = (b: ContentExtent): number =>
@@ -865,6 +890,19 @@ export class PrimitiveSceneRenderer {
    * and the monotone reframe counter. */
   getCameraReframeStatus(): { reframed: boolean; reframeCount: number } {
     return { reframed: this.lastReframed, reframeCount: this.reframeCount };
+  }
+
+  /**
+   * The honest bound/escape classification of the current engine state —
+   * the SAME tracker + rule the debug seam exposes (classifyOrbitEscape over
+   * this renderer's escapeTracker, debug-seam.ts), so the stage's learner-
+   * visible "Trajectory: Bound / Escape" line (FIX 15 details card, hostile
+   * Q5) can never diverge from `window.__unseenlabScene.engine.classification`.
+   * Never inferred: the engine's speed/distance parameters + observed radial
+   * growth decide; null/absent data → null (the UI stays honestly silent).
+   */
+  getEscapeClassification(): "bound" | "escape" | null {
+    return classifyOrbitEscape(this.engineState, this.escapeTracker);
   }
 
   // -------------------------------------------------------------------------
@@ -933,7 +971,10 @@ export class PrimitiveSceneRenderer {
     return {
       trail: { points, epoch: bestTrail?.epoch ?? 0 },
       objects,
-      camera: { reframed, reframeCount },
+      // P2-1: the live orbit distance — the engine-anchored frame the build
+      // and every reframe applied (pinned by the coupling test's ACTUAL
+      // initial-frame floor assertion; additive, no consumer regressed).
+      camera: { reframed, reframeCount, distance: this.orbit.distance },
       engine: { classification: classifyOrbitEscape(this.engineState, this.escapeTracker) },
     };
   }
@@ -995,6 +1036,10 @@ export class PrimitiveSceneRenderer {
       graphMode: this.graphMode,
       orbit: this.orbit,
       orthoBaseHalf: this.orthoBaseHalf,
+      // P2-1: the build frame is ENGINE-ANCHORED for hybrid showcases — the
+      // frame covers the mapping pivots (what applyTransforms renders), not
+      // the phantom spec positions (orbit disc >= 5% floor, C1).
+      engineMapping: this.engineMapping,
     });
     if (framed) {
       this.camera = framed.camera;
